@@ -31,6 +31,10 @@
 #include <linux/slab.h>
 #include "smsc95xx.h"
 
+#ifdef CONFIG_MACH_STEELHEAD
+#include "mach/id.h"
+#endif
+
 #define SMSC_CHIPNAME			"smsc95xx"
 #define SMSC_DRIVER_VERSION		"1.0.4"
 #define HS_USB_PKT_SIZE			(512)
@@ -612,8 +616,38 @@ static void smsc95xx_init_mac_address(struct usbnet *dev)
 		}
 	}
 
+#ifdef CONFIG_MACH_STEELHEAD
+	/* Generate a MAC address using the Google OUI and bits from the OMAP
+	 * die ID
+	 */
+	{
+		struct omap_die_id odi;
+		omap_get_die_id(&odi);
+
+		dev->net->dev_addr[0] = 0x00;
+		dev->net->dev_addr[1] = 0x1A;
+		dev->net->dev_addr[2] = 0x11;
+		dev->net->dev_addr[3] =
+			((odi.id_0 >> 24) ^ (odi.id_0 >> 16)) & 0xFF;
+		dev->net->dev_addr[4] =
+			((odi.id_0 >> 24) ^ (odi.id_0 >> 8)) & 0xFF;
+		dev->net->dev_addr[5] =
+			((odi.id_0 >> 24) ^ (odi.id_0 )) & 0xFF;
+
+		printk(KERN_INFO SMSC_CHIPNAME
+				" Tungsten MAC Address is "
+				"%02x:%02x:%02x:%02x:%02x:%02x",
+				dev->net->dev_addr[0],
+				dev->net->dev_addr[1],
+				dev->net->dev_addr[2],
+				dev->net->dev_addr[3],
+				dev->net->dev_addr[4],
+				dev->net->dev_addr[5]);
+	}
+#else
 	/* no eeprom, or eeprom values are invalid. generate random MAC */
 	random_ether_addr(dev->net->dev_addr);
+#endif
 	netif_dbg(dev, ifup, dev->net, "MAC address set to random_ether_addr\n");
 }
 
