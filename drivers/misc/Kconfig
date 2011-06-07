@@ -541,6 +541,11 @@ config STEELHEAD_AVR
 	tristate "Steelhead AVR LED/Front Panel Support"
 	default n
 
+config TAS5713
+	depends on OMAP_MCBSP && I2C
+	tristate "TAS5713 Speaker Amplifier Driver"
+	default n
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

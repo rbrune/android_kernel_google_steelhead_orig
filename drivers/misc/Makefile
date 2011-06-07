@@ -54,3 +54,4 @@ obj-$(CONFIG_APANIC)		+= apanic.o
 obj-$(CONFIG_SENSORS_AK8975)	+= akm8975.o
 obj-y				+= inv_mpu/
 obj-$(CONFIG_STEELHEAD_AVR)	+= steelhead_avr.o
+obj-$(CONFIG_TAS5713)		+= tas5713.o
