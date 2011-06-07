@@ -1522,6 +1522,51 @@ void omap_mcbsp_set_spi_mode(unsigned int id,
 }
 EXPORT_SYMBOL(omap_mcbsp_set_spi_mode);
 
+/* add APIs for raw register access */
+int omap_mcbsp_read_reg(unsigned int id, u16 reg)
+{
+	struct omap_mcbsp *mcbsp;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
+		return -ENODEV;
+	}
+	mcbsp = id_to_mcbsp_ptr(id);
+
+	return omap_mcbsp_read(mcbsp, reg, 0);
+}
+EXPORT_SYMBOL(omap_mcbsp_read_reg);
+
+int omap_mcbsp_write_reg(unsigned int id, u16 reg, u32 val)
+{
+	struct omap_mcbsp *mcbsp;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
+		return -ENODEV;
+	}
+	mcbsp = id_to_mcbsp_ptr(id);
+
+	omap_mcbsp_write(mcbsp, reg, val);
+
+        return 0;
+}
+EXPORT_SYMBOL(omap_mcbsp_write_reg);
+
+int omap_mcbsp_get_tx_irq(unsigned int id)
+{
+	struct omap_mcbsp *mcbsp;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
+		return -ENODEV;
+	}
+	mcbsp = id_to_mcbsp_ptr(id);
+
+        return mcbsp->tx_irq;
+}
+EXPORT_SYMBOL(omap_mcbsp_get_tx_irq);
+
 #ifdef CONFIG_ARCH_OMAP3
 #define max_thres(m)			(mcbsp->pdata->buffer_size)
 #define valid_threshold(m, val)		((val) <= max_thres(m))

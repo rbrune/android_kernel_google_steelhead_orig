@@ -525,6 +525,11 @@ void omap2_mcbsp1_mux_fsr_src(u8 mux);
 int omap_mcbsp_dma_ch_params(unsigned int id, unsigned int stream);
 int omap_mcbsp_dma_reg_params(unsigned int id, unsigned int stream);
 
+/* APIs for raw register access */
+int omap_mcbsp_read_reg(unsigned int id, u16 reg);
+int omap_mcbsp_write_reg(unsigned int id, u16 reg, u32 val);
+int omap_mcbsp_get_tx_irq(unsigned int id);
+
 #ifdef CONFIG_ARCH_OMAP3
 /* Sidetone specific API */
 int omap_st_set_chgain(unsigned int id, int channel, s16 chgain);
