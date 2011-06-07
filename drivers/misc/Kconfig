@@ -546,6 +546,18 @@ config TAS5713
 	tristate "TAS5713 Speaker Amplifier Driver"
 	default n
 
+config AAH_TIMESYNC
+	tristate "Android@Home Timesync Driver"
+	default n
+
+config AAH_TIMESYNC_DEBUG
+        depends on AAH_TIMESYNC
+	bool "Enable Android@Home Timesync debugging"
+	default n
+	---help---
+	 Enable capture of external timesync events used to debug
+         time synchronization.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
