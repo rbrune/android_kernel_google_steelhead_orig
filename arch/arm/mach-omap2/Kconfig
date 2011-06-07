@@ -333,6 +333,14 @@ config MACH_TUNA
 	select REGULATOR_FIXED_VOLTAGE
 	select OMAP_TPS6236X
 
+config MACH_STEELHEAD
+	bool "Steelhead"
+	default y
+	depends on ARCH_OMAP4
+	select OMAP_PACKAGE_CBL
+	select OMAP_PACKAGE_CBS
+	select REGULATOR_FIXED_VOLTAGE
+
 config OMAP3_EMU
 	bool "OMAP3 debugging peripherals"
 	depends on ARCH_OMAP3

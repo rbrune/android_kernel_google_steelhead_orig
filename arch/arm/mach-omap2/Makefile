@@ -149,6 +149,7 @@ obj-$(CONFIG_ARCH_OMAP3)		+= $(clock-common) clock3xxx.o \
 obj-$(CONFIG_ARCH_OMAP4)		+= $(clock-common) clock44xx_data.o \
 					   dpll3xxx.o dpll44xx.o
 
+
 # OMAP2 clock rate set data (old "OPP" data)
 obj-$(CONFIG_SOC_OMAP2420)		+= opp2420_data.o
 obj-$(CONFIG_SOC_OMAP2430)		+= opp2430_data.o
@@ -255,6 +256,13 @@ obj-$(CONFIG_MACH_TUNA)			+= board-tuna-input.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-power.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-sensors.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-wifi.o
+
+obj-$(CONFIG_MACH_STEELHEAD)		+= board-steelhead.o \
+					   hsmmc.o \
+					   omap_phy_internal.o \
+					   board-steelhead-platform-counter.o
+
+obj-$(CONFIG_MACH_STEELHEAD)		+= board-steelhead-android-usb.o
 
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \
