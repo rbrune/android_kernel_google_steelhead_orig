@@ -156,10 +156,14 @@ struct omap_dm_timer {
 #ifdef CONFIG_ARCH_OMAP2PLUS
 	struct clk *iclk, *fclk;
 #endif
+	u32 offset1;
+	u32 offset2;
+
 	void __iomem *io_base;
 	unsigned reserved:1;
 	unsigned enabled:1;
 	unsigned posted:1;
+	unsigned highlanderIP:1;
 };
 
 static int dm_timer_count;
@@ -266,9 +270,10 @@ static struct omap_dm_timer omap4_dm_timers[] = {
 static const char *omap4_dm_source_names[] __initdata = {
 	"sys_clkin_ck",
 	"sys_32k_ck",
+	"syc_clk_div_ck",
 	NULL
 };
-static struct clk *omap4_dm_source_clocks[2];
+static struct clk *omap4_dm_source_clocks[3];
 static const int omap4_dm_timer_count = ARRAY_SIZE(omap4_dm_timers);
 
 #else
@@ -291,10 +296,17 @@ static spinlock_t dm_timer_lock;
  */
 static inline u32 omap_dm_timer_read_reg(struct omap_dm_timer *timer, u32 reg)
 {
-	if (timer->posted)
-		while (readl(timer->io_base + (OMAP_TIMER_WRITE_PEND_REG & 0xff))
+	if (reg >= OMAP_TIMER_STAT_REG && reg <= OMAP_TIMER_INT_EN_REG)
+		reg += timer->offset1;
+	else if (reg >= OMAP_TIMER_WAKEUP_EN_REG)
+		reg += timer->offset2;
+
+	if (timer->posted) {
+		u32 wp_off = OMAP_TIMER_WRITE_PEND_REG + timer->offset2;
+		while (readl(timer->io_base + (wp_off & 0xff))
 				& (reg >> WPSHIFT))
 			cpu_relax();
+	}
 	return readl(timer->io_base + (reg & 0xff));
 }
 
@@ -307,22 +319,39 @@ static inline u32 omap_dm_timer_read_reg(struct omap_dm_timer *timer, u32 reg)
 static void omap_dm_timer_write_reg(struct omap_dm_timer *timer, u32 reg,
 						u32 value)
 {
-	if (timer->posted)
-		while (readl(timer->io_base + (OMAP_TIMER_WRITE_PEND_REG & 0xff))
+	if (reg >= OMAP_TIMER_STAT_REG && reg <= OMAP_TIMER_INT_EN_REG)
+		reg += timer->offset1;
+	else if (reg >= OMAP_TIMER_WAKEUP_EN_REG)
+		reg += timer->offset2;
+
+	if (timer->posted) {
+		u32 wp_off = OMAP_TIMER_WRITE_PEND_REG + timer->offset2;
+		while (readl(timer->io_base + (wp_off & 0xff))
 				& (reg >> WPSHIFT))
 			cpu_relax();
+	}
 	writel(value, timer->io_base + (reg & 0xff));
 }
 
 static void omap_dm_timer_wait_for_reset(struct omap_dm_timer *timer)
 {
 	int c;
+	u32 reg_address;
+	int reset_active;
+
+	if (timer->highlanderIP) {
+		reg_address = OMAP_TIMER_OCP_CFG_REG;
+		reset_active = 1;
+	} else {
+		reg_address = OMAP_TIMER_SYS_STAT_REG;
+		reset_active = 0;
+	}
 
 	c = 0;
-	while (!(omap_dm_timer_read_reg(timer, OMAP_TIMER_SYS_STAT_REG) & 1)) {
+	while (omap_dm_timer_read_reg(timer, reg_address) == reset_active) {
 		c++;
 		if (c > 100000) {
-			printk(KERN_ERR "Timer failed to reset\n");
+			printk(KERN_ERR "%s:Timer failed to reset\n", __func__);
 			return;
 		}
 	}
@@ -766,6 +795,18 @@ int __init omap_dm_timer_init(void)
 		dm_timer_count = omap4_dm_timer_count;
 		dm_source_names = omap4_dm_source_names;
 		dm_source_clocks = omap4_dm_source_clocks;
+	}
+
+	for (i = 0; i < dm_timer_count; ++i) {
+		if (cpu_is_omap44xx() && !((i == 0) || (i == 1) || (i == 9))) {
+			dm_timers[i].offset1 = 0x10;
+			dm_timers[i].offset2 = 0x14;
+			dm_timers[i].highlanderIP = 1;
+		} else {
+			dm_timers[i].offset1 = 0x00;
+			dm_timers[i].offset2 = 0x00;
+			dm_timers[i].highlanderIP = 0;
+		}
 	}
 
 	if (cpu_class_is_omap2())
