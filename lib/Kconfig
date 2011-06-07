@@ -262,4 +262,11 @@ config AVERAGE
 
 	  If unsure, say N.
 
+config NUMERIC_TRANSFORMS
+       bool "Numeric transformation functions"
+       help
+         Provides some utility routines for doing numeric transformations
+	 of integers, like reducing the ratio of two values and scaling
+	 two values up or down.
+
 endmenu
