@@ -15,9 +15,9 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/numeric_transforms.h>
 
 #include <linux/aah_timesync.h>
-#include <linux/android_utils.h>
 #include "aah_clock.h"
 
 #define kNominalCommonClockHz 1000000
