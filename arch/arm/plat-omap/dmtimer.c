@@ -766,6 +766,36 @@ int omap_dm_timers_active(void)
 }
 EXPORT_SYMBOL_GPL(omap_dm_timers_active);
 
+void omap_dm_timers_set_capture_mode(struct omap_dm_timer *timer,
+				     unsigned int capt_mode,
+				     unsigned int edges)
+{
+	u32 l, m;
+
+	m = l = omap_dm_timer_read_reg(timer, OMAP_TIMER_CTRL_REG);
+	l &= ~(OMAP_TIMER_CTRL_CAPTMODE | OMAP_TIMER_CTRL_TCM_BOTHEDGES);
+	if (capt_mode == OMAP_TIMER_CAPTURE_MODE_DOUBLE)
+		l |= OMAP_TIMER_CTRL_CAPTMODE;
+
+	l |= ((edges & 0x3) << 8);
+	l |= OMAP_TIMER_CTRL_GPOCFG;
+
+	omap_dm_timer_write_reg(timer, OMAP_TIMER_CTRL_REG, l);
+}
+EXPORT_SYMBOL_GPL(omap_dm_timers_set_capture_mode);
+
+u32 omap_dm_timers_read_capture1(struct omap_dm_timer *timer)
+{
+	return omap_dm_timer_read_reg(timer, OMAP_TIMER_CAPTURE_REG);
+}
+EXPORT_SYMBOL_GPL(omap_dm_timers_read_capture1);
+
+u32 omap_dm_timers_read_capture2(struct omap_dm_timer *timer)
+{
+	return omap_dm_timer_read_reg(timer, OMAP_TIMER_CAPTURE2_REG);
+}
+EXPORT_SYMBOL_GPL(omap_dm_timers_read_capture2);
+
 int __init omap_dm_timer_init(void)
 {
 	struct omap_dm_timer *timer;
