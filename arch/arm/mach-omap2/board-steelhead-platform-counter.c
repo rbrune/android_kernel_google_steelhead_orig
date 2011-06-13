@@ -43,7 +43,7 @@ static struct counter_state counter_state = {
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 static DEFINE_SPINLOCK(timesync_event_handler_lock);
-static timesync_event_handler_t timesync_event_handler;
+static void (*timesync_event_handler)(void *d, u64);
 static void                    *timesync_event_handler_data;
 
 static struct counter_state tsdebug_counter_state = {
@@ -208,8 +208,8 @@ u32 steelhead_get_raw_counter_nominal_freq(void)
 }
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-void register_timesync_event_handler(void *user_data,
-				     void (*handler)(void *d, u64))
+void steelhead_register_timesync_event_handler(void *user_data,
+					       void (*handler)(void *d, u64))
 {
 	unsigned long irq_state;
 
@@ -227,4 +227,3 @@ int platform_set_counter_slew_rate(int ppm)
 	return -1;
 }
 #endif
-

@@ -39,6 +39,13 @@ struct aah_tsdebug_state {
 	u64 local_event_count;
 };
 
+struct timesync_data {
+	struct timesync_platform_data *pdata;
+	struct miscdevice misc_dev;
+	struct aah_tsdebug_state tsdebug_state;
+	spinlock_t tsdebug_state_lock;
+};
+
 static void handle_timesync_event(void *user_data, u64 raw_event_time)
 {
 	unsigned long irq_state;
@@ -68,7 +75,7 @@ static void handle_timesync_event(void *user_data, u64 raw_event_time)
 	if (s->event_log_wr == s->event_log_rd)
 		s->event_log_rd = (s->event_log_rd + 1) % MAX_LOG_SIZE;
 
-	spin_unlock_irqrestore(&tdata->sdebug_state_lock, irq_state);
+	spin_unlock_irqrestore(&tdata->tsdebug_state_lock, irq_state);
 }
 
 static int get_tsdebug_events(struct timesync_data *tdata,
@@ -108,15 +115,6 @@ static int get_tsdebug_events(struct timesync_data *tdata,
 	return ret;
 }
 #endif
-
-struct timesync_data {
-	struct timesync_platform_data *pdata;
-	struct miscdevice misc_dev;
-#ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	struct aah_tsdebug_state tsdebug_state;
-	spinlock tsdebug_state_lock;
-#endif
-};
 
 static int timesync_open(struct inode *inode, struct file *file)
 {
@@ -251,11 +249,10 @@ static int __devinit timesync_probe(struct platform_device *pdev)
 	tdata->pdata = pdata;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	tdata->tsdebug_state_lock =
-		__SPIN_LOCK_UNLOCKED(tdata->tsdebug_state_lock);
+        spin_lock_init(&tdata->tsdebug_state_lock);
 
 	/* Register our callback for the platform's timesync event. */
-	(*(pdata->register_timesync_event_handler))(pdata,
+	(*(pdata->register_timesync_event_handler))(tdata,
 						    handle_timesync_event);
 #endif
 

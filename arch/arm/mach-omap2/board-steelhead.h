@@ -20,8 +20,8 @@ extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-static void register_timesync_event_handler(void *d,
-					    void (*handler)(void *d, u64))
+extern void steelhead_register_timesync_event_handler(
+		void *d, void (*handler)(void *d, u64));
 #endif
 
 #if 0 /* TBD */

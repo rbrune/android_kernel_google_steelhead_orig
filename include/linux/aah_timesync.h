@@ -89,7 +89,7 @@ struct aah_timesync_basis {
 #define TT_IOCTL_LOCALTIME_GET            _IOR(AAH_TIMESYNC_MAGIC, 3, __s64)
 #define TT_IOCTL_LOCALTIME_GETFREQ        _IOR(AAH_TIMESYNC_MAGIC, 4, __u64)
 #define TT_IOCTL_COMMONTIME_GET           _IOR(AAH_TIMESYNC_MAGIC, 5, __s64)
-#define TT_IOCTL_COMMONTIME_RESET_BASIS   _IOR(AAH_TIMESYNC_MAGIC, 6, __u64)
+#define TT_IOCTL_COMMONTIME_RESET_BASIS    _IO(AAH_TIMESYNC_MAGIC, 6)
 #define TT_IOCTL_COMMONTIME_SET_BASIS     _IOW(AAH_TIMESYNC_MAGIC, 7, \
 					       struct aah_timesync_basis)
 #define TT_IOCTL_COMMONTIME_SET_SLEW      _IOW(AAH_TIMESYNC_MAGIC, 8, __u32)
@@ -114,4 +114,3 @@ struct aah_tsdebug_fetch_records_cmd {
 #endif /* CONFIG_AAH_TIMESYNC_DEBUG */
 
 #endif  /* __LINUX_AAH_TIMESYNC_H */
-

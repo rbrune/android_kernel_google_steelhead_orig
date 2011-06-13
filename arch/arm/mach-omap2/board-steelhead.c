@@ -102,7 +102,8 @@ static struct timesync_platform_data timesync_pdata = {
 	.get_raw_counter = steelhead_get_raw_counter,
 	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	.register_timesync_event_handler = register_timesync_event_handler,
+	.register_timesync_event_handler =
+			steelhead_register_timesync_event_handler,
 #endif
 };
 
@@ -977,5 +978,3 @@ MACHINE_START(STEELHEAD, "Steelhead")
 	.init_machine	= steelhead_init,
 	.timer		= &omap_timer,
 MACHINE_END
-
-
