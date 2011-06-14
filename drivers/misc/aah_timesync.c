@@ -29,22 +29,27 @@
 
 #define TIMESYNC_NAME "timesync"
 
-
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 #define MAX_LOG_SIZE 16
+
 struct aah_tsdebug_state {
 	struct aah_tsdebug_event_record event_log[MAX_LOG_SIZE];
 	u32 event_log_wr;
 	u32 event_log_rd;
 	u64 local_event_count;
 };
+#endif
 
 struct timesync_data {
 	struct timesync_platform_data *pdata;
 	struct miscdevice misc_dev;
+#ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	struct aah_tsdebug_state tsdebug_state;
 	spinlock_t tsdebug_state_lock;
+#endif
 };
+
+#ifdef CONFIG_AAH_TIMESYNC_DEBUG
 
 static void handle_timesync_event(void *user_data, u64 raw_event_time)
 {
