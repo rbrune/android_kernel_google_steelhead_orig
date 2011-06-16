@@ -546,55 +546,29 @@ static long tas5713_out_ioctl(struct file *file,
 		state->stop = false;
 	} break;
 
-	case TAS5713_GET_NEXT_WRITE_DELTA_S: {
-		s64 local_time, delta_s_clamped;
-		struct fixed_s64_32 delta_s;
-		struct fixed_s64_32 basis;
+	case TAS5713_GET_NEXT_WRITE_TIMESTAMP: {
+		s64 timestamp;
 		long long samples_queued;
-
-		if (copy_from_user(&local_time, (const void __user *)arg,
-					sizeof(local_time))) {
-			rc = -EFAULT;
-			break;
-		}
 
 		samples_queued = atomic64_read(&state->samples_queued_to_dma);
 
 		/* If no samples have been queued, then we have no DMA start
-		 * time for this output channel and we cannot compute delta S.
+		 * time for this output channel.
 		 */
 		if ((!samples_queued) || (samples_queued >> 63)) {
 			rc = -ENODEV;
 			break;
 		}
 
-		if (!state->samples_to_ticks_d) {
-			rc = -EFAULT;
-			break;
-		}
-
-		/* Compute delta S */
-		basis.frac  = 0;
-		basis.whole = -samples_queued;
-		linear_transform_s64_to_s64_32(
-				local_time,
-				state->dma_start_local_time,
-				state->samples_to_ticks_n,
-				state->samples_to_ticks_d,
-				&basis,
-				&delta_s);
-
-		if (((delta_s.whole >> 31) ==  0LL) ||
-		    ((delta_s.whole >> 31) == -1LL)) {
-			delta_s_clamped = (delta_s.whole << 32) | delta_s.frac;
-		} else {
-			delta_s_clamped = (1ull << 63);
-			if (delta_s.whole > 0)
-				--delta_s_clamped;
-		}
+		timestamp = linear_transform_s64_to_s64(
+				samples_queued,
+				0,
+				state->pdata->get_raw_counter_nominal_freq(),
+				SAMPLE_RATE,
+				state->dma_start_local_time);
 
 		if (copy_to_user((void __user *)arg,
-				&delta_s_clamped, sizeof(delta_s_clamped)))
+				&timestamp, sizeof(timestamp)))
 			rc = -EFAULT;
 	} break;
 

@@ -44,7 +44,6 @@ struct tas5713_platform_data {
 #define TAS5713_MAGIC 0xE1
 
 #define TAS5713_FLUSH                  _IO(TAS5713_MAGIC, 0)
-#define TAS5713_GET_NEXT_WRITE_DELTA_S _IOWR(TAS5713_MAGIC, 1, __u64)
 #define TAS5713_GET_ERROR_REGISTER     _IOR(TAS5713_MAGIC, 2, __u8)
 #define TAS5713_GET_MASTER_VOLUME      _IOR(TAS5713_MAGIC, 3, __u8)
 #define TAS5713_SET_MASTER_VOLUME      _IOW(TAS5713_MAGIC, 4, __u8)
@@ -58,5 +57,7 @@ struct tas5713_i2c_request {
 };
 #define TAS5713_DO_LOW_LEVEL_I2C _IOWR(TAS5713_MAGIC, 5, \
 				       struct tas5713_i2c_request)
+
+#define TAS5713_GET_NEXT_WRITE_TIMESTAMP _IOR(TAS5713_MAGIC, 6, s64)
 
 #endif  /* __LINUX_TAS5713_H */
