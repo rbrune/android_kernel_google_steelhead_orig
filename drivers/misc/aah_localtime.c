@@ -1,4 +1,4 @@
-/* drivers/misc/aah_timesync.c
+/* drivers/misc/aah_localtime.c
  *
  * Copyright (C) 2011 Google, Inc.
  *
@@ -23,11 +23,9 @@
 #include <linux/miscdevice.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/aah_timesync.h>
+#include <linux/aah_localtime.h>
 
-#include "aah_clock.h"
-
-#define TIMESYNC_NAME "timesync"
+#define DEV_NODE_NAME "aah_localtime"
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 #define MAX_LOG_SIZE 16
@@ -40,8 +38,8 @@ struct aah_tsdebug_state {
 };
 #endif
 
-struct timesync_data {
-	struct timesync_platform_data *pdata;
+struct aah_localtime_data {
+	struct aah_localtime_platform_data *pdata;
 	struct miscdevice misc_dev;
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	struct aah_tsdebug_state tsdebug_state;
@@ -54,7 +52,7 @@ struct timesync_data {
 static void handle_timesync_event(void *user_data, u64 raw_event_time)
 {
 	unsigned long irq_state;
-	struct timesync_data *tdata = user_data;
+	struct aah_localtime_data *tdata = user_data;
 	struct aah_tsdebug_state *s = &tdata->tsdebug_state;
 	struct aah_tsdebug_event_record *e;
 
@@ -67,11 +65,6 @@ static void handle_timesync_event(void *user_data, u64 raw_event_time)
 	e->local_timesync_event_id = s->local_event_count++;
 	e->local_time = raw_event_time;
 
-	if (aah_clock_local_to_common(e->local_time, &e->common_time))
-		e->flags = AAH_TSDEBUG_EVENTF_VALID_COMMON_TIME;
-	else
-		e->flags = 0;
-
 	/* Advance the write pointer.  If it wraps and hits the read pointer
 	 * again, move the read pointer up dropping the oldest entry in the log
 	 * in the process.
@@ -83,7 +76,7 @@ static void handle_timesync_event(void *user_data, u64 raw_event_time)
 	spin_unlock_irqrestore(&tdata->tsdebug_state_lock, irq_state);
 }
 
-static int get_tsdebug_events(struct timesync_data *tdata,
+static int get_tsdebug_events(struct aah_localtime_data *tdata,
 			      struct aah_tsdebug_fetch_records_cmd *cmd)
 {
 	unsigned long irq_state;
@@ -121,38 +114,19 @@ static int get_tsdebug_events(struct timesync_data *tdata,
 }
 #endif
 
-static int timesync_open(struct inode *inode, struct file *file)
+static int aah_localtime_open(struct inode *inode, struct file *file)
 {
 	return nonseekable_open(inode, file);
 }
 
-static long timesync_ioctl(struct file *file, unsigned int cmd,
+static long aah_localtime_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	struct timesync_data *tdata = container_of(file->private_data,
-						   struct timesync_data,
+	struct aah_localtime_data *tdata = container_of(file->private_data,
+						   struct aah_localtime_data,
 						   misc_dev);
 	switch (cmd) {
-	case TT_IOCTL_LOCAL_TO_COMMON:
-	case TT_IOCTL_COMMON_TO_LOCAL: {
-		int success;
-		u64 input, output;
-		if (copy_from_user(&input, (void __user *) arg, sizeof(input)))
-			return -EFAULT;
-
-		if (cmd == TT_IOCTL_LOCAL_TO_COMMON)
-			success = aah_clock_local_to_common(input, &output);
-		else
-			success = aah_clock_common_to_local(input, &output);
-
-		if (!success)
-			return -ENODEV;
-
-		if (copy_to_user((void __user *) arg, &output, sizeof(output)))
-			return -EFAULT;
-	} break;
-
-	case TT_IOCTL_LOCALTIME_GET: {
+	case AAHLT_IOCTL_LOCALTIME_GET: {
 		u64 counter = (*tdata->pdata->get_raw_counter)();
 		if (copy_to_user((void __user *) arg,
 				&counter, sizeof(counter))) {
@@ -160,12 +134,7 @@ static long timesync_ioctl(struct file *file, unsigned int cmd,
 		}
 	} break;
 
-	case TT_IOCTL_LOCALTIME_GETFREQ: {
-		/* TODO(johngro) : most other parts of the system seem to
-		 * assume that local clock frequencies will never be greater
-		 * than 4GHz.  This IOCTL should be changed to just return a
-		 * 32 bit value.
-		 */
+	case AAHLT_IOCTL_LOCALTIME_GETFREQ: {
 		u64 freq = (*tdata->pdata->get_raw_counter_nominal_freq)();
 		if (copy_to_user((void __user *) arg,
 				&freq, sizeof(freq))) {
@@ -173,39 +142,17 @@ static long timesync_ioctl(struct file *file, unsigned int cmd,
 		}
 	} break;
 
-	case TT_IOCTL_COMMONTIME_GET: {
-		u64 output;
-		if (!aah_clock_get(&output))
-			return -ENODEV;
-
-		if (copy_to_user((void __user *) arg, &output, sizeof(output)))
-			return -EFAULT;
-	} break;
-
-	case TT_IOCTL_COMMONTIME_RESET_BASIS: {
-		aah_clock_force_basis(0, 0, 0);
-	} break;
-
-	case TT_IOCTL_COMMONTIME_SET_BASIS: {
-		struct aah_timesync_basis param;
-		if (copy_from_user(&param, (void __user *) arg, sizeof(param)))
-			return -EFAULT;
-
-		aah_clock_force_basis(param.local_basis, param.common_basis, 1);
-	} break;
-
-	case TT_IOCTL_COMMONTIME_SET_SLEW: {
+	case AAHLT_IOCTL_LOCALTIME_SET_SLEW: {
 		s32 ppm = (s32)arg;
-		aah_clock_set_slew(1000000 + ppm, 1000000);
-	} break;
 
-	case TT_IOCTL_COMMONTIME_IS_VALID: {
-		if (!aah_clock_is_valid())
-			return -ENODEV;
+		if (!tdata->pdata->set_counter_slew_rate)
+			return -EINVAL;
+
+		tdata->pdata->set_counter_slew_rate(ppm);
 	} break;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	case TT_IOCTL_FETCH_TSDEBUG_RECORDS: {
+	case AAHLT_IOCTL_FETCH_TSDEBUG_RECORDS: {
 		struct aah_tsdebug_fetch_records_cmd cmd;
 		if (copy_from_user(&cmd, (void __user *) arg, sizeof(cmd)))
 			return -EFAULT;
@@ -221,17 +168,17 @@ static long timesync_ioctl(struct file *file, unsigned int cmd,
 	return 0;
 }
 
-static const struct file_operations timesync_fops = {
+static const struct file_operations aah_localtime_fops = {
 	.owner = THIS_MODULE,
-	.open = timesync_open,
-	.unlocked_ioctl = timesync_ioctl,
+	.open = aah_localtime_open,
+	.unlocked_ioctl = aah_localtime_ioctl,
 };
 
-static int __devinit timesync_probe(struct platform_device *pdev)
+static int __devinit aah_localtime_probe(struct platform_device *pdev)
 {
 	int err;
-	struct timesync_platform_data *pdata = pdev->dev.platform_data;
-	struct timesync_data *tdata;
+	struct aah_localtime_platform_data *pdata = pdev->dev.platform_data;
+	struct aah_localtime_data *tdata;
 
 	pr_info("%s\n", __func__);
 	if (!pdata || !pdata->get_raw_counter ||
@@ -246,7 +193,7 @@ static int __devinit timesync_probe(struct platform_device *pdev)
 	}
 #endif
 
-	tdata = kzalloc(sizeof(struct timesync_data), GFP_KERNEL);
+	tdata = kzalloc(sizeof(struct aah_localtime_data), GFP_KERNEL);
 	if (!tdata) {
 		pr_err("%s: failed to allocate module data memory\n", __func__);
 		return -ENOMEM;
@@ -254,19 +201,17 @@ static int __devinit timesync_probe(struct platform_device *pdev)
 	tdata->pdata = pdata;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-        spin_lock_init(&tdata->tsdebug_state_lock);
+	spin_lock_init(&tdata->tsdebug_state_lock);
 
 	/* Register our callback for the platform's timesync event. */
 	(*(pdata->register_timesync_event_handler))(tdata,
 						    handle_timesync_event);
 #endif
 
-	aah_clock_init(pdata);
-
 	/* register misc device */
 	tdata->misc_dev.minor = MISC_DYNAMIC_MINOR;
-	tdata->misc_dev.name = TIMESYNC_NAME;
-	tdata->misc_dev.fops = &timesync_fops;
+	tdata->misc_dev.name = DEV_NODE_NAME;
+	tdata->misc_dev.fops = &aah_localtime_fops;
 	err = misc_register(&tdata->misc_dev);
 	if (err) {
 		pr_err("%s: failed to register misc device\n", __func__);
@@ -279,9 +224,9 @@ static int __devinit timesync_probe(struct platform_device *pdev)
 	return err;
 }
 
-static int __devexit timesync_remove(struct platform_device *pdev)
+static int __devexit aah_localtime_remove(struct platform_device *pdev)
 {
-	struct timesync_data *tdata = dev_get_drvdata(&pdev->dev);
+	struct aah_localtime_data *tdata = dev_get_drvdata(&pdev->dev);
 
 	pr_info("%s\n", __func__);
 
@@ -293,34 +238,33 @@ static int __devexit timesync_remove(struct platform_device *pdev)
 	/* unregister the device */
 	misc_deregister(&tdata->misc_dev);
 
-	aah_clock_shutdown();
 	dev_set_drvdata(&pdev->dev, NULL);
 	kfree(tdata);
 
 	return 0;
 }
 
-static struct platform_driver timesync_driver = {
-	.probe		= timesync_probe,
-	.remove		= __devexit_p(timesync_remove),
+static struct platform_driver aah_localtime_driver = {
+	.probe		= aah_localtime_probe,
+	.remove		= __devexit_p(aah_localtime_remove),
 	.driver		= {
-		.name	= "timesync",
+		.name	= DEV_NODE_NAME,
 		.owner	= THIS_MODULE,
 	},
 };
 
-static int __init timesync_init(void)
+static int __init aah_localtime_init(void)
 {
-	return platform_driver_register(&timesync_driver);
+	return platform_driver_register(&aah_localtime_driver);
 }
-static void __exit timesync_exit(void)
+static void __exit aah_localtime_exit(void)
 {
-	platform_driver_unregister(&timesync_driver);
+	platform_driver_unregister(&aah_localtime_driver);
 }
 
 
-module_init(timesync_init);
-module_exit(timesync_exit);
+module_init(aah_localtime_init);
+module_exit(aah_localtime_exit);
 
-MODULE_DESCRIPTION("timesync driver");
+MODULE_DESCRIPTION("aah localtime driver");
 MODULE_LICENSE("GPL");

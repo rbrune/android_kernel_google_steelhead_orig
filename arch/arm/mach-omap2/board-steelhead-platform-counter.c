@@ -15,7 +15,7 @@
 #include <linux/clk.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
-#include <linux/aah_timesync.h>
+#include <linux/aah_localtime.h>
 #include <plat/dmtimer.h>
 
 #include "board-steelhead.h"
@@ -217,13 +217,5 @@ void steelhead_register_timesync_event_handler(void *user_data,
 	timesync_event_handler = handler;
 	timesync_event_handler_data = user_data;
 	spin_unlock_irqrestore(&timesync_event_handler_lock, irq_state);
-}
-#endif
-
-#if 0
-int platform_set_counter_slew_rate(int ppm)
-{
-	/* TODO(johngro): implement platform slew. */
-	return -1;
 }
 #endif

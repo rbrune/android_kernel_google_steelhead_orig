@@ -28,7 +28,6 @@
 #include <linux/slab.h>
 #include <linux/tas5713.h>
 #include <linux/uaccess.h>
-#include <linux/numeric_transforms.h>
 #include <plat/dma.h>
 #include <plat/mcbsp.h>
 
@@ -91,8 +90,6 @@ struct tas5713_driver_state {
 
 	u64 dma_start_local_time;
 	atomic64_t samples_queued_to_dma;
-	u32 samples_to_ticks_n;
-	u32 samples_to_ticks_d;
 };
 
 static inline bool pending_buffer_requests(struct tas5713_driver_state *state)
@@ -547,28 +544,23 @@ static long tas5713_out_ioctl(struct file *file,
 	} break;
 
 	case TAS5713_GET_NEXT_WRITE_TIMESTAMP: {
-		s64 timestamp;
-		long long samples_queued;
+		struct tas5713_next_write_ts_resp resp;
 
-		samples_queued = atomic64_read(&state->samples_queued_to_dma);
+		resp.samples_queued_since_dma_start =
+			atomic64_read(&state->samples_queued_to_dma);
+
+		resp.dma_start_time = state->dma_start_local_time;
 
 		/* If no samples have been queued, then we have no DMA start
 		 * time for this output channel.
 		 */
-		if ((!samples_queued) || (samples_queued >> 63)) {
+		if ((!resp.samples_queued_since_dma_start) ||
+		    (resp.samples_queued_since_dma_start >> 63)) {
 			rc = -ENODEV;
 			break;
 		}
 
-		timestamp = linear_transform_s64_to_s64(
-				samples_queued,
-				0,
-				state->pdata->get_raw_counter_nominal_freq(),
-				SAMPLE_RATE,
-				state->dma_start_local_time);
-
-		if (copy_to_user((void __user *)arg,
-				&timestamp, sizeof(timestamp)))
+		if (copy_to_user((void __user *)arg, &resp, sizeof(resp)))
 			rc = -EFAULT;
 	} break;
 
@@ -674,12 +666,6 @@ static int tas5713_open(struct inode *inode, struct file *file)
 	state->stop = false;
 
 	atomic64_set(&state->samples_queued_to_dma, 0);
-
-	state->samples_to_ticks_n = SAMPLE_RATE;
-	state->samples_to_ticks_d =
-			(*state->pdata->get_raw_counter_nominal_freq)();
-	reduce_s32_u32_ratio(&state->samples_to_ticks_n,
-			&state->samples_to_ticks_d);
 
 	for (i = 0; i < I2S_MAX_NUM_BUFS; i++) {
 		init_completion(&state->comp[i]);

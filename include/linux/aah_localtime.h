@@ -1,4 +1,4 @@
-/* drivers/linux/aah_timesync.h
+/* drivers/linux/aah_localtime.h
  *
  * Copyright (C) 2011 Google, Inc.
  *
@@ -12,17 +12,16 @@
  * GNU General Public License for more details.
  */
 
-#ifndef __LINUX_AAH_TIMESYNC_H
-#define __LINUX_AAH_TIMESYNC_H
+#ifndef __LINUX_AAH_LOCALTIME_H
+#define __LINUX_AAH_LOCALTIME_H
 
 #include <linux/types.h>
 
 #ifdef __KERNEL__
 
-struct timesync_platform_data {
-	/* Platform provided free running counter.  All platforms which
-	 * support android@home must implement get_raw_counter and
-	 * get_raw_counter_nominal_freq.  Platform counters must be...
+struct aah_localtime_platform_data {
+	/* Platform provided free running counter.
+	 * Platform counters should be...
 	 *
 	 * + Monotonic.
 	 * + Continuous.
@@ -35,19 +34,19 @@ struct timesync_platform_data {
 	u32 (*get_raw_counter_nominal_freq)(void);
 
 	/* Optional function for adjusting the counter freq.
-	 * If the board doesn't have a VCXO, set this to NULL.
+	 * If the board doesn't have the ability to slew its counter, set this
+	 * to NULL.
 	 *
 	 * Adjusts the approximate rate at which a platform's counter runs.
-	 * Returns 0 on success and -1 if the platform has no ability to
-	 * control its counter's rate.  The signed correction argument
-	 * determines the amount of correction which should be applied to
-	 * the platform oscillator's frequency.  Negative values indicate
-	 * that the platform should attempt to slow down its counter
-	 * while positive values indicate that the platform should attempt
-	 * to speed up its counter.  The correction parameter is always
-	 * absolute, not cumulative.
+	 *
+	 * The signed correction argument determines the amount of correction
+	 * which should be applied to the platform oscillator's frequency.
+	 * Negative values indicate that the platform should attempt to slow
+	 * down its counter while positive values indicate that the platform
+	 * should attempt to speed up its counter.  The correction parameter is
+	 * always absolute, not cumulative and is expressed in ppm.
 	 */
-	 int (*set_counter_slew_rate)(s32 correction);
+	 void (*set_counter_slew_rate)(s32 correction);
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	/**********************************************************************
@@ -77,40 +76,25 @@ struct timesync_platform_data {
 
 #include <linux/ioctl.h>
 
-struct aah_timesync_basis {
-	__s64 local_basis;
-	__s64 common_basis;
-};
+#define AAH_LOCALTIME_MAGIC 0xE0
 
-#define AAH_TIMESYNC_MAGIC 0xE0
-
-#define TT_IOCTL_LOCAL_TO_COMMON         _IOWR(AAH_TIMESYNC_MAGIC, 1, __s64)
-#define TT_IOCTL_COMMON_TO_LOCAL         _IOWR(AAH_TIMESYNC_MAGIC, 2, __s64)
-#define TT_IOCTL_LOCALTIME_GET            _IOR(AAH_TIMESYNC_MAGIC, 3, __s64)
-#define TT_IOCTL_LOCALTIME_GETFREQ        _IOR(AAH_TIMESYNC_MAGIC, 4, __u64)
-#define TT_IOCTL_COMMONTIME_GET           _IOR(AAH_TIMESYNC_MAGIC, 5, __s64)
-#define TT_IOCTL_COMMONTIME_RESET_BASIS    _IO(AAH_TIMESYNC_MAGIC, 6)
-#define TT_IOCTL_COMMONTIME_SET_BASIS     _IOW(AAH_TIMESYNC_MAGIC, 7, \
-					       struct aah_timesync_basis)
-#define TT_IOCTL_COMMONTIME_SET_SLEW      _IOW(AAH_TIMESYNC_MAGIC, 8, __u32)
-#define TT_IOCTL_COMMONTIME_IS_VALID       _IO(AAH_TIMESYNC_MAGIC, 9)
+#define AAHLT_IOCTL_LOCALTIME_GET       _IOR(AAH_LOCALTIME_MAGIC, 1, __s64)
+#define AAHLT_IOCTL_LOCALTIME_GETFREQ   _IOR(AAH_LOCALTIME_MAGIC, 2, __u64)
+#define AAHLT_IOCTL_LOCALTIME_SET_SLEW  _IOW(AAH_LOCALTIME_MAGIC, 3, __s32)
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
-#define AAH_TSDEBUG_EVENTF_VALID_COMMON_TIME 0x01
 
 struct aah_tsdebug_event_record {
 	__s64 local_timesync_event_id;
 	__s64 local_time;
-	__s64 common_time;
-	__u32 flags;
 };
 
 struct aah_tsdebug_fetch_records_cmd {
 	__u32 max_records_out;
 	struct aah_tsdebug_event_record __user *records_out;
 };
-#define TT_IOCTL_FETCH_TSDEBUG_RECORDS _IOWR(AAH_TIMESYNC_MAGIC, 100, \
+#define AAHLT_IOCTL_FETCH_TSDEBUG_RECORDS _IOWR(AAH_LOCALTIME_MAGIC, 100, \
 					struct aah_tsdebug_fetch_records_cmd)
 #endif /* CONFIG_AAH_TIMESYNC_DEBUG */
 
-#endif  /* __LINUX_AAH_TIMESYNC_H */
+#endif  /* __LINUX_AAH_LOCALTIME_H */

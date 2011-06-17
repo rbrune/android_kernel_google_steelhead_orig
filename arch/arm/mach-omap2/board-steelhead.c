@@ -51,7 +51,7 @@
 #include <plat/i2c.h>
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
-#include <linux/aah_timesync.h>
+#include <linux/aah_localtime.h>
 
 #define GPIO_HUB_POWER		1
 #define GPIO_HUB_NRESET		62
@@ -98,27 +98,28 @@ static struct platform_device leds_gpio = {
 	},
 };
 
-static struct timesync_platform_data timesync_pdata = {
+static struct aah_localtime_platform_data localtime_pdata = {
 	.get_raw_counter = steelhead_get_raw_counter,
 	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
+	.set_counter_slew_rate = NULL,
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	.register_timesync_event_handler =
 			steelhead_register_timesync_event_handler,
 #endif
 };
 
-static struct platform_device timesync_device = {
-	.name	= "timesync",
+static struct platform_device aah_localtime_device = {
+	.name	= "aah_localtime",
 	.id	= -1,
 	.dev	= {
-		.platform_data	= &timesync_pdata,
+		.platform_data	= &localtime_pdata,
 	},
 };
 
 static struct platform_device *steelhead_devices[] __initdata = {
 	&leds_gpio,
 	&wl1271_device,
-	&timesync_device,
+	&aah_localtime_device,
 };
 
 static void __init steelhead_init_early(void)

@@ -55,6 +55,6 @@ obj-$(CONFIG_SENSORS_AK8975)	+= akm8975.o
 obj-y				+= inv_mpu/
 obj-$(CONFIG_STEELHEAD_AVR)	+= steelhead_avr.o
 obj-$(CONFIG_TAS5713)		+= tas5713.o
-obj-$(CONFIG_AAH_TIMESYNC)	+= aah_timesync_driver.o
+obj-$(CONFIG_AAH_LOCALTIME)	+= aah_localtime_driver.o
 
-aah_timesync_driver-objs := aah_timesync.o aah_clock.o
+aah_localtime_driver-objs := aah_localtime.o
