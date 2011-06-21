@@ -14,7 +14,6 @@
 #ifndef _MACH_OMAP2_BOARD_STEELHEAD_H_
 #define _MACH_OMAP2_BOARD_STEELHEAD_H_
 
-extern void omap4_steelhead_android_usb_init(void);
 extern void __init steelhead_platform_init_counter(void);
 extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);

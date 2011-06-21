@@ -33,19 +33,21 @@
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
-#include <plat/display.h>
+
+#include <video/omapdss.h>
+#include <video/omap-panel-generic-dpi.h>
 
 #include <plat/board.h>
 #include <plat/common.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
-#include <plat/panel-generic-dpi.h>
 #include "timer-gp.h"
 
 #include "hsmmc.h"
 #include "control.h"
 #include "mux.h"
 #include "board-steelhead.h"
+#include "common-board-devices.h"
 
 #include <linux/i2c.h>
 #include <plat/i2c.h>
@@ -61,6 +63,12 @@
 #define AVR_INT_GPIO_ID 40
 #define TAS5713_RESET_GPIO_ID 42
 #define TAS5713_PDN_GPIO_ID 44
+
+#if 0 /* TBD */
+#define GPIO_NFC_IRQ 17
+#define GPIO_NFC_FIRMWARE 172
+#define GPIO_NFC_EN 173
+#endif
 
 /* wl127x BT, FM, GPS connectivity chip */
 static int wl1271_gpios[] = {46, -1, -1};
@@ -138,6 +146,11 @@ static const struct usbhs_omap_board_data usbhs_bdata __initconst = {
 	.reset_gpio_port[2]  = -EINVAL
 };
 
+static struct gpio steelhead_ehci_gpios[] __initdata = {
+	{ GPIO_HUB_POWER,	GPIOF_OUT_INIT_LOW,  "hub_power"  },
+	{ GPIO_HUB_NRESET,	GPIOF_OUT_INIT_LOW,  "hub_nreset" },
+};
+
 static void __init omap4_ehci_init(void)
 {
 	int ret;
@@ -152,25 +165,15 @@ static void __init omap4_ehci_init(void)
 	clk_set_rate(phy_ref_clk, 19200000);
 	clk_enable(phy_ref_clk);
 
-	/* disable the power to the usb hub prior to init */
-	ret = gpio_request(GPIO_HUB_POWER, "hub_power");
+	/* disable the power to the usb hub prior to init and reset phy+hub */
+	ret = gpio_request_array(steelhead_ehci_gpios,
+				 ARRAY_SIZE(steelhead_ehci_gpios));
 	if (ret) {
-		pr_err("Cannot request GPIO %d\n", GPIO_HUB_POWER);
-		goto err_gpio_request_power;
+		pr_err("Unable to initialize EHCI power/reset\n");
+		goto err_gpio_request_array;
 	}
 	gpio_export(GPIO_HUB_POWER, 0);
-	gpio_direction_output(GPIO_HUB_POWER, 0);
-	gpio_set_value(GPIO_HUB_POWER, 0);
-
-	/* reset phy+hub */
-	ret = gpio_request(GPIO_HUB_NRESET, "hub_nreset");
-	if (ret) {
-		pr_err("Cannot request GPIO %d\n", GPIO_HUB_NRESET);
-		goto err_gpio_request_nreset;
-	}
 	gpio_export(GPIO_HUB_NRESET, 0);
-	gpio_direction_output(GPIO_HUB_NRESET, 0);
-	gpio_set_value(GPIO_HUB_NRESET, 0);
 	gpio_set_value(GPIO_HUB_NRESET, 1);
 
 	usbhs_init(&usbhs_bdata);
@@ -179,9 +182,7 @@ static void __init omap4_ehci_init(void)
 	gpio_set_value(GPIO_HUB_POWER, 1);
 	return;
 
-err_gpio_request_nreset:
-	gpio_free(GPIO_HUB_POWER);
-err_gpio_request_power:
+err_gpio_request_array:
 	clk_put(phy_ref_clk);
 err_clk_get:
 	pr_err("Unable to initialize EHCI power/reset\n");
@@ -441,15 +442,6 @@ static struct twl4030_platform_data steelhead_twldata = {
 	.usb		= &omap4_usbphy_data,
 };
 
-static struct i2c_board_info __initdata steelhead_i2c1_boardinfo[] = {
-	{
-		I2C_BOARD_INFO("twl6030", 0x48),
-		.flags = I2C_CLIENT_WAKE,
-		.irq = OMAP44XX_IRQ_SYS_1N,
-		.platform_data = &steelhead_twldata,
-	},
-};
-
 static struct steelhead_avr_platform_data steelhead_avr_pdata = {
 	/* Reset and Power Down GPIO configuration */
 	.interrupt_gpio = AVR_INT_GPIO_ID,
@@ -486,12 +478,7 @@ static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
 
 static int __init steelhead_i2c_init(void)
 {
-	/*
-	 * Phoenix Audio IC needs I2C1 to
-	 * start with 400 KHz or less
-	 */
-	omap_register_i2c_bus(1, 400, steelhead_i2c1_boardinfo,
-			      ARRAY_SIZE(steelhead_i2c1_boardinfo));
+	omap4_pmic_init("twl6030", &steelhead_twldata);
 	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
 			      ARRAY_SIZE(steelhead_i2c_bus2));
 	omap_register_i2c_bus(3, 400, NULL, 0);
@@ -612,25 +599,25 @@ static struct omap_device_pad serial4_pads[] __initdata = {
 			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
 };
 
-static struct omap_board_data serial2_data = {
+static struct omap_board_data serial2_data __initdata = {
 	.id             = 1,
 	.pads           = serial2_pads,
 	.pads_cnt       = ARRAY_SIZE(serial2_pads),
 };
 
-static struct omap_board_data serial3_data = {
+static struct omap_board_data serial3_data __initdata = {
 	.id             = 2,
 	.pads           = serial3_pads,
 	.pads_cnt       = ARRAY_SIZE(serial3_pads),
 };
 
-static struct omap_board_data serial4_data = {
+static struct omap_board_data serial4_data __initdata = {
 	.id             = 3,
 	.pads           = serial4_pads,
 	.pads_cnt       = ARRAY_SIZE(serial4_pads),
 };
 
-static inline void board_serial_init(void)
+static inline void __init board_serial_init(void)
 {
 	struct omap_board_data bdata;
 	bdata.flags     = 0;
@@ -647,7 +634,7 @@ static inline void board_serial_init(void)
 #else
 #define board_mux	NULL
 
-static inline void board_serial_init(void)
+static inline void __init board_serial_init(void)
 {
 	omap_serial_init();
 }
@@ -698,6 +685,7 @@ static void steelhead_platform_init_audio(void)
 {
 	struct clk *m3x2_clk = NULL;
 	struct clk *mclk_out = NULL;
+	struct clk *mclk_src = NULL;
 	int res;
 	unsigned long tgt_rate = (tas5713_mclk_rate * 5);
 
@@ -736,6 +724,7 @@ static void steelhead_platform_init_audio(void)
 		pr_err("tas5713: failed to dpll_per_m3x2_ck\n");
 		goto err_clk_get_dpll;
 	}
+
 	mclk_out = clk_get(NULL, "auxclk1_ck");
 	if (IS_ERR_OR_NULL(mclk_out)) {
 		pr_err("tas5713: failed to auxclk1_ck\n");
@@ -751,12 +740,18 @@ static void steelhead_platform_init_audio(void)
 		goto err_set_clk;
 	}
 
-	res = clk_set_parent(mclk_out, m3x2_clk);
+	mclk_src = clk_get(NULL, "auxclk1_src_ck");
+	if (IS_ERR_OR_NULL(mclk_out)) {
+		pr_err("tas5713: failed to auxclk1_ck\n");
+		goto err_clk_get_aux_src;
+	}
+
+	res = clk_set_parent(mclk_src, m3x2_clk);
 	if (res < 0) {
 		pr_err("tas5713: failed to set reference clock"
 				" for fref_clk1_out (res = %d)  "
 			       "driver will not load.\n", res);
-		goto err_set_clk;
+		goto err_set_parent;
 	}
 
 	res = clk_set_rate(mclk_out, tas5713_mclk_rate);
@@ -765,15 +760,20 @@ static void steelhead_platform_init_audio(void)
 			       "rate to %lu (res = %d).  "
 			       "driver will not load.\n",
 			       tas5713_mclk_rate, res);
-		goto err_set_clk;
+		goto err_set_mclk_rate;
 	}
 
 	/* Stash the clock and enable the pin. */
 	tas5713_pdata.mclk_out = mclk_out;
+	clk_put(mclk_src);
 	clk_put(m3x2_clk);
 	omap_mux_init_signal("fref_clk1_out", OMAP_PIN_OUTPUT);
 	return;
 
+err_set_mclk_rate:
+err_set_parent:
+	clk_put(mclk_src);
+err_clk_get_aux_src:
 err_set_clk:
 	clk_put(mclk_out);
 err_clk_get_aux:
@@ -869,27 +869,19 @@ static void omap4_steelhead_hdmi_mux_init(void)
 			OMAP_PIN_INPUT_PULLUP);
 }
 
+static struct gpio panda_hdmi_gpios[] = {
+	{ HDMI_GPIO_HPD,	GPIOF_OUT_INIT_HIGH, "hdmi_gpio_hpd"   },
+	{ HDMI_GPIO_LS_OE,	GPIOF_OUT_INIT_HIGH, "hdmi_gpio_ls_oe" },
+};
+
 static int omap4_steelhead_panel_enable_hdmi(struct omap_dss_device *dssdev)
 {
 	int status;
 
-	status = gpio_request_one(HDMI_GPIO_HPD, GPIOF_OUT_INIT_HIGH,
-							"hdmi_gpio_hpd");
-	if (status) {
-		pr_err("Cannot request GPIO %d\n", HDMI_GPIO_HPD);
-		return status;
-	}
-	status = gpio_request_one(HDMI_GPIO_LS_OE, GPIOF_OUT_INIT_HIGH,
-							"hdmi_gpio_ls_oe");
-	if (status) {
-		pr_err("Cannot request GPIO %d\n", HDMI_GPIO_LS_OE);
-		goto error1;
-	}
-
-	return 0;
-
-error1:
-	gpio_free(HDMI_GPIO_HPD);
+	status = gpio_request_array(panda_hdmi_gpios,
+				    ARRAY_SIZE(panda_hdmi_gpios));
+	if (status)
+		pr_err("Cannot request HDMI GPIOs\n");
 
 	return status;
 }
@@ -937,6 +929,23 @@ void omap4_steelhead_display_init(void)
 	omap_display_init(&omap4_steelhead_dss_data);
 }
 
+#if 0 /* TBD */
+static void __init steelhead_nfc_init(void)
+{
+	gpio_request(GPIO_NFC_FIRMWARE, "nfc_firmware");
+	gpio_direction_output(GPIO_NFC_FIRMWARE, 0);
+	omap_mux_init_gpio(GPIO_NFC_FIRMWARE, OMAP_PIN_OUTPUT);
+
+	gpio_request(GPIO_NFC_EN, "nfc_enable");
+	gpio_direction_output(GPIO_NFC_EN, 1);
+	omap_mux_init_gpio(GPIO_NFC_EN, OMAP_PIN_OUTPUT);
+
+	gpio_request(GPIO_NFC_IRQ, "nfc_irq");
+	gpio_direction_input(GPIO_NFC_IRQ);
+	omap_mux_init_gpio(GPIO_NFC_IRQ, OMAP_PIN_INPUT_PULLUP);
+}
+#endif
+
 static void __init steelhead_init(void)
 {
 	int package = OMAP_PACKAGE_CBS;
@@ -958,7 +967,6 @@ static void __init steelhead_init(void)
 	omap4_twl6030_hsmmc_init(mmc);
 	omap4_ehci_init();
 	usb_musb_init(&musb_board_data);
-	omap4_steelhead_android_usb_init();
 	omap4_steelhead_display_init();
 	steelhead_platform_init_counter();
 }
