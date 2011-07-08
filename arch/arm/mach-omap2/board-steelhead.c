@@ -27,6 +27,7 @@
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
 #include <linux/wl12xx.h>
+#include <linux/reboot.h>
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -929,6 +930,34 @@ void omap4_steelhead_display_init(void)
 	omap_display_init(&omap4_steelhead_dss_data);
 }
 
+#define PUBLIC_SAR_RAM_1_FREE_OFFSET 0xA0C
+
+static int steelhead_reboot_notifier_handler(struct notifier_block *this,
+					     unsigned long code, void *_cmd)
+{
+	void __iomem *sar_free_p = omap4_get_sar_ram_base();
+
+	if (!sar_free_p)
+		return notifier_from_errno(-ENOMEM);
+
+	sar_free_p += PUBLIC_SAR_RAM_1_FREE_OFFSET;
+	memset(sar_free_p, 0, 32);
+	if (code == SYS_RESTART) {
+		if (_cmd) {
+			if (!strcmp(_cmd, "recovery"))
+				strcpy(sar_free_p, "recovery");
+			else if (!strcmp(_cmd, "bootloader"))
+				strcpy(sar_free_p, "bootloader");
+		}
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block steelhead_reboot_notifier = {
+	.notifier_call = steelhead_reboot_notifier_handler,
+};
+
 #if 0 /* TBD */
 static void __init steelhead_nfc_init(void)
 {
@@ -953,6 +982,8 @@ static void __init steelhead_init(void)
 	if (omap_rev() == OMAP4430_REV_ES1_0)
 		package = OMAP_PACKAGE_CBL;
 	omap4_mux_init(board_mux, NULL, package);
+
+	register_reboot_notifier(&steelhead_reboot_notifier);
 
 	if (wl12xx_set_platform_data(&steelhead_wlan_data))
 		pr_err("error setting wl12xx data\n");
