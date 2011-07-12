@@ -28,9 +28,7 @@ struct omap_mcasp {
 	struct device *dev;
 	void __iomem *base;
 	struct clk *fclk;
-	unsigned long fclk_rate;
-	struct omap_mcasp_configs *configs;
-	unsigned int num_configs;
+	int clk_active;
 	int active;
 };
 
