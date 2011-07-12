@@ -124,6 +124,7 @@
 #define TXORD		BIT(15)
 #define FSXDLY(val)	(val<<16)
 
+#define ROTATE_8	0x2
 #define ROTATE_24	0x6
 #define SLOTSIZE_32	0xf
 
@@ -403,13 +404,6 @@ static int omap_hw_dit_param(struct omap_mcasp *mcasp, unsigned int rate)
 	mcasp_set_bits(mcasp->base + OMAP_MCASP_ACLKXCTL_REG,
 					AHCLKXDIV(aclkxdiv));
 
-	/* Configure McASP formatter */
-	mcasp_mod_bits(mcasp->base + OMAP_MCASP_TXFMT_REG,
-					TXSSZ(SLOTSIZE_32), TXSSZ_MASK);
-	mcasp_mod_bits(mcasp->base + OMAP_MCASP_TXFMT_REG, TXROT(ROTATE_24),
-							TXROT_MASK);
-	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXMASK_REG, 0xFFFF);
-
 	/* Set the TX tdm : for all the slots */
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXTDM_REG, 0xFFFFFFFF);
 
@@ -429,19 +423,59 @@ static int omap_hw_dit_param(struct omap_mcasp *mcasp, unsigned int rate)
 	return 0;
 }
 
+static int omap_mcasp_config_tx_format_unit(
+		struct omap_mcasp *mcasp,
+		struct snd_pcm_substream *substream,
+		struct snd_pcm_hw_params *params)
+{
+	u32 mask, fmt;
+	int stream = substream->stream;
+	struct omap_pcm_dma_data* dma = omap_mcasp_dai_dma_params + stream;
+
+	switch (params_format(params)) {
+	case SNDRV_PCM_FORMAT_S16_LE:
+		mask = 0x0000FFFF;
+		fmt  = TXROT(ROTATE_24);
+		dma->data_type = OMAP_DMA_DATA_TYPE_S16;
+		break;
+
+	case SNDRV_PCM_FORMAT_S32_LE:
+		mask = 0xFFFFFF00;
+		fmt  = TXROT(ROTATE_8);
+		dma->data_type = OMAP_DMA_DATA_TYPE_S32;
+		break;
+	default:
+		printk(KERN_WARNING "omap-mcasp: unsupported PCM format (%d)",
+				params_format(params));
+		return -EINVAL;
+	}
+
+	fmt |= TXSSZ(SLOTSIZE_32);	/* slot size is always 32 bits */
+
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXFMT_REG, fmt);
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXMASK_REG, mask);
+
+	return 0;
+}
+
+
 static int omap_mcasp_hw_params(struct snd_pcm_substream *substream,
 					struct snd_pcm_hw_params *params,
 					struct snd_soc_dai *dai)
 {
 	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
 	int stream = substream->stream;
+	int ret = 0;
 
 	mcasp_stop_tx(mcasp);
 
-	if ((params_format(params)) != SNDRV_PCM_FORMAT_S16_LE) {
-		printk(KERN_WARNING "omap-mcasp: unsupported PCM format");
+	if (stream != SNDRV_PCM_STREAM_PLAYBACK)
 		return -EINVAL;
-	}
+
+	/* Configure McASP formatter */
+	ret = omap_mcasp_config_tx_format_unit(mcasp, substream, params);
+	if (ret)
+		return ret;
 
 	if (omap_hw_dit_param(mcasp, params_rate(params)) < 0)
 		return -EPERM;
@@ -449,7 +483,7 @@ static int omap_mcasp_hw_params(struct snd_pcm_substream *substream,
 	snd_soc_dai_set_dma_data(dai, substream,
 				 &omap_mcasp_dai_dma_params[stream]);
 
-	return 0;
+	return ret;
 }
 
 static int omap_mcasp_trigger(struct snd_pcm_substream *substream,
@@ -490,9 +524,10 @@ static struct snd_soc_dai_driver omap_mcasp_dai[] = {
 	{
 		.name		= "omap-mcasp-dai",
 		.playback	= {
-			.channels_min	= 1,
-			.channels_max	= 384,
-			.formats	= SNDRV_PCM_FMTBIT_S16_LE,
+			.channels_min	= 2,
+			.channels_max	= 2,
+			.formats	= SNDRV_PCM_FMTBIT_S16_LE |
+					  SNDRV_PCM_FMTBIT_S32_LE,
 		},
 		.ops		= &omap_mcasp_dai_ops,
 	},
