@@ -102,6 +102,12 @@ config SND_OMAP_SOC_SDP3430
 	  Say Y if you want to add support for SoC audio on Texas Instruments
 	  SDP3430.
 
+config SND_OMAP_SOC_STEELHEAD
+	tristate "SoC Audio support for the Tungsten/Steelhead platform"
+	select SND_OMAP_SOC_MCASP
+	select SND_OMAP_SOC_SPDIF
+	depends on SND_OMAP_SOC
+
 config SND_OMAP_SOC_SDP4430
 	tristate "SoC Audio support for Texas Instruments SDP4430 or PandaBoard"
 	depends on TWL4030_CORE && (MACH_OMAP_4430SDP || MACH_OMAP4_PANDA)

@@ -219,10 +219,39 @@ CONFIG_FB_OMAP2=y
 CONFIG_PANEL_GENERIC_DPI=y
 # CONFIG_PANEL_S6E8AA0 is not set
 CONFIG_DISPLAY_SUPPORT=y
+# Note(johngro) : enable this entire block when it is time to turn S/PDIF on for
+# steelhead.
 # CONFIG_SOUND is not set
 # CONFIG_SND is not set
 # CONFIG_SND_SOC is not set
 # CONFIG_SND_OMAP_SOC is not set
+# CONFIG_SND_TIMER is not set
+# CONFIG_SND_PCM is not set
+# CONFIG_SND_SOC_SPDIF is not set
+# CONFIG_SND_OMAP_SOC_STEELHEAD is not set
+# CONFIG_SND_OMAP_SOC_MCASP is not set
+# END Note(johngro)
+# CONFIG_SND_JACK is not set
+# CONFIG_SND_SEQUENCER is not set
+# CONFIG_SND_MIXER_OSS is not set
+# CONFIG_SND_PCM_OSS is not set
+# CONFIG_SND_HRTIMER is not set
+# CONFIG_SND_DYNAMIC_MINORS is not set
+# CONFIG_SND_SUPPORT_OLD_API is not set
+# CONFIG_SND_VERBOSE_PROCFS is not set
+# CONFIG_SND_VERBOSE_PRINTK is not set
+# CONFIG_SND_DEBUG is not set
+# CONFIG_SND_RAWMIDI_SEQ is not set
+# CONFIG_SND_OPL3_LIB_SEQ is not set
+# CONFIG_SND_OPL4_LIB_SEQ is not set
+# CONFIG_SND_SBAWE_SEQ is not set
+# CONFIG_SND_EMU10K1_SEQ is not set
+# CONFIG_SND_DRIVERS is not set
+# CONFIG_SND_ARM is not set
+# CONFIG_SND_SPI is not set
+# CONFIG_SND_USB is not set
+# CONFIG_SND_SOC_CACHE_LZO is not set
+# CONFIG_SND_SOC_I2C_AND_SPI is not set
 # CONFIG_SND_OMAP_SOC_SDP4430 is not set
 CONFIG_USB=y
 CONFIG_USB_ANNOUNCE_NEW_DEVICES=y

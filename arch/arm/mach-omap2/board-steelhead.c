@@ -40,6 +40,7 @@
 
 #include <plat/board.h>
 #include <plat/common.h>
+#include <plat/dma.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
 #include "timer-gp.h"
@@ -52,9 +53,11 @@
 
 #include <linux/i2c.h>
 #include <plat/i2c.h>
+#include <plat/mcasp.h>
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
 #include <linux/aah_localtime.h>
+#include <sound/pcm.h>
 
 #define GPIO_HUB_POWER		1
 #define GPIO_HUB_NRESET		62
@@ -682,7 +685,7 @@ static int steelhead_reserve_gpios(struct steelhead_gpio *data, int count,
 
 static const unsigned long tas5713_mclk_rate = 12288000;
 
-static void steelhead_platform_init_audio(void)
+static void steelhead_platform_init_tas5713_audio(void)
 {
 	struct clk *m3x2_clk = NULL;
 	struct clk *mclk_out = NULL;
@@ -751,7 +754,7 @@ static void steelhead_platform_init_audio(void)
 	if (res < 0) {
 		pr_err("tas5713: failed to set reference clock"
 				" for fref_clk1_out (res = %d)  "
-			       "driver will not load.\n", res);
+				"driver will not load.\n", res);
 		goto err_set_parent;
 	}
 
@@ -783,6 +786,38 @@ err_clk_get_dpll:
 	/* TODO: release gpios, but we're fatal anyway. */
 	return;
 }
+
+/******************************************************************************
+ *                                                                            *
+ *                     McASP S/PDIF Audio Initialization                      *
+ *                                                                            *
+ ******************************************************************************/
+
+static struct platform_device steelhead_mcasp_device = {
+	.name		= "omap-mcasp-dai",
+	.id		= 0,
+};
+
+static struct platform_device steelhead_spdif_dit_device = {
+	.name		= "spdif-dit",
+	.id		= 0,
+};
+
+static void steelhead_platform_init_mcasp_audio(void)
+{
+	int res;
+
+	res = omap_mux_init_signal("abe_mcbsp2_dr.abe_mcasp_axr", OMAP_PIN_OUTPUT);
+	if (res) {
+		pr_err("omap-mcasp: failed to enable MCASP_AXR pin mux, S/PDIF"
+				"will be unavailable. (res = %d)\n", res);
+		return;
+	}
+
+	platform_device_register(&steelhead_spdif_dit_device);
+	platform_device_register(&steelhead_mcasp_device);
+	return;
+};
 
 /******************************************************************************
  *                                                                            *
@@ -989,7 +1024,10 @@ static void __init steelhead_init(void)
 		pr_err("error setting wl12xx data\n");
 
 	steelhead_platform_init_avr();
-	steelhead_platform_init_audio();
+	steelhead_platform_init_tas5713_audio();
+#if defined(CONFIG_SND_OMAP_SOC_MCASP)
+	steelhead_platform_init_mcasp_audio();
+#endif
 
 	steelhead_i2c_init();
 	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
