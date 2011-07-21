@@ -1095,9 +1095,29 @@ static int soc_pcm_ioctl(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_platform *platform = rtd->platform;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret;
 
-	if (platform->driver->ops->ioctl)
-		return platform->driver->ops->ioctl(substream, cmd, arg);
+	if (codec_dai->driver->ops->ioctl) {
+		ret = codec_dai->driver->ops->ioctl(
+				substream, codec_dai, cmd, arg);
+		if (ret != -ENOIOCTLCMD)
+			return ret;
+	}
+
+	if (cpu_dai->driver->ops->ioctl) {
+		ret = cpu_dai->driver->ops->ioctl(substream, cpu_dai, cmd, arg);
+		if (ret != -ENOIOCTLCMD)
+			return ret;
+	}
+
+	if (platform->driver->ops->ioctl) {
+		ret = platform->driver->ops->ioctl(substream, cmd, arg);
+		if (ret != -ENOIOCTLCMD)
+			return ret;
+	}
+
 	return snd_pcm_lib_ioctl(substream, cmd, arg);
 }
 

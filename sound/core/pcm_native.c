@@ -2574,6 +2574,13 @@ static int snd_pcm_common_ioctl1(struct file *file,
 		snd_pcm_stream_unlock_irq(substream);
 		return res;
 	}
+	default:
+	{
+		int res;
+		res = substream->ops->ioctl(substream, cmd, arg);
+		if (res != -ENOIOCTLCMD)
+			return res;
+	}
 	}
 	snd_printd("unknown ioctl = 0x%x\n", cmd);
 	return -ENOTTY;
