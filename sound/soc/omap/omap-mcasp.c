@@ -38,6 +38,10 @@
 #include "omap-pcm.h"
 #include "omap-mcasp.h"
 
+#define SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME	_IOR('A', 0xF0, __s64)
+
+static DEFINE_SPINLOCK(starttime_lock);
+
 /*
  * McASP register definitions
  */
@@ -255,6 +259,35 @@ static inline void mcasp_set_ctl_reg(void __iomem *regs, u32 val)
 		printk(KERN_ERR "GBLCTL write error\n");
 }
 
+static int mcasp_ioctl_get_start_time(
+		struct snd_pcm_substream *substream,
+		struct snd_soc_dai *dai,
+		void *arg)
+{
+	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
+	unsigned long irq_state;
+	s64 start;
+	int valid;
+
+	if (!mcasp)
+		return -EINVAL;
+
+	spin_lock_irqsave(&starttime_lock, irq_state);
+	start = mcasp->start_time;
+	valid = mcasp->start_time_valid;
+	spin_unlock_irqrestore(&starttime_lock, irq_state);
+
+	if (valid) {
+		if (copy_to_user((void __user *)arg,
+					&start, sizeof(start)))
+			return -EFAULT;
+	} else {
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static void mcasp_clk_on(struct omap_mcasp *mcasp) {
 	if (mcasp->clk_active)
 		return;
@@ -359,6 +392,8 @@ static int mcasp_compute_playback_rates(long fclk_rate) {
 static int mcasp_start_tx(struct omap_mcasp *mcasp)
 {
 	int i;
+	unsigned long irq_state;
+
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXHCLKRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXCLKRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSERCLR);
@@ -380,9 +415,19 @@ static int mcasp_start_tx(struct omap_mcasp *mcasp)
 		udelay(1);
 	}
 
+	spin_lock_irqsave(&starttime_lock, irq_state);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSMRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXFSRST);
 	mcasp_clr_bits(mcasp->base + OMAP_MCASP_TXEVTCTL_REG, TXDATADMADIS);
+
+	if (!mcasp->start_time_valid &&
+			mcasp->pdata &&
+			mcasp->pdata->get_raw_counter) {
+		mcasp->start_time_valid = 1;
+		mcasp->start_time = mcasp->pdata->get_raw_counter();
+	}
+
+	spin_unlock_irqrestore(&starttime_lock, irq_state);
 
 	return 0;
 }
@@ -397,6 +442,13 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp, int stream)
 
 static void mcasp_stop_tx(struct omap_mcasp *mcasp)
 {
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&starttime_lock, irq_state);
+	mcasp->start_time_valid = 0;
+	mcasp->start_time = 0;
+	spin_unlock_irqrestore(&starttime_lock, irq_state);
+
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, 0);
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG,
 			OMAP_MCASP_TXSTAT_MASK);
@@ -598,6 +650,8 @@ static int omap_mcasp_ioctl(struct snd_pcm_substream *substream,
 		void *arg)
 {
 	switch (cmd) {
+	case SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME:
+		return mcasp_ioctl_get_start_time(substream, cpu_dai, arg);
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -667,6 +721,7 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 		goto err;
 	}
 
+	mcasp->pdata = pdev->dev.platform_data;
 	ret = snd_soc_register_dai(&pdev->dev, omap_mcasp_dai);
 
 	if (ret < 0)
@@ -676,6 +731,7 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 	mcasp_clk_off(mcasp);
 
 	return 0;
+
 err:
 	if (mcasp && mcasp->fclk)
 		mcasp_clk_off(mcasp);

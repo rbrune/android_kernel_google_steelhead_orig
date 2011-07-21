@@ -793,9 +793,16 @@ err_clk_get_dpll:
  *                                                                            *
  ******************************************************************************/
 
+static struct omap_mcasp_platform_data steelhead_mcasp_pdata = {
+	.get_raw_counter = steelhead_get_raw_counter,
+};
+
 static struct platform_device steelhead_mcasp_device = {
 	.name		= "omap-mcasp-dai",
 	.id		= 0,
+	.dev	= {
+		.platform_data	= &steelhead_mcasp_pdata,
+	},
 };
 
 static struct platform_device steelhead_spdif_dit_device = {

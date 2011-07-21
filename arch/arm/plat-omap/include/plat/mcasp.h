@@ -45,6 +45,8 @@ struct omap_mcasp_platform_data {
 	unsigned long mcasp_fclk_rate;
 	struct omap_mcasp_configs *mcasp_configs;
 	unsigned int num_configs;
+
+	s64 (*get_raw_counter)(void);
 };
 
 void omap_init_mcasp(struct omap_mcasp_platform_data *pdata);
