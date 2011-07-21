@@ -592,12 +592,23 @@ static int omap_mcasp_trigger(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+static int omap_mcasp_ioctl(struct snd_pcm_substream *substream,
+		struct snd_soc_dai *cpu_dai,
+		unsigned int cmd,
+		void *arg)
+{
+	switch (cmd) {
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+
 static struct snd_soc_dai_ops omap_mcasp_dai_ops = {
 	.startup	= omap_mcasp_startup,
 	.shutdown	= omap_mcasp_shutdown,
 	.trigger	= omap_mcasp_trigger,
 	.hw_params	= omap_mcasp_hw_params,
-
+	.ioctl		= omap_mcasp_ioctl,
 };
 
 static struct snd_soc_dai_driver omap_mcasp_dai[] = {
