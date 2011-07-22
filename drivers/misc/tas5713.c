@@ -155,6 +155,13 @@ static int i2s_fifo_enable(struct tas5713_driver_state *state, int on)
 	return was_enabled;
 }
 
+static int is_i2s_fifo_enabled(struct tas5713_driver_state *state)
+{
+	unsigned id = state->pdata->mcbsp_id;
+	u32 val = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_XCCR);
+	return !(val & XDISABLE);
+}
+
 static irqreturn_t tas5713_mcbsp_irq_handler(int irq, void *dev_id)
 {
 	struct tas5713_driver_state *state = dev_id;
@@ -358,14 +365,6 @@ static int start_playback(struct tas5713_driver_state *state,
 	return 0;
 }
 
-/* Called with state->dma_req_lock taken. */
-static void stop_dma_playback(struct tas5713_driver_state *state)
-{
-	pr_debug("%s\n", __func__);
-	i2s_fifo_enable(state, 0);
-	atomic64_set(&state->samples_queued_to_dma, 0);
-}
-
 static bool stop_playback_if_necessary(struct tas5713_driver_state *state)
 {
 	unsigned long flags;
@@ -373,7 +372,7 @@ static bool stop_playback_if_necessary(struct tas5713_driver_state *state)
 	pr_debug("%s\n", __func__);
 	if (!pending_buffer_requests(state)) {
 		pr_debug("%s: no more data to play back\n", __func__);
-		stop_dma_playback(state);
+		atomic64_set(&state->samples_queued_to_dma, 0);
 		spin_unlock_irqrestore(&state->dma_req_lock, flags);
 		allow_suspend(state);
 		return true;
@@ -395,6 +394,29 @@ static bool wait_till_stopped(struct tas5713_driver_state *state)
 		pr_err("%s: wait error %d\n", __func__, rc);
 	allow_suspend(state);
 	pr_debug("%s: done: %d\n", __func__, rc);
+	return true;
+}
+
+static bool drain_fifo_and_disable(struct tas5713_driver_state *state)
+{
+	unsigned id = state->pdata->mcbsp_id;
+
+	/* If the TX FIFO is enabled, wait for it to drain out completely.
+	 * Assuming the FIFO was totally full, there would be 64 frames of audio
+	 * (128 samples).  At 32KHz (our lowest frame rate), this would be 2mSec
+	 * worth of audio.  Wait for 5mSec at most for this FIFO to drain before
+	 * proceeding */
+	if (is_i2s_fifo_enabled(state)) {
+		u32 timeout = 0;
+		u32 tmp;
+		do {
+			tmp = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_XBUFFSTAT);
+			tmp &= 0xFF;
+			usleep_range(100, 100);
+		} while ((++timeout < 50) && (tmp != 0x80));
+	}
+
+	i2s_fifo_enable(state, 0);
 	return true;
 }
 
@@ -540,6 +562,8 @@ static long tas5713_out_ioctl(struct file *file,
 		}
 		if (stop_playback_if_necessary(state))
 			pr_debug("%s: done (stopped)\n", __func__);
+
+		drain_fifo_and_disable(state);
 		state->stop = false;
 	} break;
 
@@ -692,6 +716,7 @@ static int tas5713_release(struct inode *inode, struct file *file)
 	request_stop_nosync(state);
 	if (stop_playback_if_necessary(state))
 		pr_debug("%s: done (stopped)\n", __func__);
+	drain_fifo_and_disable(state);
 	allow_suspend(state);
 
 	mutex_unlock(&state->lock);
