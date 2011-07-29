@@ -773,6 +773,50 @@ static void steelhead_platform_init_avr(void)
 
 }
 
+/* Display DVI */
+#define STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO	0
+
+static int omap4_steelhead_enable_dvi(struct omap_dss_device *dssdev)
+{
+	gpio_set_value(dssdev->reset_gpio, 1);
+	return 0;
+}
+
+static void omap4_steelhead_disable_dvi(struct omap_dss_device *dssdev)
+{
+	gpio_set_value(dssdev->reset_gpio, 0);
+}
+
+/* Using generic display panel */
+static struct panel_generic_dpi_data omap4_dvi_panel = {
+	.name			= "generic_720p",
+	.platform_enable	= omap4_steelhead_enable_dvi,
+	.platform_disable	= omap4_steelhead_disable_dvi,
+};
+
+struct omap_dss_device omap4_steelhead_dvi_device = {
+	.type			= OMAP_DISPLAY_TYPE_DPI,
+	.name			= "dvi",
+	.driver_name		= "generic_dpi_panel",
+	.data			= &omap4_dvi_panel,
+	.phy.dpi.data_lines	= 24,
+	.reset_gpio		= STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO,
+	.channel		= OMAP_DSS_CHANNEL_LCD2,
+};
+
+int __init omap4_steelhead_dvi_init(void)
+{
+	int r;
+
+	/* Requesting TFP410 DVI GPIO and disabling it, at bootup */
+	r = gpio_request_one(omap4_steelhead_dvi_device.reset_gpio,
+				GPIOF_OUT_INIT_LOW, "DVI PD");
+	if (r)
+		pr_err("Failed to get DVI powerdown GPIO\n");
+
+	return r;
+}
+
 #if 0
 static void omap4_steelhead_hdmi_mux_init(void)
 {
@@ -819,24 +863,33 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 	.platform_disable = omap4_steelhead_panel_disable_hdmi,
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
+#endif
 
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
+	&omap4_steelhead_dvi_device,
+#if 0
 	&omap4_steelhead_hdmi_device,
+#endif
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
-	.default_device	= &omap4_steelhead_hdmi_device,
+	.default_device	= &omap4_steelhead_dvi_device,
 };
-#endif
 
 void omap4_steelhead_display_init(void)
 {
+	int r;
+
+	r = omap4_steelhead_dvi_init();
+	if (r)
+		pr_err("error initializing steelhead DVI\n");
+
 #if 0
 	omap4_steelhead_hdmi_mux_init();
-	omap_display_init(&omap4_steelhead_dss_data);
 #endif
+	omap_display_init(&omap4_steelhead_dss_data);
 }
 
 #define PUBLIC_SAR_RAM_1_FREE_OFFSET 0xA0C
