@@ -162,13 +162,13 @@ static void __init omap4_ehci_init(void)
 	int ret;
 	struct clk *phy_ref_clk;
 
-	/* FREF_CLK3 provides the 19.2 MHz reference clock to the PHY */
+	/* FREF_CLK3 provides the 38.4 MHz reference clock to the PHY */
 	phy_ref_clk = clk_get(NULL, "auxclk3_ck");
 	if (IS_ERR(phy_ref_clk)) {
 		pr_err("Cannot request auxclk3\n");
 		goto err_clk_get;
 	}
-	clk_set_rate(phy_ref_clk, 19200000);
+	clk_set_rate(phy_ref_clk, 38400000);
 	clk_enable(phy_ref_clk);
 
 	/* disable the power to the usb hub prior to init and reset phy+hub */
