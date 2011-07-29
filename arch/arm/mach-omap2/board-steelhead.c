@@ -129,8 +129,10 @@ static struct platform_device aah_localtime_device = {
 };
 
 static struct platform_device *steelhead_devices[] __initdata = {
+#if 0
 	&leds_gpio,
 	&wl1271_device,
+#endif
 	&aah_localtime_device,
 };
 
@@ -215,10 +217,13 @@ static struct twl4030_usb_data omap4_usbphy_data = {
 static struct omap2_hsmmc_info mmc[] = {
 	{
 		.mmc		= 1,
+		.nonremovable	= true,
 		.caps		= MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA,
+		.ocr_mask	= MMC_VDD_29_30	| MMC_VDD_30_31,
 		.gpio_wp	= -EINVAL,
 		.gpio_cd	= -EINVAL,
 	},
+#if 0
 	{
 		.name		= "wl1271",
 		.mmc		= 5,
@@ -228,6 +233,7 @@ static struct omap2_hsmmc_info mmc[] = {
 		.ocr_mask	= MMC_VDD_165_195,
 		.nonremovable	= true,
 	},
+#endif
 	{}	/* Terminator */
 };
 
@@ -275,6 +281,7 @@ struct wl12xx_platform_data steelhead_wlan_data  __initdata = {
 	.board_ref_clock = 2,
 };
 
+#if 0
 static int omap4_twl6030_hsmmc_late_init(struct device *dev)
 {
 	int ret = 0;
@@ -311,14 +318,17 @@ static __init void omap4_twl6030_hsmmc_set_late_init(struct device *dev)
 
 	pdata->init =	omap4_twl6030_hsmmc_late_init;
 }
+#endif
 
 static int __init omap4_twl6030_hsmmc_init(struct omap2_hsmmc_info *controllers)
 {
 	struct omap2_hsmmc_info *c;
 
 	omap2_hsmmc_init(controllers);
+#if 0
 	for (c = controllers; c->mmc; c++)
 		omap4_twl6030_hsmmc_set_late_init(c->dev);
+#endif
 
 	return 0;
 }
@@ -352,7 +362,7 @@ static struct regulator_init_data steelhead_vaux3 = {
 /* VMMC1 for MMC1 card */
 static struct regulator_init_data steelhead_vmmc = {
 	.constraints = {
-		.min_uV			= 1200000,
+		.min_uV			= 3000000,
 		.max_uV			= 3000000,
 		.apply_uV		= true,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
@@ -483,11 +493,17 @@ static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
 static int __init steelhead_i2c_init(void)
 {
 	omap4_pmic_init("twl6030", &steelhead_twldata);
+#if 0
 	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
 			      ARRAY_SIZE(steelhead_i2c_bus2));
 	omap_register_i2c_bus(3, 400, NULL, 0);
 	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
 			      ARRAY_SIZE(steelhead_i2c_bus4));
+#else
+	omap_register_i2c_bus(2, 400, NULL, 0);
+	omap_register_i2c_bus(3, 400, NULL, 0);
+	omap_register_i2c_bus(4, 400, NULL, 0);
+#endif
 
 	return 0;
 }
@@ -507,56 +523,7 @@ static struct omap_board_mux board_mux[] __initdata = {
 	OMAP4_MUX(SDMMC5_DAT1, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
 	OMAP4_MUX(SDMMC5_DAT2, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
 	OMAP4_MUX(SDMMC5_DAT3, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	/* gpio 0 - TFP410 PD */
-	OMAP4_MUX(KPD_COL1, OMAP_PIN_OUTPUT | OMAP_MUX_MODE3),
-	/* dispc2_data23 */
-	OMAP4_MUX(USBB2_ULPITLL_STP, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data22 */
-	OMAP4_MUX(USBB2_ULPITLL_DIR, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data21 */
-	OMAP4_MUX(USBB2_ULPITLL_NXT, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data20 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT0, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data19 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT1, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data18 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT2, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data15 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT3, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data14 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT4, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data13 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT5, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data12 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT6, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data11 */
-	OMAP4_MUX(USBB2_ULPITLL_DAT7, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data10 */
-	OMAP4_MUX(DPM_EMU3, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data9 */
-	OMAP4_MUX(DPM_EMU4, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data16 */
-	OMAP4_MUX(DPM_EMU5, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data17 */
-	OMAP4_MUX(DPM_EMU6, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_hsync */
-	OMAP4_MUX(DPM_EMU7, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_pclk */
-	OMAP4_MUX(DPM_EMU8, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_vsync */
-	OMAP4_MUX(DPM_EMU9, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_de */
-	OMAP4_MUX(DPM_EMU10, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data8 */
-	OMAP4_MUX(DPM_EMU11, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data7 */
-	OMAP4_MUX(DPM_EMU12, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data6 */
-	OMAP4_MUX(DPM_EMU13, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data5 */
-	OMAP4_MUX(DPM_EMU14, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data4 */
-	OMAP4_MUX(DPM_EMU15, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
+#if 0
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	/* dispc2_data3 - set this pin to be DMTIMER8_PWM_EVT
 	 * instead of DISPC2_DATA3
@@ -565,24 +532,8 @@ static struct omap_board_mux board_mux[] __initdata = {
 #else
 	OMAP4_MUX(DPM_EMU16, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
 #endif
-	/* dispc2_data2 */
-	OMAP4_MUX(DPM_EMU17, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data1 */
-	OMAP4_MUX(DPM_EMU18, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-	/* dispc2_data0 */
-	OMAP4_MUX(DPM_EMU19, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
+#endif
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
-};
-
-static struct omap_device_pad serial2_pads[] __initdata = {
-	OMAP_MUX_STATIC("uart2_cts.uart2_cts",
-			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_rts.uart2_rts",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_rx.uart2_rx",
-			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_tx.uart2_tx",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
 };
 
 static struct omap_device_pad serial3_pads[] __initdata = {
@@ -596,22 +547,13 @@ static struct omap_device_pad serial3_pads[] __initdata = {
 			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
 };
 
-static struct omap_device_pad serial4_pads[] __initdata = {
-	OMAP_MUX_STATIC("uart4_rx.uart4_rx",
-			 OMAP_PIN_INPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart4_tx.uart4_tx",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
-};
-
 static inline void __init board_serial_init(void)
 {
 	omap_serial_init_port_pads(0, NULL, 0, NULL);
-	omap_serial_init_port_pads(1, serial2_pads, ARRAY_SIZE(serial2_pads),
-			NULL);
+	omap_serial_init_port_pads(1, NULL, 0, NULL);
 	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
 			NULL);
-	omap_serial_init_port_pads(3, serial4_pads, ARRAY_SIZE(serial4_pads),
-			NULL);
+	omap_serial_init_port_pads(3, NULL, 0, NULL);
 }
 #else
 #define board_mux	NULL
@@ -831,50 +773,6 @@ static void steelhead_platform_init_avr(void)
 
 }
 
-/* Display DVI */
-#define STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO	0
-
-static int omap4_steelhead_enable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 1);
-	return 0;
-}
-
-static void omap4_steelhead_disable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 0);
-}
-
-/* Using generic display panel */
-static struct panel_generic_dpi_data omap4_dvi_panel = {
-	.name			= "generic_720p",
-	.platform_enable	= omap4_steelhead_enable_dvi,
-	.platform_disable	= omap4_steelhead_disable_dvi,
-};
-
-struct omap_dss_device omap4_steelhead_dvi_device = {
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.name			= "dvi",
-	.driver_name		= "generic_dpi_panel",
-	.data			= &omap4_dvi_panel,
-	.phy.dpi.data_lines	= 24,
-	.reset_gpio		= STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO,
-	.channel		= OMAP_DSS_CHANNEL_LCD2,
-};
-
-int __init omap4_steelhead_dvi_init(void)
-{
-	int r;
-
-	/* Requesting TFP410 DVI GPIO and disabling it, at bootup */
-	r = gpio_request_one(omap4_steelhead_dvi_device.reset_gpio,
-				GPIOF_OUT_INIT_LOW, "DVI PD");
-	if (r)
-		pr_err("Failed to get DVI powerdown GPIO\n");
-
-	return r;
-}
-
 #if 0
 static void omap4_steelhead_hdmi_mux_init(void)
 {
@@ -921,33 +819,24 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 	.platform_disable = omap4_steelhead_panel_disable_hdmi,
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
-#endif
 
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
-	&omap4_steelhead_dvi_device,
-#if 0
 	&omap4_steelhead_hdmi_device,
-#endif
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
-	.default_device	= &omap4_steelhead_dvi_device,
+	.default_device	= &omap4_steelhead_hdmi_device,
 };
+#endif
 
 void omap4_steelhead_display_init(void)
 {
-	int r;
-
-	r = omap4_steelhead_dvi_init();
-	if (r)
-		pr_err("error initializing steelhead DVI\n");
-
 #if 0
 	omap4_steelhead_hdmi_mux_init();
-#endif
 	omap_display_init(&omap4_steelhead_dss_data);
+#endif
 }
 
 #define PUBLIC_SAR_RAM_1_FREE_OFFSET 0xA0C
@@ -1005,6 +894,7 @@ static void __init steelhead_init(void)
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
 
+#if 0
 	if (wl12xx_set_platform_data(&steelhead_wlan_data))
 		pr_err("error setting wl12xx data\n");
 
@@ -1012,6 +902,7 @@ static void __init steelhead_init(void)
 	steelhead_platform_init_tas5713_audio();
 #if defined(CONFIG_SND_OMAP_SOC_MCASP)
 	steelhead_platform_init_mcasp_audio();
+#endif
 #endif
 
 	steelhead_i2c_init();
