@@ -84,32 +84,6 @@ static struct platform_device wl1271_device = {
 	},
 };
 
-static struct gpio_led gpio_leds[] = {
-	{
-		.name			= "steelhead::status1",
-		.default_trigger	= "heartbeat",
-		.gpio			= 7,
-	},
-	{
-		.name			= "steelhead::status2",
-		.default_trigger	= "mmc0",
-		.gpio			= 8,
-	},
-};
-
-static struct gpio_led_platform_data gpio_led_info = {
-	.leds		= gpio_leds,
-	.num_leds	= ARRAY_SIZE(gpio_leds),
-};
-
-static struct platform_device leds_gpio = {
-	.name	= "leds-gpio",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &gpio_led_info,
-	},
-};
-
 static struct aah_localtime_platform_data localtime_pdata = {
 	.get_raw_counter = steelhead_get_raw_counter,
 	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
@@ -130,7 +104,6 @@ static struct platform_device aah_localtime_device = {
 
 static struct platform_device *steelhead_devices[] __initdata = {
 #if 0
-	&leds_gpio,
 	&wl1271_device,
 #endif
 	&aah_localtime_device,
