@@ -64,7 +64,9 @@
 #define GPIO_WIFI_PMENA		43
 #define GPIO_WIFI_IRQ		53
 
-#define AVR_INT_GPIO_ID 40
+#define AVR_INT_GPIO_ID 49
+
+#define TAS5713_INTERFACE_EN_GPIO_ID 40
 #define TAS5713_RESET_GPIO_ID 42
 #define TAS5713_PDN_GPIO_ID 44
 
@@ -446,6 +448,7 @@ static struct tas5713_platform_data tas5713_pdata = {
 	.mcbsp_id = OMAP_MCBSP2,
 
 	/* Reset and Power Down GPIO configuration */
+	.interface_en_gpio = TAS5713_INTERFACE_EN_GPIO_ID,
 	.reset_gpio = TAS5713_RESET_GPIO_ID,
 	.pdn_gpio = TAS5713_PDN_GPIO_ID,
 
@@ -470,12 +473,11 @@ static int __init steelhead_i2c_init(void)
 	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
 			      ARRAY_SIZE(steelhead_i2c_bus2));
 	omap_register_i2c_bus(3, 400, NULL, 0);
-	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
-			      ARRAY_SIZE(steelhead_i2c_bus4));
 #else
 	omap_register_i2c_bus(2, 400, NULL, 0);
 	omap_register_i2c_bus(3, 400, NULL, 0);
-	omap_register_i2c_bus(4, 400, NULL, 0);
+	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
+			      ARRAY_SIZE(steelhead_i2c_bus4));
 #endif
 
 	return 0;
@@ -592,6 +594,12 @@ static void steelhead_platform_init_tas5713_audio(void)
 	 * reset)
 	 */
 	static struct steelhead_gpio tas5713_gpios[] = {
+		{
+			.gpio_id = TAS5713_INTERFACE_EN_GPIO_ID,
+			.gpio_name = "tas5713_interface_en",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
 		{
 			.gpio_id = TAS5713_RESET_GPIO_ID,
 			.gpio_name = "tas5713_reset",
@@ -925,7 +933,9 @@ static void __init steelhead_init(void)
 		pr_err("error setting wl12xx data\n");
 
 	steelhead_platform_init_avr();
+#endif
 	steelhead_platform_init_tas5713_audio();
+#if 0
 #if defined(CONFIG_SND_OMAP_SOC_MCASP)
 	steelhead_platform_init_mcasp_audio();
 #endif

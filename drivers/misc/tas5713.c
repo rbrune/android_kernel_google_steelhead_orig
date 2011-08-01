@@ -1026,22 +1026,24 @@ static int power_up_tas5713(struct tas5713_driver_state *state)
 	mcbsp_id = pdata->mcbsp_id;
 
 	/* Start by making absolutely certain that the reset and power down
-	 * signals are asserted.
+	 * signals are asserted, and that the external level translator is
+	 * enabled.
 	 */
 	gpio_set_value(pdata->pdn_gpio, 0);
 	gpio_set_value(pdata->reset_gpio, 0);
+	gpio_set_value(pdata->interface_en_gpio, 1);
 
 	/* Turn on MCLK */
 	rc = clk_enable(pdata->mclk_out);
 	if (rc) {
-		printk(ERR_LOG_PREFIX "Failed to enable MCLK (rc = %d)", rc);
+		printk(ERR_LOG_PREFIX "Failed to enable MCLK (rc = %d)\n", rc);
 		goto err_setup;
 	}
 
 	/* Now turn on the McBSP in order to generate the LRCLK signal. */
 	rc = setup_mcbsp(state);
 	if (rc) {
-		printk(ERR_LOG_PREFIX "Failed to enable McBSP (rc = %d)", rc);
+		printk(ERR_LOG_PREFIX "Failed to enable McBSP (rc = %d)\n", rc);
 		goto err_setup;
 	}
 
@@ -1066,7 +1068,7 @@ static int power_up_tas5713(struct tas5713_driver_state *state)
 	rc = i2c_smbus_write_byte_data(state->i2c_client, 0x1B, 0x00);
 	if (rc < 0) {
 		printk(ERR_LOG_PREFIX "I2C failure (%d) while trying to trim"
-				" oscillator", rc);
+				" oscillator\n", rc);
 		goto err_setup;
 	}
 	usleep_range(50000, 50000);
@@ -1079,7 +1081,7 @@ static int power_up_tas5713(struct tas5713_driver_state *state)
 
 		if (rc < 0) {
 			printk(ERR_LOG_PREFIX "I2C failure (%d) while trying to"
-					" write register 0x%02x", rc,
+					" write register 0x%02x\n", rc,
 					tas5713_init_sequence[i].data[0]);
 			goto err_setup;
 		} else if (0x07 == tas5713_init_sequence[i].data[0]) {
@@ -1097,7 +1099,7 @@ static int power_up_tas5713(struct tas5713_driver_state *state)
 	rc = i2c_smbus_write_byte_data(state->i2c_client, 0x05, 0x00);
 	if (rc < 0) {
 		printk(ERR_LOG_PREFIX "I2C failure (%d) while trying to exit"
-				" shutdown", rc);
+				" shutdown\n", rc);
 		goto err_setup;
 	}
 	usleep_range(shutdown_wait_time_usec, shutdown_wait_time_usec);
@@ -1125,6 +1127,9 @@ err_setup:
 		free_irq(omap_mcbsp_get_tx_irq(mcbsp_id), state);
 	}
 
+	/* Shut of the external level translator */
+	gpio_set_value(pdata->interface_en_gpio, 0);
+
 	return rc;
 }
 
@@ -1139,7 +1144,7 @@ static void power_down_tas5713(struct tas5713_driver_state *state)
 	rc = i2c_smbus_write_byte_data(state->i2c_client, 0x05, 0x40);
 	if (rc < 0) {
 		printk(ERR_LOG_PREFIX "I2C failure (%d) while trying to exit"
-				" shutdown", rc);
+				" shutdown\n", rc);
 		goto err_clean_shutdown_failed;
 	}
 	usleep_range(shutdown_wait_time_usec, shutdown_wait_time_usec);
@@ -1149,11 +1154,7 @@ static void power_down_tas5713(struct tas5713_driver_state *state)
 	 * cleanly entered the shutdown state via i2c commands.
 	 */
 	gpio_set_value(state->pdata->pdn_gpio, 0);
-	gpio_set_value(state->pdata->reset_gpio, 0);
-	omap_mcbsp_stop(mcbsp_id, 1, 0);
-	clk_disable(state->pdata->mclk_out);
-
-	return;
+	goto common_exit;
 
 err_clean_shutdown_failed:
 	/* We failed to cleanly enter the shutdown state.  Follow the sudden
@@ -1162,11 +1163,16 @@ err_clean_shutdown_failed:
 	 */
 	gpio_set_value(state->pdata->pdn_gpio, 0);
 	usleep_range(2000, 2500);
+
+common_exit:
 	gpio_set_value(state->pdata->reset_gpio, 0);
 
 	/* Make sure the LR and MCLK clocks are now shut off. */
 	omap_mcbsp_stop(mcbsp_id, 1, 0);
 	clk_disable(state->pdata->mclk_out);
+
+	/* Shut of the external level translator */
+	gpio_set_value(state->pdata->interface_en_gpio, 0);
 }
 
 static int tas5713_probe(struct i2c_client *client,

@@ -23,7 +23,9 @@ struct tas5713_platform_data {
 	/* the ID of the McBSP being used as an I2S port */
 	omap_mcbsp_id mcbsp_id;
 
-	/* GPIO IDs used for controlling the reset and power down signals */
+	/* GPIO IDs used for controlling the interface enable, reset and power
+	 * down signals */
+	unsigned interface_en_gpio;
 	unsigned reset_gpio;
 	unsigned pdn_gpio;
 
