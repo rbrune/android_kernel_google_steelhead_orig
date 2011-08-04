@@ -585,6 +585,8 @@ static void steelhead_platform_init_tas5713_audio(void)
 	struct clk *m3x2_clk = NULL;
 	struct clk *mclk_out = NULL;
 	struct clk *mclk_src = NULL;
+	struct clk *mcbsp_internal_clk =  NULL;
+	struct clk *abe_24m_clk = NULL;
 	int res;
 	unsigned long tgt_rate = (tas5713_mclk_rate * 5);
 
@@ -617,6 +619,29 @@ static void steelhead_platform_init_tas5713_audio(void)
 				"tas5713"))
 		return;
 
+	/* Make sure that McBSP2's internal clock selection is set to the output
+	 * of the ABE DPLL and not the PER DPLL.
+	 */
+	mcbsp_internal_clk = clk_get(NULL, "mcbsp2_sync_mux_ck");
+	if (IS_ERR_OR_NULL(mcbsp_internal_clk)) {
+		pr_err("tas5713: failed to fetch mcbsp2_sync_mux_ck\n");
+		goto err;
+	}
+	
+	abe_24m_clk = clk_get(NULL, "abe_24m_fclk");
+	if (IS_ERR_OR_NULL(abe_24m_clk)) {
+		pr_err("tas5713: failed to fetch abe_24m_clk\n");
+		goto err;
+	}
+
+	res = clk_set_parent(mcbsp_internal_clk, abe_24m_clk);
+	if (res < 0) {
+		pr_err("tas5713: failed to set reference clock"
+				" for McBSP2 internal clk (res = %d)  "
+				"driver will not load.\n", res);
+		goto err;
+	}
+
 	/* We use fref_clk1_out to drive MCLK on steelhead.  It should be
 	 * configured to run from the M3 X2 output of DPLL_PER.  With a system
 	 * clock of 38.4MHz, and default multiplier of 40 as the reference for
@@ -627,13 +652,13 @@ static void steelhead_platform_init_tas5713_audio(void)
 	m3x2_clk = clk_get(NULL, "dpll_per_m3x2_ck");
 	if (IS_ERR_OR_NULL(m3x2_clk)) {
 		pr_err("tas5713: failed to dpll_per_m3x2_ck\n");
-		goto err_clk_get_dpll;
+		goto err;
 	}
 
 	mclk_out = clk_get(NULL, "auxclk1_ck");
 	if (IS_ERR_OR_NULL(mclk_out)) {
 		pr_err("tas5713: failed to auxclk1_ck\n");
-		goto err_clk_get_aux;
+		goto err;
 	}
 
 	res = clk_set_rate(m3x2_clk, tgt_rate);
@@ -642,13 +667,13 @@ static void steelhead_platform_init_tas5713_audio(void)
 			       "rate to %lu (res = %d).  "
 			       "driver will not load.\n",
 			       tgt_rate, res);
-		goto err_set_clk;
+		goto err;
 	}
 
 	mclk_src = clk_get(NULL, "auxclk1_src_ck");
 	if (IS_ERR_OR_NULL(mclk_out)) {
 		pr_err("tas5713: failed to auxclk1_ck\n");
-		goto err_clk_get_aux_src;
+		goto err;
 	}
 
 	res = clk_set_parent(mclk_src, m3x2_clk);
@@ -656,7 +681,7 @@ static void steelhead_platform_init_tas5713_audio(void)
 		pr_err("tas5713: failed to set reference clock"
 				" for fref_clk1_out (res = %d)  "
 				"driver will not load.\n", res);
-		goto err_set_parent;
+		goto err;
 	}
 
 	res = clk_set_rate(mclk_out, tas5713_mclk_rate);
@@ -665,25 +690,24 @@ static void steelhead_platform_init_tas5713_audio(void)
 			       "rate to %lu (res = %d).  "
 			       "driver will not load.\n",
 			       tas5713_mclk_rate, res);
-		goto err_set_mclk_rate;
+		goto err;
 	}
 
 	/* Stash the clock and enable the pin. */
 	tas5713_pdata.mclk_out = mclk_out;
-	clk_put(mclk_src);
-	clk_put(m3x2_clk);
 	omap_mux_init_signal("fref_clk1_out", OMAP_PIN_OUTPUT);
-	return;
 
-err_set_mclk_rate:
-err_set_parent:
-	clk_put(mclk_src);
-err_clk_get_aux_src:
-err_set_clk:
-	clk_put(mclk_out);
-err_clk_get_aux:
-	clk_put(m3x2_clk);
-err_clk_get_dpll:
+err:
+	if (!IS_ERR_OR_NULL(m3x2_clk))
+		clk_put(m3x2_clk);
+	if (!IS_ERR_OR_NULL(mclk_out))
+		clk_put(mclk_out);
+	if (!IS_ERR_OR_NULL(mclk_src))
+		clk_put(mclk_src);
+	if (!IS_ERR_OR_NULL(mcbsp_internal_clk))
+		clk_put(mcbsp_internal_clk);
+	if (!IS_ERR_OR_NULL(abe_24m_clk))
+		clk_put(abe_24m_clk);
 	/* TODO: release gpios, but we're fatal anyway. */
 	return;
 }
