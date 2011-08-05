@@ -270,7 +270,9 @@ obj-$(CONFIG_MACH_TUNA)			+= board-tuna-usbhost.o
 obj-$(CONFIG_MACH_STEELHEAD)		+= board-steelhead.o \
 					   hsmmc.o \
 					   omap_phy_internal.o \
-					   board-steelhead-platform-counter.o
+					   board-steelhead-platform-counter.o \
+					   board-steelhead-bluetooth.o \
+					   board-steelhead-wifi.o
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \
 					   omap_phy_internal.o \

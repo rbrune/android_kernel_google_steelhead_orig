@@ -26,7 +26,6 @@
 #include <linux/i2c/twl.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
-#include <linux/wl12xx.h>
 #include <linux/reboot.h>
 
 #include <mach/hardware.h>
@@ -61,30 +60,12 @@
 
 #define GPIO_HUB_POWER		1
 #define GPIO_HUB_NRESET		62
-#define GPIO_WIFI_PMENA		43
-#define GPIO_WIFI_IRQ		53
-
-#define AVR_INT_GPIO_ID 49
-
-#define TAS5713_INTERFACE_EN_GPIO_ID 40
-#define TAS5713_RESET_GPIO_ID 42
-#define TAS5713_PDN_GPIO_ID 44
 
 #if 0 /* TBD */
 #define GPIO_NFC_IRQ 17
 #define GPIO_NFC_FIRMWARE 172
 #define GPIO_NFC_EN 173
 #endif
-
-/* wl127x BT, FM, GPS connectivity chip */
-static int wl1271_gpios[] = {46, -1, -1};
-static struct platform_device wl1271_device = {
-	.name	= "kim",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &wl1271_gpios,
-	},
-};
 
 static struct aah_localtime_platform_data localtime_pdata = {
 	.get_raw_counter = steelhead_get_raw_counter,
@@ -105,9 +86,6 @@ static struct platform_device aah_localtime_device = {
 };
 
 static struct platform_device *steelhead_devices[] __initdata = {
-#if 0
-	&wl1271_device,
-#endif
 	&aah_localtime_device,
 };
 
@@ -189,6 +167,7 @@ static struct twl4030_usb_data omap4_usbphy_data = {
 	.phy_suspend	= omap4430_phy_suspend,
 };
 
+extern struct mmc_platform_data steelhead_wifi_data;
 static struct omap2_hsmmc_info mmc[] = {
 	{
 		.mmc		= 1,
@@ -198,17 +177,24 @@ static struct omap2_hsmmc_info mmc[] = {
 		.gpio_wp	= -EINVAL,
 		.gpio_cd	= -EINVAL,
 	},
-#if 0
 	{
-		.name		= "wl1271",
+		.name		= "omap_wlan",
 		.mmc		= 5,
-		.caps		= MMC_CAP_4_BIT_DATA | MMC_CAP_POWER_OFF_CARD,
+		.caps		= MMC_CAP_4_BIT_DATA,
 		.gpio_wp	= -EINVAL,
 		.gpio_cd	= -EINVAL,
-		.ocr_mask	= MMC_VDD_165_195,
-		.nonremovable	= true,
+		.ocr_mask	= MMC_VDD_27_28 |
+				  MMC_VDD_28_29 |
+				  MMC_VDD_29_30 |
+				  MMC_VDD_30_31 |
+				  MMC_VDD_31_32 |
+				  MMC_VDD_32_33 |
+				  MMC_VDD_33_34 |
+				  MMC_VDD_34_35 |
+				  MMC_VDD_35_36,
+		.nonremovable	= false,
+		.mmc_data	= &steelhead_wifi_data,
 	},
-#endif
 	{}	/* Terminator */
 };
 
@@ -219,92 +205,9 @@ static struct regulator_consumer_supply steelhead_vmmc_supply[] = {
 	},
 };
 
-static struct regulator_consumer_supply steelhead_vmmc5_supply = {
-	.supply = "vmmc",
-	.dev_name = "omap_hsmmc.4",
-};
-
-static struct regulator_init_data steelhead_vmmc5 = {
-	.constraints = {
-		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
-	},
-	.num_consumer_supplies = 1,
-	.consumer_supplies = &steelhead_vmmc5_supply,
-};
-
-static struct fixed_voltage_config steelhead_vwlan = {
-	.supply_name = "vwl1271",
-	.microvolts = 1800000, /* 1.8V */
-	.gpio = GPIO_WIFI_PMENA,
-	.startup_delay = 70000, /* 70msec */
-	.enable_high = 1,
-	.enabled_at_boot = 0,
-	.init_data = &steelhead_vmmc5,
-};
-
-static struct platform_device omap_vwlan_device = {
-	.name		= "reg-fixed-voltage",
-	.id		= 1,
-	.dev = {
-		.platform_data = &steelhead_vwlan,
-	},
-};
-
-struct wl12xx_platform_data steelhead_wlan_data  __initdata = {
-	.irq = OMAP_GPIO_IRQ(GPIO_WIFI_IRQ),
-	/* Steelhead ref clock is 38.4 MHz */
-	.board_ref_clock = 2,
-};
-
-#if 0
-static int omap4_twl6030_hsmmc_late_init(struct device *dev)
-{
-	int ret = 0;
-	struct platform_device *pdev = container_of(dev,
-				struct platform_device, dev);
-	struct omap_mmc_platform_data *pdata = dev->platform_data;
-
-	if (!pdata) {
-		dev_err(dev, "%s: NULL platform data\n", __func__);
-		return -EINVAL;
-	}
-	/* Setting MMC1 Card detect Irq */
-	if (pdev->id == 0) {
-		ret = twl6030_mmc_card_detect_config();
-		if (ret)
-			dev_err(dev, "%s: Error card detect config(%d)\n",
-				__func__, ret);
-		else
-			pdata->slots[0].card_detect = twl6030_mmc_card_detect;
-	}
-	return ret;
-}
-
-static __init void omap4_twl6030_hsmmc_set_late_init(struct device *dev)
-{
-	struct omap_mmc_platform_data *pdata;
-
-	/* dev can be null if CONFIG_MMC_OMAP_HS is not set */
-	if (!dev) {
-		pr_err("Failed omap4_twl6030_hsmmc_set_late_init\n");
-		return;
-	}
-	pdata = dev->platform_data;
-
-	pdata->init =	omap4_twl6030_hsmmc_late_init;
-}
-#endif
-
 static int __init omap4_twl6030_hsmmc_init(struct omap2_hsmmc_info *controllers)
 {
-	struct omap2_hsmmc_info *c;
-
 	omap2_hsmmc_init(controllers);
-#if 0
-	for (c = controllers; c->mmc; c++)
-		omap4_twl6030_hsmmc_set_late_init(c->dev);
-#endif
-
 	return 0;
 }
 
@@ -408,9 +311,11 @@ static struct regulator_init_data steelhead_vusb = {
 	},
 };
 
+/* clk32kg is a twl6030 32khz clock modeled as a regulator, used by wifi */
 static struct regulator_init_data steelhead_clk32kg = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.always_on              = true,
 	},
 };
 
@@ -431,86 +336,7 @@ static struct twl4030_platform_data steelhead_twldata = {
 	.usb		= &omap4_usbphy_data,
 };
 
-static struct steelhead_avr_platform_data steelhead_avr_pdata = {
-	/* Reset and Power Down GPIO configuration */
-	.interrupt_gpio = AVR_INT_GPIO_ID,
-};
-
-static struct i2c_board_info __initdata steelhead_i2c_bus2[] = {
-	{
-		I2C_BOARD_INFO("steelhead-avr", (0x20)),
-		.platform_data = &steelhead_avr_pdata,
-	},
-};
-
-static struct tas5713_platform_data tas5713_pdata = {
-	/* configure McBSP2 as an I2S transmitter */
-	.mcbsp_id = OMAP_MCBSP2,
-
-	/* Reset and Power Down GPIO configuration */
-	.interface_en_gpio = TAS5713_INTERFACE_EN_GPIO_ID,
-	.reset_gpio = TAS5713_RESET_GPIO_ID,
-	.pdn_gpio = TAS5713_PDN_GPIO_ID,
-
-	/* MCLK */
-	.mclk_out = NULL,
-
-	.get_raw_counter = steelhead_get_raw_counter,
-	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
-};
-
-static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
-	{
-		I2C_BOARD_INFO("tas5713", (0x36 >> 1)),
-		.platform_data = &tas5713_pdata,
-	},
-};
-
-static int __init steelhead_i2c_init(void)
-{
-	omap4_pmic_init("twl6030", &steelhead_twldata);
-#if 0
-	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
-			      ARRAY_SIZE(steelhead_i2c_bus2));
-	omap_register_i2c_bus(3, 400, NULL, 0);
-#else
-	omap_register_i2c_bus(2, 400, NULL, 0);
-	omap_register_i2c_bus(3, 400, NULL, 0);
-	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
-			      ARRAY_SIZE(steelhead_i2c_bus4));
-#endif
-
-	return 0;
-}
-
 #ifdef CONFIG_OMAP_MUX
-static struct omap_board_mux board_mux[] __initdata = {
-	/* WLAN IRQ - GPIO 53 */
-	OMAP4_MUX(GPMC_NCS3, OMAP_MUX_MODE3 | OMAP_PIN_INPUT),
-	/* WLAN POWER ENABLE - GPIO 43 */
-	OMAP4_MUX(GPMC_A19, OMAP_MUX_MODE3 | OMAP_PIN_OUTPUT),
-	/* WLAN SDIO: MMC5 CMD */
-	OMAP4_MUX(SDMMC5_CMD, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	/* WLAN SDIO: MMC5 CLK */
-	OMAP4_MUX(SDMMC5_CLK, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	/* WLAN SDIO: MMC5 DAT[0-3] */
-	OMAP4_MUX(SDMMC5_DAT0, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	OMAP4_MUX(SDMMC5_DAT1, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	OMAP4_MUX(SDMMC5_DAT2, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-	OMAP4_MUX(SDMMC5_DAT3, OMAP_MUX_MODE0 | OMAP_PIN_INPUT_PULLUP),
-#if 0
-#ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	/* dispc2_data3 - set this pin to be DMTIMER8_PWM_EVT
-	 * instead of DISPC2_DATA3
-	 */
-	OMAP4_MUX(DPM_EMU16, OMAP_PIN_INPUT | OMAP_MUX_MODE1),
-#else
-	OMAP4_MUX(DPM_EMU16, OMAP_PIN_OUTPUT | OMAP_MUX_MODE5),
-#endif
-#endif
-	{ .reg_offset = OMAP_MUX_TERMINATOR },
-};
-
 static struct omap_device_pad serial3_pads[] __initdata = {
 	OMAP_MUX_STATIC("uart3_cts_rctx.uart3_cts_rctx",
 			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
@@ -531,40 +357,35 @@ static inline void __init board_serial_init(void)
 	omap_serial_init_port_pads(3, NULL, 0, NULL);
 }
 #else
-#define board_mux	NULL
-
 static inline void __init board_serial_init(void)
 {
 	omap_serial_init();
 }
 #endif
 
-struct steelhead_gpio {
-	unsigned gpio_id;
-	const char *gpio_name;
-	int pin_mode;
-	int init_state;
-};
-
-static int steelhead_reserve_gpios(struct steelhead_gpio *data, int count,
-				   const char *log_tag)
+int steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
+		int count,
+		const char *log_tag)
 {
 	int i;
 	for (i = 0; i < count; ++i) {
 		int status;
-		struct steelhead_gpio *g = (data + i);
-		char pin_name[32];
+		struct steelhead_gpio_reservation *g = (data + i);
 
-		snprintf(pin_name, sizeof(pin_name), "gpio_%d", g->gpio_id);
-		omap_mux_init_signal(pin_name, g->pin_mode);
+		status = omap_mux_init_signal(g->mux_name, g->pin_mode);
+		if (status)
+			pr_err("%s: failed to set gpio pin mux for gpio \"%s\""
+					" to mode %d.  (status %d)\n",
+					log_tag, g->mux_name,
+					g->pin_mode, status);
+			return status;
 
-		/* Setup IRQ handler for the HDP input */
 		status = gpio_request_one(
 				g->gpio_id, g->init_state, g->gpio_name);
 
 		if (status)
-			pr_err("%s: failed to reserve gpio \"%s\" driver will"
-					" not load. (status %d)\n",
+			pr_err("%s: failed to reserve gpio \"%s\""
+				       "(status %d)\n",
 					log_tag, g->gpio_name, status);
 			return status;
 	}
@@ -577,6 +398,26 @@ static int steelhead_reserve_gpios(struct steelhead_gpio *data, int count,
  *              TAS5713 Class-D Audio Amplifier Initialization                *
  *                                                                            *
  ******************************************************************************/
+
+#define TAS5713_INTERFACE_EN_GPIO_ID 40
+#define TAS5713_RESET_GPIO_ID 42
+#define TAS5713_PDN_GPIO_ID 44
+
+static struct tas5713_platform_data tas5713_pdata = {
+	/* configure McBSP2 as an I2S transmitter */
+	.mcbsp_id = OMAP_MCBSP2,
+
+	/* Reset and Power Down GPIO configuration */
+	.interface_en_gpio = TAS5713_INTERFACE_EN_GPIO_ID,
+	.reset_gpio = TAS5713_RESET_GPIO_ID,
+	.pdn_gpio = TAS5713_PDN_GPIO_ID,
+
+	/* MCLK */
+	.mclk_out = NULL,
+
+	.get_raw_counter = steelhead_get_raw_counter,
+	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
+};
 
 static const unsigned long tas5713_mclk_rate = 12288000;
 
@@ -595,22 +436,25 @@ static void steelhead_platform_init_tas5713_audio(void)
 	 * framwork, and set them to be driven low initially (hold the chip in
 	 * reset)
 	 */
-	static struct steelhead_gpio tas5713_gpios[] = {
+	static struct steelhead_gpio_reservation tas5713_gpios[] = {
 		{
 			.gpio_id = TAS5713_INTERFACE_EN_GPIO_ID,
 			.gpio_name = "tas5713_interface_en",
+			.mux_name = "gpmc_a16.gpio_40",
 			.pin_mode = OMAP_PIN_OUTPUT,
 			.init_state = GPIOF_OUT_INIT_LOW,
 		},
 		{
 			.gpio_id = TAS5713_RESET_GPIO_ID,
 			.gpio_name = "tas5713_reset",
+			.mux_name = "gpmc_a18.gpio_42",
 			.pin_mode = OMAP_PIN_OUTPUT,
 			.init_state = GPIOF_OUT_INIT_LOW,
 		},
 		{
 			.gpio_id = TAS5713_PDN_GPIO_ID,
 			.gpio_name = "tas5713_pdn",
+			.mux_name = "gpmc_a20.gpio_44",
 			.pin_mode = OMAP_PIN_OUTPUT,
 			.init_state = GPIOF_OUT_INIT_LOW,
 		},
@@ -757,16 +601,24 @@ static void steelhead_platform_init_mcasp_audio(void)
  *                                                                            *
  ******************************************************************************/
 
+#define AVR_INT_GPIO_ID 49
+
+static struct steelhead_avr_platform_data steelhead_avr_pdata = {
+	/* Reset and Power Down GPIO configuration */
+	.interrupt_gpio = AVR_INT_GPIO_ID,
+};
+
 static void steelhead_platform_init_avr(void)
 {
 	/* Grab a hold of the GPIO used to control the AVR interrupt
 	 * request line.  Configure it to be an input and reserve it in
 	 * the GPIO framwork.
 	 */
-	static struct steelhead_gpio avr_gpios[] = {
+	static struct steelhead_gpio_reservation avr_gpios[] = {
 		{
 			.gpio_id = AVR_INT_GPIO_ID,
 			.gpio_name = "avr_int",
+			.mux_name = "gpmc_a25.gpio_49",
 			.pin_mode = OMAP_PIN_INPUT_PULLUP,
 			.init_state = GPIOF_IN,
 		},
@@ -777,6 +629,44 @@ static void steelhead_platform_init_avr(void)
 		return;
 
 }
+
+/******************************************************************************
+ *                                                                            *
+ *                            I2C Bus setup                                   *
+ *                                                                            *
+ ******************************************************************************/
+
+static struct i2c_board_info __initdata steelhead_i2c_bus2[] = {
+	{
+		I2C_BOARD_INFO("steelhead-avr", (0x20)),
+		.platform_data = &steelhead_avr_pdata,
+	},
+};
+
+static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
+	{
+		I2C_BOARD_INFO("tas5713", (0x36 >> 1)),
+		.platform_data = &tas5713_pdata,
+	},
+};
+
+static int __init steelhead_i2c_init(void)
+{
+	omap4_pmic_init("twl6030", &steelhead_twldata);
+#if 0
+	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
+			      ARRAY_SIZE(steelhead_i2c_bus2));
+	omap_register_i2c_bus(3, 400, NULL, 0);
+#else
+	omap_register_i2c_bus(2, 400, NULL, 0);
+	omap_register_i2c_bus(3, 400, NULL, 0);
+	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
+			      ARRAY_SIZE(steelhead_i2c_bus4));
+#endif
+
+	return 0;
+}
+
 
 /* Display DVI */
 #define STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO	0
@@ -948,14 +838,12 @@ static void __init steelhead_init(void)
 
 	if (omap_rev() == OMAP4430_REV_ES1_0)
 		package = OMAP_PACKAGE_CBL;
-	omap4_mux_init(board_mux, NULL, package);
+
+	omap4_mux_init(NULL, NULL, package);
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
 
 #if 0
-	if (wl12xx_set_platform_data(&steelhead_wlan_data))
-		pr_err("error setting wl12xx data\n");
-
 	steelhead_platform_init_avr();
 #endif
 	steelhead_platform_init_tas5713_audio();
@@ -967,12 +855,13 @@ static void __init steelhead_init(void)
 
 	steelhead_i2c_init();
 	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
-	platform_device_register(&omap_vwlan_device);
 	board_serial_init();
 	omap4_twl6030_hsmmc_init(mmc);
 	omap4_ehci_init();
 	usb_musb_init(&musb_board_data);
 	omap4_steelhead_display_init();
+	steelhead_init_wlan();
+	steelhead_init_bluetooth();
 }
 
 static int __init steelhead_init_late(void)
