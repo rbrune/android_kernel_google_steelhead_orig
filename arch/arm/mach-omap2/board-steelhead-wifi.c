@@ -270,15 +270,35 @@ static struct platform_device steelhead_wifi_device = {
         },
 };
 
+static void steelhead_init_wlan_hsmmc_mux(void) {
+	/* WLAN SDIO: MMC5 CMD */
+	omap_mux_init_signal("sdmmc5_cmd", OMAP_PIN_INPUT_PULLUP);
+	/* WLAN SDIO: MMC5 CLK */
+	omap_mux_init_signal("sdmmc5_clk", OMAP_PIN_INPUT_PULLUP);
+	/* WLAN SDIO: MMC5 DAT[0-3] */
+	omap_mux_init_signal("sdmmc5_dat0", OMAP_PIN_INPUT_PULLUP);
+	omap_mux_init_signal("sdmmc5_dat1", OMAP_PIN_INPUT_PULLUP);
+	omap_mux_init_signal("sdmmc5_dat2", OMAP_PIN_INPUT_PULLUP);
+	omap_mux_init_signal("sdmmc5_dat3", OMAP_PIN_INPUT_PULLUP);
+}
+ 
 int __init steelhead_init_wlan(void)
 {
 	int status;
+
+	/* Set up the pin mux for HSMMC 5 */
+	steelhead_init_wlan_hsmmc_mux();
+
+	/* Set up all of the GPIOs used to control the BCM4330 */
 	status = steelhead_reserve_gpios(wlan_gpios,
 			ARRAY_SIZE(wlan_gpios),
 			"steelhead_wlan");
 	if (status)
 		return status;
 
+	/* Preallocate the SKB memory to be used by the WiFi driver */
 	steelhead_init_wifi_mem();
+
+	/* Register the driver and we are done */
 	return platform_device_register(&steelhead_wifi_device);
 }

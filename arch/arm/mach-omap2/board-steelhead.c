@@ -373,21 +373,23 @@ int steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 		struct steelhead_gpio_reservation *g = (data + i);
 
 		status = omap_mux_init_signal(g->mux_name, g->pin_mode);
-		if (status)
+		if (status) {
 			pr_err("%s: failed to set gpio pin mux for gpio \"%s\""
 					" to mode %d.  (status %d)\n",
 					log_tag, g->mux_name,
 					g->pin_mode, status);
 			return status;
+		}
 
 		status = gpio_request_one(
 				g->gpio_id, g->init_state, g->gpio_name);
 
-		if (status)
+		if (status) {
 			pr_err("%s: failed to reserve gpio \"%s\""
 				       "(status %d)\n",
 					log_tag, g->gpio_name, status);
 			return status;
+		}
 	}
 
 	return 0;
