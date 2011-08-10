@@ -150,7 +150,7 @@ static int dsp_add_new_paths(struct snd_soc_pcm_runtime *fe,
 {
 	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
 	struct snd_soc_card *card = fe->card;
-	struct snd_soc_dapm_widget_list *list;
+	struct snd_soc_dapm_widget_list *list = NULL;
 	enum snd_soc_dapm_type fe_type, be_type;
 	int i, count = 0, err, paths;
 
@@ -185,6 +185,10 @@ static int dsp_add_new_paths(struct snd_soc_pcm_runtime *fe,
 				continue;
 			}
 
+			/* don't connect if FE is not running */
+			if (!fe->dsp[stream].runtime)
+				continue;
+
 			/* newly connected FE and BE */
 			err = be_connect(fe, be, stream);
 			if (err < 0) {
@@ -199,7 +203,9 @@ static int dsp_add_new_paths(struct snd_soc_pcm_runtime *fe,
 	}
 
 out:
-	kfree(list);
+	/* list could be not initialized if root widget not found */
+	if (list != NULL)
+		kfree(list);
 	return count;
 }
 
@@ -213,7 +219,7 @@ static int dsp_prune_old_paths(struct snd_soc_pcm_runtime *fe, int stream,
 	struct snd_soc_dai *cpu_dai = fe->cpu_dai;
 	struct snd_soc_card *card = fe->card;
 	struct snd_soc_dsp_params *dsp_params;
-	struct snd_soc_dapm_widget_list *list;
+	struct snd_soc_dapm_widget_list *list = NULL;
 	int count = 0, paths;
 	enum snd_soc_dapm_type fe_type, be_type;
 	struct snd_soc_dapm_widget *widget;
@@ -274,7 +280,9 @@ static int dsp_prune_old_paths(struct snd_soc_pcm_runtime *fe, int stream,
 
 	/* the number of old paths pruned */
 out:
-	kfree(list);
+	/* list could be not initialized if root widget not found */
+	if (list != NULL)
+		kfree(list);
 	return count;
 }
 
@@ -1318,6 +1326,27 @@ int soc_dsp_be_platform_suspend(struct snd_soc_pcm_runtime *fe)
 	return 0;
 }
 
+int soc_dsp_fe_suspend(struct snd_soc_pcm_runtime *fe)
+{
+	struct snd_soc_dai *dai = fe->cpu_dai;
+	struct snd_soc_dai_driver *dai_drv = dai->driver;
+	struct snd_soc_platform *platform = fe->platform;
+	struct snd_soc_platform_driver *plat_drv = platform->driver;
+
+	if (dai_drv->suspend && !dai_drv->ac97_control)
+		dai_drv->suspend(dai);
+
+	if (plat_drv->suspend && !platform->suspended) {
+		plat_drv->suspend(dai);
+		platform->suspended = 1;
+	}
+
+	soc_dsp_be_cpu_dai_suspend(fe);
+	soc_dsp_be_platform_suspend(fe);
+
+	return 0;
+}
+
 int soc_dsp_be_cpu_dai_resume(struct snd_soc_pcm_runtime *fe)
 {
 	struct snd_soc_dsp_params *dsp_params;
@@ -1453,6 +1482,27 @@ int soc_dsp_be_platform_resume(struct snd_soc_pcm_runtime *fe)
 	return 0;
 }
 
+int soc_dsp_fe_resume(struct snd_soc_pcm_runtime *fe)
+{
+	struct snd_soc_dai *dai = fe->cpu_dai;
+	struct snd_soc_dai_driver *dai_drv = dai->driver;
+	struct snd_soc_platform *platform = fe->platform;
+	struct snd_soc_platform_driver *plat_drv = platform->driver;
+
+	soc_dsp_be_cpu_dai_resume(fe);
+	soc_dsp_be_platform_resume(fe);
+
+	if (dai_drv->resume && !dai_drv->ac97_control)
+		dai_drv->resume(dai);
+
+	if (plat_drv->resume && platform->suspended) {
+		plat_drv->resume(dai);
+		platform->suspended = 0;
+	}
+
+	return 0;
+}
+
 /* called when opening FE stream  */
 int soc_dsp_fe_dai_open(struct snd_pcm_substream *fe_substream)
 {
@@ -1480,6 +1530,8 @@ int soc_dsp_fe_dai_close(struct snd_pcm_substream *fe_substream)
 	ret = soc_dsp_fe_dai_shutdown(fe_substream);
 
 	be_disconnect(fe, fe_substream->stream);
+
+	fe->dsp[fe_substream->stream].runtime = NULL;
 
 	return ret;
 }

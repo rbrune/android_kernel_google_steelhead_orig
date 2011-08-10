@@ -767,39 +767,17 @@ void OMAPLFBSwapHandler(OMAPLFB_BUFFER *psBuffer)
 	psDevInfo->sPVRJTable.pfnPVRSRVCmdComplete((IMG_HANDLE)psBuffer->hCmdComplete, IMG_TRUE);
 }
 
-static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
-                            IMG_UINT32  ui32DataSize,
-                            IMG_VOID   *pvData)
+static IMG_BOOL ProcessFlipV1(IMG_HANDLE hCmdCookie,
+							  OMAPLFB_DEVINFO *psDevInfo,
+							  OMAPLFB_SWAPCHAIN *psSwapChain,
+							  OMAPLFB_BUFFER *psBuffer,
+							  unsigned long ulSwapInterval)
 {
-	DISPLAYCLASS_FLIP_COMMAND *psFlipCmd;
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_BUFFER *psBuffer;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
-
-	
-	if(!hCmdCookie || !pvData)
-	{
-		return IMG_FALSE;
-	}
-
-	
-	psFlipCmd = (DISPLAYCLASS_FLIP_COMMAND*)pvData;
-
-	if (psFlipCmd == IMG_NULL || sizeof(DISPLAYCLASS_FLIP_COMMAND) != ui32DataSize)
-	{
-		return IMG_FALSE;
-	}
-
-	
-	psDevInfo = (OMAPLFB_DEVINFO*)psFlipCmd->hExtDevice;
-	psBuffer = (OMAPLFB_BUFFER*)psFlipCmd->hExtBuffer;
-	psSwapChain = (OMAPLFB_SWAPCHAIN*) psFlipCmd->hExtSwapChain;
-
 	OMAPLFBCreateSwapChainLock(psDevInfo);
 
+	
 	if (SwapChainHasChanged(psDevInfo, psSwapChain))
 	{
-		
 		DEBUG_PRINTK((KERN_WARNING DRIVER_PREFIX
 			": %s: Device %u (PVR Device ID %u): The swap chain has been destroyed\n",
 			__FUNCTION__, psDevInfo->uiFBDevID, psDevInfo->uiPVRDevID));
@@ -807,7 +785,7 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
 	else
 	{
 		psBuffer->hCmdComplete = (OMAPLFB_HANDLE)hCmdCookie;
-		psBuffer->ulSwapInterval = (unsigned long)psFlipCmd->ui32SwapInterval;
+		psBuffer->ulSwapInterval = ulSwapInterval;
 #if defined(NO_HARDWARE)
 		psDevInfo->sPVRJTable.pfnPVRSRVCmdComplete((IMG_HANDLE)psBuffer->hCmdComplete, IMG_FALSE);
 #else
@@ -820,6 +798,149 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
 	return IMG_TRUE;
 }
 
+#if defined(CONFIG_DSSCOMP)
+
+#include <mach/tiler.h>
+#include <video/dsscomp.h>
+#include <plat/dsscomp.h>
+
+#include "servicesint.h"
+#include "services.h"
+#include "mm.h"
+
+static IMG_BOOL ProcessFlipV2(IMG_HANDLE hCmdCookie,
+							  OMAPLFB_DEVINFO *psDevInfo,
+							  IMG_VOID **ppvMemInfos,
+							  IMG_UINT32 ui32NumMemInfos,
+							  struct dsscomp_setup_dispc_data *psDssData,
+							  IMG_UINT32 uiDssDataLength)
+{
+	PVRSRV_KERNEL_MEM_INFO **ppsMemInfos =
+		(PVRSRV_KERNEL_MEM_INFO **)ppvMemInfos;
+	struct tiler_pa_info *apsTilerPAs[5];
+	IMG_UINT32 i, k;
+
+	BUG_ON(uiDssDataLength != sizeof(*psDssData));
+
+	for(i = k = 0; i < ui32NumMemInfos && i < ARRAY_SIZE(apsTilerPAs); i++, k++)
+	{
+		struct tiler_pa_info *psTilerInfo;
+		LinuxMemArea *psLinuxMemArea;
+		IMG_UINT32 ui32NumPages;
+		int j;
+
+		psLinuxMemArea = ppsMemInfos[i]->sMemBlk.hOSMemHandle;
+		ui32NumPages = (psLinuxMemArea->ui32ByteSize + PAGE_SIZE - 1) >> PAGE_SHIFT;
+
+		apsTilerPAs[k] = NULL;
+
+		
+		if(psDssData->ovls[k].cfg.color_mode == OMAP_DSS_COLOR_NV12)
+		{
+			
+			BUG_ON(i + 1 >= ui32NumMemInfos);
+			psDssData->ovls[k].ba = (u32)LinuxMemAreaToCpuPAddr(psLinuxMemArea, 0).uiAddr;
+
+			i++;
+			psLinuxMemArea = ppsMemInfos[i]->sMemBlk.hOSMemHandle;
+			psDssData->ovls[k].uv = (u32)LinuxMemAreaToCpuPAddr(psLinuxMemArea, 0).uiAddr;
+
+			continue;
+		}
+
+		psTilerInfo = kzalloc(sizeof(*psTilerInfo), GFP_KERNEL);
+		if(!psTilerInfo)
+		{
+			continue;
+		}
+
+		psTilerInfo->mem = kzalloc(sizeof(*psTilerInfo->mem) * ui32NumPages, GFP_KERNEL);
+		if(!psTilerInfo->mem)
+		{
+			kfree(psTilerInfo);
+			continue;
+		}
+
+		psTilerInfo->num_pg = ui32NumPages;
+		psTilerInfo->memtype = TILER_MEM_USING;
+
+		for(j = 0; j < ui32NumPages; j++)
+		{
+			psTilerInfo->mem[j] =
+				(u32)LinuxMemAreaToCpuPAddr(psLinuxMemArea, j << PAGE_SHIFT).uiAddr;
+		}
+
+		
+		psDssData->ovls[k].ba = (u32)ppsMemInfos[i]->pvLinAddrKM;
+		apsTilerPAs[k] = psTilerInfo;
+	}
+
+	BUG_ON(psDssData->num_ovls == 0);
+
+	dsscomp_gralloc_queue(psDssData, apsTilerPAs,
+						  (void *)psDevInfo->sPVRJTable.pfnPVRSRVCmdComplete,
+						  (void *)hCmdCookie);
+
+	for(i = 0; i < k; i++)
+	{
+		tiler_pa_free(apsTilerPAs[i]);
+	}
+
+	return IMG_TRUE;
+}
+
+#endif 
+
+static IMG_BOOL ProcessFlip(IMG_HANDLE  hCmdCookie,
+                            IMG_UINT32  ui32DataSize,
+                            IMG_VOID   *pvData)
+{
+	DISPLAYCLASS_FLIP_COMMAND2 *psFlipCmd2;
+	DISPLAYCLASS_FLIP_COMMAND *psFlipCmd;
+	OMAPLFB_DEVINFO *psDevInfo;
+
+	struct dsscomp_setup_mgr_data *dss_data;
+	struct tiler_pa_info *tiler_pas[5];
+	unsigned long i;
+
+	if(!hCmdCookie || !pvData)
+	{
+		return IMG_FALSE;
+	}
+
+	psFlipCmd = (DISPLAYCLASS_FLIP_COMMAND*)pvData;
+
+	if (psFlipCmd == IMG_NULL)
+	{
+		return IMG_FALSE;
+	}
+
+	psDevInfo = (OMAPLFB_DEVINFO*)psFlipCmd->hExtDevice;
+
+	if(psFlipCmd->hExtBuffer)
+	{
+		return ProcessFlipV1(hCmdCookie,
+							 psDevInfo,
+							 psFlipCmd->hExtSwapChain,
+							 psFlipCmd->hExtBuffer,
+							 psFlipCmd->ui32SwapInterval);
+	}
+	else
+	{
+#if defined(CONFIG_DSSCOMP)
+		DISPLAYCLASS_FLIP_COMMAND2 *psFlipCmd2;
+		psFlipCmd2 = (DISPLAYCLASS_FLIP_COMMAND2 *)pvData;
+		return ProcessFlipV2(hCmdCookie,
+							 psDevInfo,
+							 psFlipCmd2->ppvMemInfos,
+							 psFlipCmd2->ui32NumMemInfos,
+							 psFlipCmd2->pvPrivData,
+							 psFlipCmd2->ui32PrivDataLength);
+#else
+		BUG();
+#endif
+	}
+}
 
 static OMAPLFB_ERROR OMAPLFBInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 {
@@ -831,7 +952,7 @@ static OMAPLFB_ERROR OMAPLFBInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 	unsigned long ulLCM;
 	unsigned uiFBDevID = psDevInfo->uiFBDevID;
 
-	console_lock();
+	OMAPLFB_CONSOLE_LOCK();
 
 	psLINFBInfo = registered_fb[uiFBDevID];
 	if (psLINFBInfo == NULL)
@@ -976,7 +1097,7 @@ static OMAPLFB_ERROR OMAPLFBInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 ErrorModPut:
 	module_put(psLINFBOwner);
 ErrorRelSem:
-	console_unlock();
+	OMAPLFB_CONSOLE_UNLOCK();
 
 	return eError;
 }
@@ -986,7 +1107,7 @@ static void OMAPLFBDeInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 	struct fb_info *psLINFBInfo = psDevInfo->psLINFBInfo;
 	struct module *psLINFBOwner;
 
-	console_lock();
+	OMAPLFB_CONSOLE_LOCK();
 
 	psLINFBOwner = psLINFBInfo->fbops->owner;
 
@@ -997,7 +1118,7 @@ static void OMAPLFBDeInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 
 	module_put(psLINFBOwner);
 
-	console_unlock();
+	OMAPLFB_CONSOLE_UNLOCK();
 }
 
 static OMAPLFB_DEVINFO *OMAPLFBInitDev(unsigned uiFBDevID)
@@ -1103,7 +1224,7 @@ static OMAPLFB_DEVINFO *OMAPLFBInitDev(unsigned uiFBDevID)
 
 	
 	aui32SyncCountList[DC_FLIP_COMMAND][0] = 0; 
-	aui32SyncCountList[DC_FLIP_COMMAND][1] = 2; 
+	aui32SyncCountList[DC_FLIP_COMMAND][1] = 5; 
 
 	
 

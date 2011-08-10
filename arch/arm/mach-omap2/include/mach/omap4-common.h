@@ -21,6 +21,11 @@
 #define HAL_SAVEHW_INDEX		0x1b
 #define HAL_SAVEALL_INDEX		0x1c
 #define HAL_SAVEGIC_INDEX		0x1d
+
+/*
+ * Secure HAL, PPA services available
+ */
+#define PPA_SERVICE_PL310_POR		0x23
 #define PPA_SERVICE_NS_SMP		0x25
 /*
  * Secure HAL API flags
@@ -49,13 +54,20 @@ static inline void __iomem *omap4_get_scu_base(void)
 extern void __iomem *omap4_get_gic_dist_base(void);
 extern void __iomem *omap4_get_gic_cpu_base(void);
 extern void __iomem *omap4_get_sar_ram_base(void);
+extern void *omap_get_dram_barrier_base(void);
 extern dma_addr_t omap4_secure_ram_phys;
 extern void __init gic_init_irq(void);
 extern void gic_cpu_enable(void);
 extern void gic_cpu_disable(void);
 extern void gic_dist_enable(void);
 extern void gic_dist_disable(void);
+extern u32 gic_cpu_read(u32 reg);
 extern void omap_smc1(u32 fn, u32 arg);
+extern void omap_bus_sync(void);
+extern void omap_do_wfi(void);
+
+extern bool gic_dist_disabled(void);
+extern void gic_timer_retrigger(void);
 
 /*
  * Read MPIDR: Multiprocessor affinity register
@@ -117,5 +129,8 @@ static inline u32 omap4_secure_dispatcher(u32 idx, u32 flag, u32 nargs,
 }
 #endif	/* CONFIG_PM */
 #endif	/* CONFIG_SMP */
+
+extern int omap4_prcm_freq_update(void);
+
 #endif /* __ASSEMBLER__ */
 #endif /* OMAP_ARCH_OMAP4_COMMON_H */

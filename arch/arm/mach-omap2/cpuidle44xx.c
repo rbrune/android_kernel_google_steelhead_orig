@@ -29,15 +29,13 @@
 
 #define OMAP4_MAX_STATES	4
 
-#define CPUIDLE_FLAG_CHECK_BM	0x10000	/* use omap4_enter_idle_bm() */
-
 /* C1 - CPU0 WFI + CPU1 OFF + MPU ON + CORE ON */
 #define OMAP4_STATE_C1		0
 /* C2 - CPU0 INA + CPU1 OFF + MPU INA + CORE INA */
 #define OMAP4_STATE_C2		1
 /* C3 - CPU0 OFF + CPU1 OFF + MPU CSWR + CORE CSWR */
 #define OMAP4_STATE_C3		2
-/* C4 - CPU0 OFF + CPU1 OFF + MPU RET + CORE CSWR */
+/* C4 - CPU0 OFF + CPU1 OFF + MPU OSWR + CORE OSWR */
 #define OMAP4_STATE_C4		3
 
 struct omap4_processor_cx {
@@ -74,16 +72,13 @@ static struct cpuidle_params cpuidle_params_table[] = {
 	{.exit_latency = 140 + 160, .target_residency = 300, .valid = 1},
 	/* C3 - CPU0 OFF + CPU1 OFF + MPU CSWR + CORE CSWR */
 	{.exit_latency = 1516 + 3220, .target_residency = 15000, .valid = 1},
+#ifdef CONFIG_OMAP_ALLOW_OSWR
 	/* C4 - CPU0 OFF + CPU1 OFF + MPU OSWR + CORE OSWR */
+	{.exit_latency = 1644 + 3298, .target_residency = 39000, .valid = 1},
+#else
 	{.exit_latency = 1644 + 3298, .target_residency = 39000, .valid = 0},
+#endif
 };
-
-static bool omap4_idle_bm_busy(void)
-{
-	if (!omap4_can_sleep())
-		return true;
-	return false;
-}
 
 /**
  * omap4_prepare_idle - Update C-state parameters dynamically
@@ -155,7 +150,7 @@ static int omap4_enter_idle(struct cpuidle_device *dev,
 	if (cx->type > OMAP4_STATE_C1)
 		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu_id);
 
-	omap4_enter_sleep(dev->cpu, cx->cpu0_state);
+	omap4_enter_sleep(dev->cpu, cx->cpu0_state, false);
 
 	/* restore the MPU and CORE states to ON */
 	omap_set_pwrdm_state(mpu_pd, PWRDM_POWER_ON);
@@ -170,27 +165,6 @@ static int omap4_enter_idle(struct cpuidle_device *dev,
 	local_fiq_enable();
 
 	return ts_idle.tv_nsec / NSEC_PER_USEC + ts_idle.tv_sec * USEC_PER_SEC;
-}
-
-/**
- * omap4_enter_idle_bm - Checks for any bus activity
- * @dev: cpuidle device
- * @state: The target state to be programmed
- *
- * Used for C states with CPUIDLE_FLAG_CHECK_BM flag set. This
- * function checks for any pending activity and then programs the
- * device to the specified or a safer state.
- */
-static int omap4_enter_idle_bm(struct cpuidle_device *dev,
-			       struct cpuidle_state *state)
-{
-	if ((omap4_idle_bm_busy())) {
-		BUG_ON(!dev->safe_state);
-		state = dev->safe_state;
-	}
-
-	dev->last_state = state;
-	return omap4_enter_idle(dev, state);
 }
 
 DEFINE_PER_CPU(struct cpuidle_device, omap4_idle_dev);
@@ -254,8 +228,7 @@ void omap4_init_power_states(void)
 	omap4_power_states[OMAP4_STATE_C3].mpu_logic_state = PWRDM_POWER_RET;
 	omap4_power_states[OMAP4_STATE_C3].core_state = PWRDM_POWER_RET;
 	omap4_power_states[OMAP4_STATE_C3].core_logic_state = PWRDM_POWER_RET;
-	omap4_power_states[OMAP4_STATE_C3].flags = CPUIDLE_FLAG_TIME_VALID |
-					CPUIDLE_FLAG_CHECK_BM;
+	omap4_power_states[OMAP4_STATE_C3].flags = CPUIDLE_FLAG_TIME_VALID;
 	omap4_power_states[OMAP4_STATE_C3].desc = "MPU CSWR + CORE CSWR";
 
 	/*
@@ -273,8 +246,7 @@ void omap4_init_power_states(void)
 	omap4_power_states[OMAP4_STATE_C4].mpu_logic_state = PWRDM_POWER_OFF;
 	omap4_power_states[OMAP4_STATE_C4].core_state = PWRDM_POWER_RET;
 	omap4_power_states[OMAP4_STATE_C4].core_logic_state = PWRDM_POWER_OFF;
-	omap4_power_states[OMAP4_STATE_C4].flags = CPUIDLE_FLAG_TIME_VALID |
-			CPUIDLE_FLAG_CHECK_BM;
+	omap4_power_states[OMAP4_STATE_C4].flags = CPUIDLE_FLAG_TIME_VALID;
 	omap4_power_states[OMAP4_STATE_C4].desc = "MPU OSWR + CORE OSWR";
 
 }
@@ -349,8 +321,7 @@ int __init omap4_idle_init(void)
 		state->flags = cx->flags;
 		if (cx->type == OMAP4_STATE_C1)
 			dev->safe_state = state;
-		state->enter = (state->flags & CPUIDLE_FLAG_CHECK_BM) ?
-			omap4_enter_idle_bm : omap4_enter_idle;
+		state->enter = omap4_enter_idle;
 
 		sprintf(state->name, "C%d", count+1);
 		strncpy(state->desc, cx->desc, CPUIDLE_DESC_LEN);

@@ -325,6 +325,15 @@ config SGI_GRU_DEBUG
 	This option enables addition debugging code for the SGI GRU driver. If
 	you are unsure, say N.
 
+config SAMSUNG_JACK
+	bool "3.5MM ear jack driver for Samsung devices"
+	depends on INPUT
+	default n
+	---help---
+	 This is 3.5MM ear jack driver for Samsung devices.
+
+	 If unsure, say N.
+
 config APDS9802ALS
 	tristate "Medfield Avago APDS9802 ALS Sensor module"
 	depends on I2C
@@ -494,6 +503,16 @@ config BMP085
 	  To compile this driver as a module, choose M here: the
 	  module will be called bmp085.
 
+config BMP180
+        tristate "BMP180 digital pressure sensor"
+        depends on I2C && SYSFS
+        help
+          If you say yes here you get support for the Bosch Sensortec
+          BMP180 digital pressure sensor.
+
+          To compile this driver as a module, choose M here: the
+          module will be called bmp180.
+
 config PCH_PHUB
 	tristate "Intel EG20T PCH / OKI SEMICONDUCTOR IOH(ML7213/ML7223) PHUB"
 	depends on PCI
@@ -536,6 +555,22 @@ config APANIC_PLABEL
 	 If your platform uses a different flash partition label for storing
  	 crashdumps, enter it here.
 
+config USB_SWITCH_FSA9480
+	tristate "FSA9480 USB Switch"
+	depends on I2C
+	help
+	  The FSA9480 is a USB port accessory detector and switch.
+	  The FSA9480 is fully controlled using I2C and enables USB data,
+	  stereo and mono audio, video, microphone and UART data to use
+	  a common connector port.
+
+config OMAP_DIE_TEMP_SENSOR
+        bool "OMAP On-Die temp sensor support"
+        depends on OMAP_TEMP_SENSOR
+        help
+          Enabling this config will give support for the on-die
+          temp sensor for the OMAP platform.
+
 config STEELHEAD_AVR
 	depends on I2C && INPUT
 	tristate "Steelhead AVR LED/Front Panel Support"
@@ -570,5 +605,6 @@ source "drivers/misc/iwmc3200top/Kconfig"
 source "drivers/misc/ti-st/Kconfig"
 source "drivers/misc/lis3lv02d/Kconfig"
 source "drivers/misc/carma/Kconfig"
+source "drivers/misc/modem_if/Kconfig"
 
 endif # MISC_DEVICES

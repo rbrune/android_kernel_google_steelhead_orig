@@ -30,6 +30,9 @@ static struct device *mpu_dev;
 static struct device *iva_dev;
 static struct device *l3_dev;
 static struct device *dsp_dev;
+static struct device *fdif_dev;
+
+bool omap_pm_is_ready_status;
 
 struct device *omap2_get_mpuss_device(void)
 {
@@ -58,6 +61,13 @@ struct device *omap4_get_dsp_device(void)
 	return dsp_dev;
 }
 EXPORT_SYMBOL(omap4_get_dsp_device);
+
+struct device *omap4_get_fdif_device(void)
+{
+	WARN_ON_ONCE(!fdif_dev);
+	return fdif_dev;
+}
+EXPORT_SYMBOL(omap4_get_fdif_device);
 
 /* static int _init_omap_device(struct omap_hwmod *oh, void *user) */
 static int _init_omap_device(char *name, struct device **new_dev)
@@ -93,6 +103,7 @@ static void omap2_init_processor_devices(void)
 		_init_omap_device("l3_main_1", &l3_dev);
 		_init_omap_device("dsp", &dsp_dev);
 		_init_omap_device("iva", &iva_dev);
+		_init_omap_device("fdif", &fdif_dev);
 	} else {
 		_init_omap_device("l3_main", &l3_dev);
 	}
@@ -294,11 +305,12 @@ static void __init omap4_init_voltages(void)
 	if (!cpu_is_omap44xx())
 		return;
 
-	if (cpu_is_omap446x())
+	if (cpu_is_omap446x()) {
 		omap2_set_init_voltage("mpu", "virt_dpll_mpu_ck", mpu_dev);
-	else
+	} else {
 		omap2_set_init_voltage("mpu", "dpll_mpu_ck", mpu_dev);
-	omap2_set_init_voltage("core", "l3_div_ck", l3_dev);
+	}
+	omap2_set_init_voltage("core", "virt_l3_ck", l3_dev);
 	omap2_set_init_voltage("iva", "dpll_iva_m5x2_ck", iva_dev);
 }
 

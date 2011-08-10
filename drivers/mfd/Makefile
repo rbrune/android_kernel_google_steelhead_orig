@@ -42,6 +42,7 @@ obj-$(CONFIG_TWL4030_MADC)      += twl4030-madc.o
 obj-$(CONFIG_TWL4030_POWER)    += twl4030-power.o
 obj-$(CONFIG_TWL4030_CODEC)	+= twl4030-codec.o
 obj-$(CONFIG_TWL6030_PWM)	+= twl6030-pwm.o
+obj-$(CONFIG_TWL6030_MADC)	+= twl6030-madc.o
 obj-$(CONFIG_TWL6040_CODEC)	+= twl6040-codec.o twl6040-irq.o
 obj-$(CONFIG_TWL6030_POWEROFF)	+= twl6030-poweroff.o
 
@@ -96,3 +97,4 @@ obj-$(CONFIG_MFD_OMAP_USB_HOST)	+= omap-usb-host.o
 obj-$(CONFIG_MFD_PM8921_CORE) 	+= pm8921-core.o
 obj-$(CONFIG_MFD_PM8XXX_IRQ) 	+= pm8xxx-irq.o
 obj-$(CONFIG_MFD_TPS65910)	+= tps65910.o tps65910-irq.o
+obj-$(CONFIG_TPS65911_COMPARATOR)	+= tps65911-comparator.o

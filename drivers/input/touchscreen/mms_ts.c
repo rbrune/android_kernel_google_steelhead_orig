@@ -17,6 +17,7 @@
 //#define DEBUG
 #include <linux/completion.h>
 #include <linux/delay.h>
+#include <linux/earlysuspend.h>
 #include <linux/firmware.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
@@ -52,7 +53,7 @@
 #define MMS_COMPAT_GROUP	0xF2
 #define MMS_FW_VERSION		0xF3
 
-#define REQUIRED_FW_VERSION	0x10
+#define REQUIRED_FW_VERSION	0x21
 
 enum {
 	ISP_MODE_FLASH_ERASE	= 0x59F3,
@@ -88,7 +89,17 @@ struct mms_ts_info {
 
 	char				*fw_name;
 	struct completion		init_done;
+	struct early_suspend		early_suspend;
+
+	/* protects the enabled flag */
+	struct mutex			lock;
+	bool				enabled;
 };
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void mms_ts_early_suspend(struct early_suspend *h);
+static void mms_ts_late_resume(struct early_suspend *h);
+#endif
 
 static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 {
@@ -494,6 +505,33 @@ static int get_fw_version(struct mms_ts_info *info)
 	return ret;
 }
 
+static int mms_ts_enable(struct mms_ts_info *info)
+{
+	mutex_lock(&info->lock);
+	if (info->enabled)
+		goto out;
+	/* wake up the touch controller. */
+	i2c_smbus_write_byte_data(info->client, 0, 0);
+	info->enabled = true;
+	enable_irq(info->irq);
+out:
+	mutex_unlock(&info->lock);
+	return 0;
+}
+
+static int mms_ts_disable(struct mms_ts_info *info)
+{
+	mutex_lock(&info->lock);
+	if (!info->enabled)
+		goto out;
+	disable_irq(info->irq);
+	i2c_smbus_write_byte_data(info->client, MMS_MODE_CONTROL, 0);
+	info->enabled = false;
+out:
+	mutex_unlock(&info->lock);
+	return 0;
+}
+
 static int mms_ts_input_open(struct input_dev *dev)
 {
 	struct mms_ts_info *info = input_get_drvdata(dev);
@@ -503,7 +541,7 @@ static int mms_ts_input_open(struct input_dev *dev)
 			msecs_to_jiffies(20 * MSEC_PER_SEC));
 
 	if (ret > 0) {
-		ret = 0;
+		ret = mms_ts_enable(info);
 	} else if (ret < 0) {
 		dev_err(&dev->dev,
 			"error while waiting for device to init (%d)\n", ret);
@@ -515,6 +553,12 @@ static int mms_ts_input_open(struct input_dev *dev)
 	}
 
 	return ret;
+}
+
+static void mms_ts_input_close(struct input_dev *dev)
+{
+	struct mms_ts_info *info = input_get_drvdata(dev);
+	mms_ts_disable(info);
 }
 
 static int mms_ts_finish_config(struct mms_ts_info *info)
@@ -529,6 +573,7 @@ static int mms_ts_finish_config(struct mms_ts_info *info)
 		dev_err(&client->dev, "Failed to register interrupt\n");
 		goto err_req_irq;
 	}
+	disable_irq(client->irq);
 
 	info->irq = client->irq;
 	barrier();
@@ -664,6 +709,7 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 	info->pdata = client->dev.platform_data;
 	init_completion(&info->init_done);
 	info->irq = -1;
+	mutex_init(&info->lock);
 
 	if (info->pdata) {
 		info->max_x = info->pdata->max_x;
@@ -684,6 +730,7 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 	input_dev->id.bustype = BUS_I2C;
 	input_dev->dev.parent = &client->dev;
 	input_dev->open = mms_ts_input_open;
+	input_dev->close = mms_ts_input_close;
 
 	__set_bit(EV_ABS, input_dev->evbit);
 	__set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
@@ -711,6 +758,13 @@ static int __devinit mms_ts_probe(struct i2c_client *client,
 		goto err_config;
 	}
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	info->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	info->early_suspend.suspend = mms_ts_early_suspend;
+	info->early_suspend.resume = mms_ts_late_resume;
+	register_early_suspend(&info->early_suspend);
+#endif
+
 	return 0;
 
 err_config:
@@ -737,6 +791,72 @@ static int __devexit mms_ts_remove(struct i2c_client *client)
 	return 0;
 }
 
+#if defined(CONFIG_PM) || defined(CONFIG_HAS_EARLYSUSPEND)
+static int mms_ts_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mms_ts_info *info = i2c_get_clientdata(client);
+	int i;
+
+	/* TODO: turn off the power (set vdd_en to 0) to the touchscreen
+	 * on suspend
+	 */
+
+	mutex_lock(&info->input_dev->mutex);
+	if (!info->input_dev->users)
+		goto out;
+
+	mms_ts_disable(info);
+	for (i = 0; i < MAX_FINGERS; i++) {
+		input_mt_slot(info->input_dev, i);
+		input_mt_report_slot_state(info->input_dev, MT_TOOL_FINGER,
+					   false);
+	}
+	input_sync(info->input_dev);
+
+out:
+	mutex_unlock(&info->input_dev->mutex);
+	return 0;
+}
+
+static int mms_ts_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mms_ts_info *info = i2c_get_clientdata(client);
+	int ret = 0;
+
+	mutex_lock(&info->input_dev->mutex);
+	if (info->input_dev->users)
+		ret = mms_ts_enable(info);
+	mutex_unlock(&info->input_dev->mutex);
+
+	return ret;
+}
+#endif
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void mms_ts_early_suspend(struct early_suspend *h)
+{
+	struct mms_ts_info *info;
+	info = container_of(h, struct mms_ts_info, early_suspend);
+	mms_ts_suspend(&info->client->dev);
+}
+
+static void mms_ts_late_resume(struct early_suspend *h)
+{
+	struct mms_ts_info *info;
+	info = container_of(h, struct mms_ts_info, early_suspend);
+	mms_ts_resume(&info->client->dev);
+}
+#endif
+
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+static const struct dev_pm_ops mms_ts_pm_ops = {
+	.suspend	= mms_ts_suspend,
+	.resume		= mms_ts_resume,
+};
+#endif
+
 static const struct i2c_device_id mms_ts_id[] = {
 	{ "mms_ts", 0 },
 	{ }
@@ -748,6 +868,9 @@ static struct i2c_driver mms_ts_driver = {
 	.remove		= __devexit_p(mms_ts_remove),
 	.driver = {
 		.name = "mms_ts",
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+		.pm	= &mms_ts_pm_ops,
+#endif
 	},
 	.id_table	= mms_ts_id,
 };

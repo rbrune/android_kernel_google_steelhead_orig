@@ -41,6 +41,8 @@
 #include <linux/usb/ulpi.h>
 #include <plat/usb.h>
 #include <linux/regulator/consumer.h>
+#include <plat/omap_hwmod.h>
+#include <linux/pm_runtime.h>
 
 /* EHCI Register Set */
 #define EHCI_INSNREG04					(0xA0)
@@ -178,11 +180,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = omap_usbhs_enable(dev);
-	if (ret) {
-		dev_err(dev, "failed to start usbhs with err %d\n", ret);
-		goto err_enable;
-	}
+	pm_runtime_get_sync(dev->parent);
 
 	/*
 	 * An undocumented "feature" in the OMAP3 EHCI controller,
@@ -228,10 +226,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	return 0;
 
 err_add_hcd:
-	omap_usbhs_disable(dev);
-
-err_enable:
-	usb_put_hcd(hcd);
+	pm_runtime_put_sync(dev->parent);
 
 err_io:
 	return ret;
@@ -252,25 +247,65 @@ static int ehci_hcd_omap_remove(struct platform_device *pdev)
 	struct usb_hcd *hcd	= dev_get_drvdata(dev);
 
 	usb_remove_hcd(hcd);
-	omap_usbhs_disable(dev);
+	pm_runtime_put_sync(dev->parent);
 	usb_put_hcd(hcd);
 	return 0;
 }
 
 static void ehci_hcd_omap_shutdown(struct platform_device *pdev)
 {
+	struct device *dev	= &pdev->dev;
 	struct usb_hcd *hcd = dev_get_drvdata(&pdev->dev);
 
-	if (hcd->driver->shutdown)
+	if (hcd->driver->shutdown) {
+		pm_runtime_get_sync(dev->parent);
 		hcd->driver->shutdown(hcd);
+		pm_runtime_put(dev->parent);
+	}
+}
+
+static int ehci_omap_bus_suspend(struct usb_hcd *hcd)
+{
+	struct device *dev = hcd->self.controller;
+	struct omap_hwmod	*oh;
+	int ret = 0;
+
+	dev_dbg(dev, "ehci_omap_bus_suspend\n");
+
+	ret = ehci_bus_suspend(hcd);
+
+	if (ret != 0) {
+		dev_dbg(dev, "ehci_omap_bus_suspend failed %d\n", ret);
+		return ret;
+	}
+
+	oh = omap_hwmod_lookup(USBHS_EHCI_HWMODNAME);
+
+	omap_hwmod_enable_ioring_wakeup(oh);
+
+	if (dev->parent)
+		pm_runtime_put_sync(dev->parent);
+
+	return ret;
+}
+
+static int ehci_omap_bus_resume(struct usb_hcd *hcd)
+{
+	struct device *dev = hcd->self.controller;
+
+	dev_dbg(dev, "ehci_omap_bus_resume\n");
+
+	if (dev->parent) {
+		pm_runtime_get_sync(dev->parent);
+	}
+
+	return ehci_bus_resume(hcd);
 }
 
 static struct platform_driver ehci_hcd_omap_driver = {
 	.probe			= ehci_hcd_omap_probe,
 	.remove			= ehci_hcd_omap_remove,
 	.shutdown		= ehci_hcd_omap_shutdown,
-	/*.suspend		= ehci_hcd_omap_suspend, */
-	/*.resume		= ehci_hcd_omap_resume, */
 	.driver = {
 		.name		= "ehci-omap",
 	}
@@ -315,8 +350,8 @@ static const struct hc_driver ehci_omap_hc_driver = {
 	 */
 	.hub_status_data	= ehci_hub_status_data,
 	.hub_control		= ehci_hub_control,
-	.bus_suspend		= ehci_bus_suspend,
-	.bus_resume		= ehci_bus_resume,
+	.bus_suspend		= ehci_omap_bus_suspend,
+	.bus_resume		= ehci_omap_bus_resume,
 
 	.clear_tt_buffer_complete = ehci_clear_tt_buffer_complete,
 };

@@ -17,6 +17,7 @@
 #define TUNA_REV_PRE_LUNCHBOX	0x5
 #define TUNA_REV_LUNCHBOX	0x0
 #define TUNA_REV_MASK		0xf
+#define TUNA_REV_03		0x3
 
 #define TUNA_TYPE_TORO		0x10
 #define TUNA_TYPE_MAGURO	0x00
@@ -27,10 +28,18 @@ int omap4_tuna_get_type(void);
 bool omap4_tuna_final_gpios(void);
 void omap4_tuna_display_init(void);
 void omap4_tuna_input_init(void);
+void omap4_tuna_jack_init(void);
+void omap4_tuna_nfc_init(void);
 void omap4_tuna_power_init(void);
 void omap4_tuna_sensors_init(void);
+int omap4_tuna_connector_init(void);
 int tuna_wlan_init(void);
+int omap_hsi_init(void);
+void omap4_tuna_emif_init(void);
+void omap4_ehci_init(void);
+void modem_toro_init(void);
 
 extern struct mmc_platform_data tuna_wifi_data;
+extern struct class *sec_class;
 
 #endif

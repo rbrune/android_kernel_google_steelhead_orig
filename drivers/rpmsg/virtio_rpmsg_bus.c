@@ -62,7 +62,7 @@ struct virtproc_info {
 	void *rbufs, *sbufs;
 	int last_rbuf, last_sbuf;
 	void *sim_base;
-	spinlock_t svq_lock;
+	struct mutex svq_lock;
 	int num_bufs;
 	int buf_size;
 	struct idr endpoints;
@@ -418,13 +418,20 @@ static int rpmsg_destroy_channel_by_info(struct virtproc_info *vrp,
 static void *get_a_buf(struct virtproc_info *vrp)
 {
 	unsigned int len;
+	void *buf = NULL;
+
+	/* protect svq from simultaneous concurrent manipulations */
+	mutex_lock(&vrp->svq_lock);
 
 	/* either pick the next unused buffer */
 	if (vrp->last_sbuf < vrp->num_bufs / 2)
-		return vrp->sbufs + vrp->buf_size * vrp->last_sbuf++;
+		buf = vrp->sbufs + vrp->buf_size * vrp->last_sbuf++;
 	/* or recycle a used one */
 	else
-		return virtqueue_get_buf(vrp->svq, &len);
+		buf = virtqueue_get_buf(vrp->svq, &len);
+
+	mutex_unlock(&vrp->svq_lock);
+	return buf;
 }
 
 /* XXX: the blocking 'wait' mechanism hasn't been tested yet */
@@ -456,22 +463,30 @@ int rpmsg_send_offchannel_raw(struct rpmsg_channel *rpdev, u32 src, u32 dst,
 		return -ENOMEM;
 
 	/* no free buffer ? wait for one (but bail after 15 seconds) */
-	while (!msg) {
+	if (!msg) {
 		/* enable "tx-complete" interrupts before dozing off */
 		virtqueue_enable_cb(vrp->svq);
+
 		/*
 		 * sleep until a free buffer is available or 15 secs elapse.
 		 * the timeout period is not configurable because frankly
 		 * i don't see why drivers need to deal with that.
 		 * if later this happens to be required, it'd be easy to add.
 		 */
-		if (wait_event_interruptible_timeout(vrp->sendq,
+		err = wait_event_interruptible_timeout(vrp->sendq,
 					(msg = get_a_buf(vrp)),
-					msecs_to_jiffies(15000)))
-			return -ERESTARTSYS;
+					msecs_to_jiffies(15000));
+
 		/* on success, suppress "tx-complete" interrupts again */
-		if (msg)
-			virtqueue_disable_cb(vrp->svq);
+		virtqueue_disable_cb(vrp->svq);
+
+		if (err < 0)
+			return -ERESTARTSYS;
+
+		if (!msg) {
+			dev_err(dev, "timeout waiting for buffer\n");
+			return -ETIMEDOUT;
+		}
 	}
 
 	msg->len = len;
@@ -484,15 +499,17 @@ int rpmsg_send_offchannel_raw(struct rpmsg_channel *rpdev, u32 src, u32 dst,
 	dev_dbg(dev, "TX From 0x%x, To 0x%x, Len %d, Flags %d, Unused %d\n",
 					msg->src, msg->dst, msg->len,
 					msg->flags, msg->unused);
+#if 0
 	print_hex_dump(KERN_DEBUG, "rpmsg_virtio TX: ", DUMP_PREFIX_NONE, 16, 1,
 					msg, sizeof(*msg) + msg->len, true);
+#endif
 
 	offset = ((unsigned long) msg) - ((unsigned long) vrp->rbufs);
 	sim_addr = vrp->sim_base + offset;
 	sg_init_one(&sg, sim_addr, sizeof(*msg) + len);
 
 	/* protect svq from simultaneous concurrent manipulations */
-	spin_lock(&vrp->svq_lock);
+	mutex_lock(&vrp->svq_lock);
 
 	/* add message to the remote processor's virtqueue */
 	err = virtqueue_add_buf_gfp(vrp->svq, &sg, 1, 0, msg, GFP_KERNEL);
@@ -506,7 +523,7 @@ int rpmsg_send_offchannel_raw(struct rpmsg_channel *rpdev, u32 src, u32 dst,
 
 	err = 0;
 out:
-	spin_unlock(&vrp->svq_lock);
+	mutex_unlock(&vrp->svq_lock);
 	return err;
 }
 EXPORT_SYMBOL(rpmsg_send_offchannel_raw);
@@ -532,8 +549,10 @@ static void rpmsg_recv_done(struct virtqueue *rvq)
 	dev_dbg(dev, "From: 0x%x, To: 0x%x, Len: %d, Flags: %d, Unused: %d\n",
 					msg->src, msg->dst, msg->len,
 					msg->flags, msg->unused);
+#if 0
 	print_hex_dump(KERN_DEBUG, "rpmsg_virtio RX: ", DUMP_PREFIX_NONE, 16, 1,
 					msg, sizeof(*msg) + msg->len, true);
+#endif
 
 	/* fetch the callback of the appropriate user */
 	spin_lock(&vrp->endpoints_lock);
@@ -639,7 +658,7 @@ static int rpmsg_probe(struct virtio_device *vdev)
 
 	idr_init(&vrp->endpoints);
 	spin_lock_init(&vrp->endpoints_lock);
-	spin_lock_init(&vrp->svq_lock);
+	mutex_init(&vrp->svq_lock);
 	init_waitqueue_head(&vrp->sendq);
 
 	/* We expect two virtqueues, rx and tx (in this order) */

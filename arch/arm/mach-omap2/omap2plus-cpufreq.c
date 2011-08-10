@@ -40,18 +40,28 @@
 
 #include "dvfs.h"
 
+#ifdef CONFIG_SMP
+struct lpj_info {
+	unsigned long	ref;
+	unsigned int	freq;
+};
+
+#define THROTTLE_DELAY_MS 1000
+
+static DEFINE_PER_CPU(struct lpj_info, lpj_ref);
+static struct lpj_info global_lpj_ref;
+#endif
+
 static struct cpufreq_frequency_table *freq_table;
 static atomic_t freq_table_users = ATOMIC_INIT(0);
 static struct clk *mpu_clk;
 static char *mpu_clk_name;
 static struct device *mpu_dev;
+static DEFINE_MUTEX(omap_cpufreq_lock);
 
-static int omap_verify_speed(struct cpufreq_policy *policy)
-{
-	if (!freq_table)
-		return -EINVAL;
-	return cpufreq_frequency_table_verify(policy, freq_table);
-}
+static unsigned int max_thermal;
+static unsigned int max_freq;
+static unsigned int current_target_freq;
 
 static unsigned int omap_getspeed(unsigned int cpu)
 {
@@ -64,13 +74,187 @@ static unsigned int omap_getspeed(unsigned int cpu)
 	return rate;
 }
 
+static int omap_cpufreq_scale(unsigned int target_freq, unsigned int cur_freq)
+{
+	unsigned int i;
+	int ret;
+	struct cpufreq_freqs freqs;
+
+	freqs.new = target_freq;
+	freqs.old = omap_getspeed(0);
+
+	/*
+	 * If the new frequency is more than the thermal max allowed
+	 * frequency, go ahead and scale the mpu device to proper frequency.
+	 */
+	if (freqs.new > max_thermal)
+		freqs.new = max_thermal;
+
+	if ((freqs.old == freqs.new) && (cur_freq = freqs.new))
+		return 0;
+
+	/* notifiers */
+	for_each_online_cpu(freqs.cpu)
+		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+
+#ifdef CONFIG_CPU_FREQ_DEBUG
+	pr_info("cpufreq-omap: transition: %u --> %u\n", freqs.old, freqs.new);
+#endif
+
+	ret = omap_device_scale(mpu_dev, mpu_dev, freqs.new * 1000);
+
+	freqs.new = omap_getspeed(0);
+
+#ifdef CONFIG_SMP
+	/*
+	 * Note that loops_per_jiffy is not updated on SMP systems in
+	 * cpufreq driver. So, update the per-CPU loops_per_jiffy value
+	 * on frequency transition. We need to update all dependent CPUs.
+	 */
+	for_each_possible_cpu(i) {
+		struct lpj_info *lpj = &per_cpu(lpj_ref, i);
+		if (!lpj->freq) {
+			lpj->ref = per_cpu(cpu_data, i).loops_per_jiffy;
+			lpj->freq = freqs.old;
+		}
+
+		per_cpu(cpu_data, i).loops_per_jiffy =
+			cpufreq_scale(lpj->ref, lpj->freq, freqs.new);
+	}
+
+	/* And don't forget to adjust the global one */
+	if (!global_lpj_ref.freq) {
+		global_lpj_ref.ref = loops_per_jiffy;
+		global_lpj_ref.freq = freqs.old;
+	}
+	loops_per_jiffy = cpufreq_scale(global_lpj_ref.ref, global_lpj_ref.freq,
+					freqs.new);
+#endif
+
+	/* notifiers */
+	for_each_online_cpu(freqs.cpu)
+		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+
+	return ret;
+}
+
+static unsigned int omap_thermal_lower_speed(void)
+{
+	unsigned int max = 0;
+	unsigned int curr;
+	int i;
+
+	curr = max_thermal;
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++)
+		if (freq_table[i].frequency > max &&
+		    freq_table[i].frequency < curr)
+			max = freq_table[i].frequency;
+
+	if (!max)
+		return curr;
+
+	return max;
+}
+
+static void throttle_delayed_work_fn(struct work_struct *work);
+
+static DECLARE_DELAYED_WORK(throttle_delayed_work, throttle_delayed_work_fn);
+
+static void throttle_delayed_work_fn(struct work_struct *work)
+{
+	unsigned int new_max;
+	unsigned int cur;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+	if (max_thermal == max_freq)
+		goto out;
+
+	new_max = omap_thermal_lower_speed();
+	if (new_max == max_thermal)
+		goto out;
+
+	max_thermal = new_max;
+
+	pr_warn("%s: temperature still too high, throttling cpu to max %u\n",
+		__func__, max_thermal);
+
+	cur = omap_getspeed(0);
+	if (cur > max_thermal)
+		omap_cpufreq_scale(max_thermal, cur);
+
+	schedule_delayed_work(&throttle_delayed_work,
+		msecs_to_jiffies(THROTTLE_DELAY_MS));
+
+out:
+	mutex_unlock(&omap_cpufreq_lock);
+}
+
+void omap_thermal_throttle(void)
+{
+	unsigned int cur;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+	if (max_thermal != max_freq) {
+		pr_warn("%s: already throttling\n", __func__);
+		goto out;
+	}
+
+	max_thermal = omap_thermal_lower_speed();
+
+	pr_warn("%s: temperature too high, starting cpu throttling at max %u\n",
+		__func__, max_thermal);
+
+	cur = omap_getspeed(0);
+	if (cur > max_thermal)
+		omap_cpufreq_scale(max_thermal, cur);
+
+	schedule_delayed_work(&throttle_delayed_work,
+		msecs_to_jiffies(THROTTLE_DELAY_MS));
+
+out:
+	mutex_unlock(&omap_cpufreq_lock);
+}
+
+void omap_thermal_unthrottle(void)
+{
+	unsigned int cur;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+	if (max_thermal == max_freq) {
+		pr_warn("%s: not throttling\n", __func__);
+		goto out;
+	}
+
+	max_thermal = max_freq;
+
+	cancel_delayed_work_sync(&throttle_delayed_work);
+
+	pr_warn("%s: temperature reduced, ending cpu throttling\n", __func__);
+
+	cur = omap_getspeed(0);
+	omap_cpufreq_scale(current_target_freq, cur);
+
+out:
+	mutex_unlock(&omap_cpufreq_lock);
+}
+
+static int omap_verify_speed(struct cpufreq_policy *policy)
+{
+	if (!freq_table)
+		return -EINVAL;
+	return cpufreq_frequency_table_verify(policy, freq_table);
+}
+
 static int omap_target(struct cpufreq_policy *policy,
 		       unsigned int target_freq,
 		       unsigned int relation)
 {
 	unsigned int i;
 	int ret = 0;
-	struct cpufreq_freqs freqs;
 
 	if (!freq_table) {
 		dev_err(mpu_dev, "%s: cpu%d: no freq table!\n", __func__,
@@ -85,70 +269,15 @@ static int omap_target(struct cpufreq_policy *policy,
 			__func__, policy->cpu, target_freq, ret);
 		return ret;
 	}
-	freqs.new = freq_table[i].frequency;
-	if (!freqs.new) {
-		dev_err(mpu_dev, "%s: cpu%d: no match for freq %d\n", __func__,
-			policy->cpu, target_freq);
-		return -EINVAL;
-	}
 
-	freqs.old = omap_getspeed(policy->cpu);
-	freqs.cpu = policy->cpu;
+	mutex_lock(&omap_cpufreq_lock);
 
-	if (freqs.old == freqs.new && policy->cur == freqs.new)
-		return ret;
+	current_target_freq = freq_table[i].frequency;
 
-	if (!is_smp()) {
-		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
-		goto set_freq;
-	}
+	ret = omap_cpufreq_scale(current_target_freq, policy->cur);
 
-	/* notifiers */
-	for_each_cpu(i, policy->cpus) {
-		freqs.cpu = i;
-		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
-	}
+	mutex_unlock(&omap_cpufreq_lock);
 
-set_freq:
-#ifdef CONFIG_CPU_FREQ_DEBUG
-	pr_info("cpufreq-omap: transition: %u --> %u\n", freqs.old, freqs.new);
-#endif
-
-	ret = omap_device_scale(mpu_dev, mpu_dev, freqs.new * 1000);
-
-	/*
-	 * Generic CPUFREQ driver jiffy update is under !SMP. So jiffies
-	 * won't get updated when UP machine cpufreq build with
-	 * CONFIG_SMP enabled. Below code is added only to manage that
-	 * scenario
-	 */
-	freqs.new = omap_getspeed(policy->cpu);
-	if (!is_smp()) {
-		loops_per_jiffy =
-			 cpufreq_scale(loops_per_jiffy, freqs.old, freqs.new);
-		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
-		goto skip_lpj;
-	}
-
-#ifdef CONFIG_SMP
-	/*
-	 * Note that loops_per_jiffy is not updated on SMP systems in
-	 * cpufreq driver. So, update the per-CPU loops_per_jiffy value
-	 * on frequency transition. We need to update all dependent CPUs.
-	 */
-	for_each_cpu(i, policy->cpus)
-		per_cpu(cpu_data, i).loops_per_jiffy =
-			cpufreq_scale(per_cpu(cpu_data, i).loops_per_jiffy,
-					freqs.old, freqs.new);
-#endif
-
-	/* notifiers */
-	for_each_cpu(i, policy->cpus) {
-		freqs.cpu = i;
-		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
-	}
-
-skip_lpj:
 	return ret;
 }
 
@@ -161,6 +290,7 @@ static inline void freq_table_free(void)
 static int __cpuinit omap_cpu_init(struct cpufreq_policy *policy)
 {
 	int result = 0;
+	int i;
 
 	mpu_clk = clk_get(NULL, mpu_clk_name);
 	if (IS_ERR(mpu_clk))
@@ -191,6 +321,10 @@ static int __cpuinit omap_cpu_init(struct cpufreq_policy *policy)
 	policy->min = policy->cpuinfo.min_freq;
 	policy->max = policy->cpuinfo.max_freq;
 	policy->cur = omap_getspeed(policy->cpu);
+
+	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++)
+		max_freq = max(freq_table[i].frequency, max_freq);
+	max_thermal = max_freq;
 
 	/*
 	 * On OMAP SMP configuartion, both processors share the voltage

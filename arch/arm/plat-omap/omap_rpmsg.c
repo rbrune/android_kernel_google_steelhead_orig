@@ -36,7 +36,7 @@
 
 #include <plat/rpmsg.h>
 #include <plat/mailbox.h>
-#include <plat/dsp.h>
+#include <plat/remoteproc.h>
 
 struct omap_rpmsg_vproc {
 	struct virtio_device vdev;
@@ -49,6 +49,7 @@ struct omap_rpmsg_vproc {
 	struct omap_mbox *mbox;
 	struct rproc *rproc;
 	struct notifier_block nb;
+	struct notifier_block rproc_nb;
 	struct virtqueue *vq[2];
 	int base_vq_id;
 	int num_of_vqs;
@@ -142,6 +143,7 @@ static void omap_rpmsg_notify(struct virtqueue *vq)
 	int ret;
 
 	pr_debug("sending mailbox msg: %d\n", rpvq->vq_id);
+	rproc_last_busy(rpvq->rpdev->rproc);
 	/* send the index of the triggered virtqueue as the mailbox payload */
 	ret = omap_mbox_msg_send(rpvq->rpdev->mbox, rpvq->vq_id);
 	if (ret)
@@ -157,6 +159,8 @@ static int omap_rpmsg_mbox_callback(struct notifier_block *this,
 	rpdev = container_of(this, struct omap_rpmsg_vproc, nb);
 
 	pr_debug("mbox msg: 0x%x\n", msg);
+
+	rproc_last_busy(rpdev->rproc);
 
 	switch (msg) {
 	case RP_MBOX_CRASH:
@@ -191,6 +195,17 @@ static int omap_rpmsg_mbox_callback(struct notifier_block *this,
 			vring_interrupt(msg, rpdev->vq[msg]);
 	}
 
+	return NOTIFY_DONE;
+}
+
+static int rpmsg_rproc_suspend(struct notifier_block *this,
+				unsigned long type, void *data)
+{
+	struct omap_rpmsg_vproc *rpdev =
+			container_of(this, struct omap_rpmsg_vproc, rproc_nb);
+
+	if (virtqueue_more_used(rpdev->vq[0]))
+		return NOTIFY_BAD;
 	return NOTIFY_DONE;
 }
 
@@ -250,11 +265,16 @@ static void omap_rpmsg_del_vqs(struct virtio_device *vdev)
 	struct virtqueue *vq, *n;
 	struct omap_rpmsg_vproc *rpdev = to_omap_rpdev(vdev);
 
+	rproc_event_unregister(rpdev->rproc, &rpdev->rproc_nb,
+				RPROC_PRE_SUSPEND);
+
 	list_for_each_entry_safe(vq, n, &vdev->vqs, list) {
 		struct omap_rpmsg_vq_info *rpvq = vq->priv;
 		vring_del_virtqueue(vq);
 		kfree(rpvq);
 	}
+
+	iounmap(rpdev->buf_mapped);
 
 	if (rpdev->mbox)
 		omap_mbox_put(rpdev->mbox, &rpdev->nb);
@@ -334,7 +354,11 @@ static int omap_rpmsg_find_vqs(struct virtio_device *vdev, unsigned nvqs,
 	if (!rpdev->rproc) {
 		pr_err("failed to get rproc %s\n", rpdev->rproc_name);
 		err = -EINVAL;
+		goto put_mbox;
 	}
+	/* register for remoteproc pre-suspend */
+	rpdev->rproc_nb.notifier_call = rpmsg_rproc_suspend;
+	rproc_event_register(rpdev->rproc, &rpdev->rproc_nb, RPROC_PRE_SUSPEND);
 
 	return 0;
 
@@ -397,11 +421,13 @@ static struct virtio_config_ops omap_rpmsg_config_ops = {
 };
 
 static struct rpmsg_channel_info omap_ipuc0_hardcoded_chnls[] = {
+	{ "rpmsg-resmgr", 100, RPMSG_ADDR_ANY },
 	{ "rpmsg-server-sample", 137, RPMSG_ADDR_ANY },
 	{ },
 };
 
 static struct rpmsg_channel_info omap_ipuc1_hardcoded_chnls[] = {
+	{ "rpmsg-resmgr", 100, RPMSG_ADDR_ANY },
 	{ },
 };
 
@@ -429,8 +455,10 @@ static struct omap_rpmsg_vproc omap_rpmsg_vprocs[] = {
 static int __init omap_rpmsg_ini(void)
 {
 	int i, ret = 0;
-	phys_addr_t paddr = omap_dsp_get_mempool_base();
-	phys_addr_t psize = omap_dsp_get_mempool_size();
+	phys_addr_t paddr = omap_ipu_get_mempool_base(
+						OMAP_RPROC_MEMPOOL_DYNAMIC);
+	phys_addr_t psize = omap_ipu_get_mempool_size(
+						OMAP_RPROC_MEMPOOL_DYNAMIC);
 
 	for (i = 0; i < ARRAY_SIZE(omap_rpmsg_vprocs); i++) {
 		struct omap_rpmsg_vproc *rpdev = &omap_rpmsg_vprocs[i];

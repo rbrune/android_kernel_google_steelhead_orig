@@ -4,7 +4,7 @@
 
 # Common support
 obj-y := id.o io.o control.o mux.o devices.o serial.o gpmc.o timer-gp.o pm.o \
-	 common.o gpio.o dma.o wd_timer.o omap_pmic.o
+	 common.o gpio.o dma.o wd_timer.o omap_pmic.o dmtimer.o
 
 omap-2-3-common				= irq.o sdrc.o
 hwmod-common				= omap_hwmod.o \
@@ -15,11 +15,13 @@ clock-common				= clock.o clock_common_data.o \
 obj-$(CONFIG_ARCH_OMAP2) += $(omap-2-3-common) $(hwmod-common)
 obj-$(CONFIG_ARCH_OMAP3) += $(omap-2-3-common) $(hwmod-common)
 obj-$(CONFIG_ARCH_OMAP4) += prm44xx.o $(hwmod-common)
+obj-$(CONFIG_ARCH_OMAP4) += emif.o lpddr2_jedec_data.o lpddr2_elpida_data.o
 
 obj-$(CONFIG_OMAP_MCBSP) += mcbsp.o
 
 obj-$(CONFIG_TWL4030_CORE) += omap_twl.o
 obj-$(CONFIG_OMAP_TPS6236X) += omap_tps6236x.o
+obj-$(CONFIG_OMAP_TEMP_SENSOR) +=temp_sensor_device.o
 
 # SMP support ONLY available for OMAP4
 obj-$(CONFIG_SMP)			+= omap-smp.o omap-headsmp.o
@@ -69,8 +71,8 @@ obj-$(CONFIG_ARCH_OMAP3)		+= pm34xx.o sleep34xx.o \
 					   cpuidle34xx.o
 obj-$(CONFIG_ARCH_OMAP4)		+= pm44xx.o		\
 					   omap4-mpuss-lowpower.o sleep44xx.o \
-					   cpuidle44xx.o
-obj-$(CONFIG_PM_DEBUG)			+= pm-debug.o
+					   cpuidle44xx.o resetreason.o
+obj-$(CONFIG_PM_DEBUG)			+= pm-debug.o prcm-debug.o
 obj-$(CONFIG_OMAP_SMARTREFLEX)          += sr_device.o smartreflex.o
 obj-$(CONFIG_OMAP_SMARTREFLEX_CLASS3)	+= smartreflex-class3.o
 
@@ -102,9 +104,11 @@ voltagedomain-common			:= voltage.o vc.o vp.o
 obj-$(CONFIG_ARCH_OMAP2)		+= $(voltagedomain-common) \
 					   voltagedomains2xxx_data.o
 obj-$(CONFIG_ARCH_OMAP3)		+= $(voltagedomain-common) \
-					   voltagedomains3xxx_data.o
+					   voltagedomains3xxx_data.o \
+					   ldo.o ldo3xxx_data.o
 obj-$(CONFIG_ARCH_OMAP4)		+= $(voltagedomain-common) \
-					   voltagedomains44xx_data.o
+					   voltagedomains44xx_data.o \
+					   ldo.o ldo4xxx_data.o
 endif
 
 # OMAP powerdomain framework
@@ -247,15 +251,21 @@ obj-$(CONFIG_MACH_OMAP_4430SDP)		+= board-4430sdp.o \
 obj-$(CONFIG_MACH_OMAP4_PANDA)		+= board-omap4panda.o \
 					   hsmmc.o \
 					   omap_phy_internal.o
-# Android specific board file extensions
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna.o \
 					   hsmmc.o \
 					   omap_phy_internal.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-display.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-input.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-jack.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-nfc.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-power.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-sensors.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-vibrator.o
 obj-$(CONFIG_MACH_TUNA)			+= board-tuna-wifi.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-bluetooth.o \
+					   board-tuna-emif.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-connector.o
+obj-$(CONFIG_MACH_TUNA)			+= board-tuna-usbhost.o
 
 obj-$(CONFIG_MACH_STEELHEAD)		+= board-steelhead.o \
 					   hsmmc.o \
@@ -298,3 +308,5 @@ obj-y					+= $(disp-m) $(disp-y)
 obj-y					+= common-board-devices.o
 
 obj-$(CONFIG_OMAP_REMOTE_PROC)		+= remoteproc.o
+obj-$(CONFIG_OMAP_HSI_DEVICE)		+= omap_hsi.o
+obj-$(CONFIG_SEC_MODEM)			+= board-tuna-modems.o

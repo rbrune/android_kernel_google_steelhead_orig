@@ -668,6 +668,7 @@ struct twl4030_codec_audio_data {
 	u16 hs_right_step;
 	u16 hf_left_step;
 	u16 hf_right_step;
+	u16 ep_step;
 	void (*set_hs_extmute)(int mute);
 };
 
@@ -715,6 +716,9 @@ struct twl4030_platform_data {
 	struct regulator_init_data		*vintana1;
 	struct regulator_init_data		*vintana2;
 	struct regulator_init_data		*vintdig;
+	/* TWL6030 DCDC regulators */
+	struct regulator_init_data		*vdd3;
+	struct regulator_init_data		*vmem;
 	/* TWL6030 LDO regulators */
 	struct regulator_init_data              *vmmc;
 	struct regulator_init_data              *vpp;

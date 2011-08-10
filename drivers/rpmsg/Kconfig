@@ -19,12 +19,23 @@ config RPMSG_OMX
 	tristate "rpmsg OMX driver"
 	default y
 	depends on RPMSG
+	depends on TI_TILER
 	---help---
 	  An rpmsg driver that exposes OMX API to user space, in order to
 	  allow multimedia applications to offload OMX processing to
 	  remote processors.
 
 	  If unsure, say N.
+
+config RPMSG_RESMGR
+	tristate "rpmsg resource manager"
+	default y
+	depends on RPMSG
+	depends on OMAP_RPRES
+	---help---
+	  Add Framework base on RPMSG to request and release resources
+	  from a remote Processor.
+	  Say either Y or M. You know you want to.
 
 config RPMSG_CLIENT_SAMPLE
 	tristate "An rpmsg client sample"

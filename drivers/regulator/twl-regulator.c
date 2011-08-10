@@ -104,6 +104,18 @@ struct twlreg_info {
 #define SMPS_MULTOFFSET_VIO	BIT(1)
 #define SMPS_MULTOFFSET_SMPS3	BIT(6)
 
+/* TWL6030 VUSB supplemental config registers */
+#define TWL6030_MISC2		0xE5
+#define TWL6030_CFG_LDO_PD2	0xF5
+
+/*
+ * TWL603X SMPS has 6 bits xxxx_CFG_VOLTAGE.VSEL[5:0] to configure voltages and
+ * each bit combination corresponds to a particular voltage (value 63 is
+ * reserved).
+ */
+#define TWL603X_SMPS_VSEL_MASK	0x3F
+#define TWL603X_SMPS_NUMBER_VOLTAGES TWL603X_SMPS_VSEL_MASK
+
 static inline int
 twlreg_read(struct twlreg_info *info, unsigned slave_subgp, unsigned offset)
 {
@@ -835,8 +847,8 @@ static struct regulator_ops twlsmps_ops = {
 			remap_conf) \
 		TWL_FIXED_LDO(label, offset, mVolts, num, turnon_delay, \
 			remap_conf, TWL4030, twl4030fixed_ops)
-#define TWL6030_FIXED_LDO(label, offset, mVolts, num, turnon_delay) \
-		TWL_FIXED_LDO(label, offset, mVolts, num, turnon_delay, \
+#define TWL6030_FIXED_LDO(label, offset, mVolts, turnon_delay) \
+		TWL_FIXED_LDO(label, offset, mVolts, 0x0, turnon_delay, \
 			0x0, TWL6030, twl6030fixed_ops)
 
 #define TWL4030_ADJUSTABLE_LDO(label, offset, num, turnon_delay, remap_conf) { \
@@ -856,9 +868,8 @@ static struct regulator_ops twlsmps_ops = {
 		}, \
 	}
 
-#define TWL6030_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts, num) { \
+#define TWL6030_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts) { \
 	.base = offset, \
-	.id = num, \
 	.min_mV = min_mVolts, \
 	.max_mV = max_mVolts, \
 	.desc = { \
@@ -871,9 +882,8 @@ static struct regulator_ops twlsmps_ops = {
 		}, \
 	}
 
-#define TWL6025_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts, num) { \
+#define TWL6025_ADJUSTABLE_LDO(label, offset, min_mVolts, max_mVolts) { \
 	.base = offset, \
-	.id = num, \
 	.min_mV = min_mVolts, \
 	.max_mV = max_mVolts, \
 	.desc = { \
@@ -903,9 +913,8 @@ static struct regulator_ops twlsmps_ops = {
 		}, \
 	}
 
-#define TWL6030_FIXED_RESOURCE(label, offset, num, turnon_delay) { \
+#define TWL6030_FIXED_RESOURCE(label, offset, turnon_delay) { \
 	.base = offset, \
-	.id = num, \
 	.delay = turnon_delay, \
 	.desc = { \
 		.name = #label, \
@@ -916,15 +925,28 @@ static struct regulator_ops twlsmps_ops = {
 		}, \
 	}
 
-#define TWL6025_ADJUSTABLE_SMPS(label, offset, num) { \
+#define TWL6030_ADJUSTABLE_SMPS(label, offset, min_mVolts, max_mVolts) { \
 	.base = offset, \
-	.id = num, \
+	.min_mV = min_mVolts, \
+	.max_mV = max_mVolts, \
+	.desc = { \
+		.name = #label, \
+		.id = TWL6030_REG_##label, \
+		.n_voltages = TWL603X_SMPS_NUMBER_VOLTAGES, \
+		.ops = &twlsmps_ops, \
+		.type = REGULATOR_VOLTAGE, \
+		.owner = THIS_MODULE, \
+		}, \
+	}
+
+#define TWL6025_ADJUSTABLE_SMPS(label, offset) { \
+	.base = offset, \
 	.min_mV = 600, \
 	.max_mV = 2100, \
 	.desc = { \
 		.name = #label, \
 		.id = TWL6025_REG_##label, \
-		.n_voltages = 63, \
+		.n_voltages = TWL603X_SMPS_NUMBER_VOLTAGES, \
 		.ops = &twlsmps_ops, \
 		.type = REGULATOR_VOLTAGE, \
 		.owner = THIS_MODULE, \
@@ -961,32 +983,34 @@ static struct twlreg_info twl_regs[] = {
 	/* 6030 REG with base as PMC Slave Misc : 0x0030 */
 	/* Turnon-delay and remap configuration values for 6030 are not
 	   verified since the specification is not public */
-	TWL6030_ADJUSTABLE_LDO(VAUX1_6030, 0x54, 1000, 3300, 1),
-	TWL6030_ADJUSTABLE_LDO(VAUX2_6030, 0x58, 1000, 3300, 2),
-	TWL6030_ADJUSTABLE_LDO(VAUX3_6030, 0x5c, 1000, 3300, 3),
-	TWL6030_ADJUSTABLE_LDO(VMMC, 0x68, 1000, 3300, 4),
-	TWL6030_ADJUSTABLE_LDO(VPP, 0x6c, 1000, 3300, 5),
-	TWL6030_ADJUSTABLE_LDO(VUSIM, 0x74, 1000, 3300, 7),
-	TWL6030_FIXED_LDO(VANA, 0x50, 2100, 15, 0),
-	TWL6030_FIXED_LDO(VCXIO, 0x60, 1800, 16, 0),
-	TWL6030_FIXED_LDO(VDAC, 0x64, 1800, 17, 0),
-	TWL6030_FIXED_LDO(VUSB, 0x70, 3300, 18, 0),
-	TWL6030_FIXED_RESOURCE(CLK32KG, 0x8C, 48, 0),
+	TWL6030_ADJUSTABLE_LDO(VAUX1_6030, 0x54, 1000, 3300),
+	TWL6030_ADJUSTABLE_LDO(VAUX2_6030, 0x58, 1000, 3300),
+	TWL6030_ADJUSTABLE_LDO(VAUX3_6030, 0x5c, 1000, 3300),
+	TWL6030_ADJUSTABLE_LDO(VMMC, 0x68, 1000, 3300),
+	TWL6030_ADJUSTABLE_LDO(VPP, 0x6c, 1000, 3300),
+	TWL6030_ADJUSTABLE_LDO(VUSIM, 0x74, 1000, 3300),
+	TWL6030_FIXED_LDO(VANA, 0x50, 2100, 0),
+	TWL6030_FIXED_LDO(VCXIO, 0x60, 1800, 0),
+	TWL6030_FIXED_LDO(VDAC, 0x64, 1800, 0),
+	TWL6030_FIXED_LDO(VUSB, 0x70, 3300, 0),
+	TWL6030_FIXED_RESOURCE(CLK32KG, 0x8C, 0),
+	TWL6030_ADJUSTABLE_SMPS(VDD3, 0x2e, 600, 4000),
+	TWL6030_ADJUSTABLE_SMPS(VMEM, 0x34, 600, 4000),
 
 	/* 6025 are renamed compared to 6030 versions */
-	TWL6025_ADJUSTABLE_LDO(LDO2, 0x54, 1000, 3300, 1),
-	TWL6025_ADJUSTABLE_LDO(LDO4, 0x58, 1000, 3300, 2),
-	TWL6025_ADJUSTABLE_LDO(LDO3, 0x5c, 1000, 3300, 3),
-	TWL6025_ADJUSTABLE_LDO(LDO5, 0x68, 1000, 3300, 4),
-	TWL6025_ADJUSTABLE_LDO(LDO1, 0x6c, 1000, 3300, 5),
-	TWL6025_ADJUSTABLE_LDO(LDO7, 0x74, 1000, 3300, 7),
-	TWL6025_ADJUSTABLE_LDO(LDO6, 0x60, 1000, 3300, 16),
-	TWL6025_ADJUSTABLE_LDO(LDOLN, 0x64, 1000, 3300, 17),
-	TWL6025_ADJUSTABLE_LDO(LDOUSB, 0x70, 1000, 3300, 18),
+	TWL6025_ADJUSTABLE_LDO(LDO2, 0x54, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO4, 0x58, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO3, 0x5c, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO5, 0x68, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO1, 0x6c, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO7, 0x74, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDO6, 0x60, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDOLN, 0x64, 1000, 3300),
+	TWL6025_ADJUSTABLE_LDO(LDOUSB, 0x70, 1000, 3300),
 
-	TWL6025_ADJUSTABLE_SMPS(SMPS3, 0x34, 1),
-	TWL6025_ADJUSTABLE_SMPS(SMPS4, 0x10, 2),
-	TWL6025_ADJUSTABLE_SMPS(VIO, 0x16, 3),
+	TWL6025_ADJUSTABLE_SMPS(SMPS3, 0x34),
+	TWL6025_ADJUSTABLE_SMPS(SMPS4, 0x10),
+	TWL6025_ADJUSTABLE_SMPS(VIO, 0x16),
 };
 
 static u8 twl_get_smps_offset(void)
@@ -1014,6 +1038,7 @@ static int __devinit twlreg_probe(struct platform_device *pdev)
 	struct regulator_init_data	*initdata;
 	struct regulation_constraints	*c;
 	struct regulator_dev		*rdev;
+	int ret;
 
 	for (i = 0, info = NULL; i < ARRAY_SIZE(twl_regs); i++) {
 		if (twl_regs[i].desc.id != pdev->id)
@@ -1048,6 +1073,18 @@ static int __devinit twlreg_probe(struct platform_device *pdev)
 	case TWL4030_REG_VINTANA2:
 	case TWL4030_REG_VINTDIG:
 		c->always_on = true;
+		break;
+	case TWL6030_REG_VUSB:
+		/* Program CFG_LDO_PD2 register and set VUSB bit */
+		ret = twl_i2c_write_u8(TWL6030_MODULE_ID0, 0x1,
+				TWL6030_CFG_LDO_PD2);
+		if (ret < 0)
+			return ret;
+
+		/* Program MISC2 register and set bit VUSB_IN_VBAT */
+		ret = twl_i2c_write_u8(TWL6030_MODULE_ID0, 0x10, TWL6030_MISC2);
+		if (ret < 0)
+			return ret;
 		break;
 	default:
 		break;

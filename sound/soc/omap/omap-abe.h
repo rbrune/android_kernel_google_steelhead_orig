@@ -30,7 +30,8 @@
 #define ABE_FRONTEND_DAI_TONES		3
 #define ABE_FRONTEND_DAI_VIBRA		4
 #define ABE_FRONTEND_DAI_MODEM		5
-#define ABE_FRONTEND_DAI_LP_MEDIA		6
+#define ABE_FRONTEND_DAI_LP_MEDIA	6
+#define ABE_FRONTEND_DAI_NUM		7
 
 /* This must currently match the BE order in DSP */
 #define OMAP_ABE_DAI_PDM_UL			0
@@ -43,12 +44,14 @@
 #define OMAP_ABE_DAI_DMIC0			7
 #define OMAP_ABE_DAI_DMIC1			8
 #define OMAP_ABE_DAI_DMIC2			9
+#define OMAP_ABE_DAI_NUM			10
 
 #define OMAP_ABE_BE_PDM_DL1		"PDM-DL1"
 #define OMAP_ABE_BE_PDM_UL1		"PDM-UL1"
 #define OMAP_ABE_BE_PDM_DL2		"PDM-DL2"
 #define OMAP_ABE_BE_PDM_VIB		"PDM-VIB"
-#define OMAP_ABE_BE_BT_VX			"BT-VX"
+#define OMAP_ABE_BE_BT_VX_UL		"BT-VX-UL"
+#define OMAP_ABE_BE_BT_VX_DL		"BT-VX-DL"
 #define OMAP_ABE_BE_MM_EXT0		"FM-EXT"
 #define OMAP_ABE_BE_MM_EXT1		"MODEM-EXT"
 #define OMAP_ABE_BE_DMIC0		"DMIC0"

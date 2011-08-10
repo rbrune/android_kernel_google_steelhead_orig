@@ -139,13 +139,10 @@ u32 tiler_virt2phys(u32 usr);
  *		must be 0) with the tiler block information. 'height' must be 1
  *		for 1D block.
  * @param fmt	TILER block format
- * @param align	block alignment (default: normally PAGE_SIZE)
- * @param offs	block offset
  *
  * @return error status
  */
-s32 tiler_alloc(struct tiler_block_t *blk, enum tiler_fmt fmt, u32 align,
-		u32 offs);
+s32 tiler_alloc(struct tiler_block_t *blk, enum tiler_fmt fmt);
 
 /**
  * Reserves a 1D or 2D TILER block area and memory for a set process and group
@@ -155,15 +152,13 @@ s32 tiler_alloc(struct tiler_block_t *blk, enum tiler_fmt fmt, u32 align,
  *		must be 0) with the tiler block information. 'height' must be 1
  *		for 1D block.
  * @param fmt	TILER block format
- * @param align	block alignment (default: normally PAGE_SIZE)
- * @param offs	block offset
  * @param gid	group ID
  * @param pid	process ID
  *
  * @return error status
  */
-s32 tiler_allocx(struct tiler_block_t *blk, enum tiler_fmt fmt, u32 align,
-					u32 offs, u32 gid, pid_t pid);
+s32 tiler_allocx(struct tiler_block_t *blk, enum tiler_fmt fmt,
+					u32 gid, pid_t pid);
 
 /**
  * Mmaps a portion of a tiler block to a virtual address.  Use this method in
@@ -259,11 +254,8 @@ void tiler_free(struct tiler_block_t *blk);
  * @param fmt		TILER format
  * @param width		block width
  * @param height	block height (must be 1 for 1D)
- * @param align		block alignment (default: PAGE_SIZE)
- * @param offs		block offset
  */
-void tiler_reserve(u32 n, enum tiler_fmt fmt, u32 width, u32 height, u32 align,
-								u32 offs);
+void tiler_reserve(u32 n, enum tiler_fmt fmt, u32 width, u32 height);
 
 /**
  * Reserves tiler area for n identical blocks.  Use this method to get optimal
@@ -274,13 +266,11 @@ void tiler_reserve(u32 n, enum tiler_fmt fmt, u32 width, u32 height, u32 align,
  * @param fmt		TILER bit mode
  * @param width		block width
  * @param height	block height (must be 1 for 1D)
- * @param align		block alignment (default: PAGE_SIZE)
- * @param offs		block offset
  * @param gid		group ID
  * @param pid		process ID
  */
 void tiler_reservex(u32 n, enum tiler_fmt fmt, u32 width, u32 height,
-				u32 align, u32 offs, u32 gid, pid_t pid);
+				u32 gid, pid_t pid);
 
 /**
  * Reserves tiler area for n identical NV12 blocks for the current process.  Use
@@ -290,10 +280,8 @@ void tiler_reservex(u32 n, enum tiler_fmt fmt, u32 width, u32 height,
  * @param n		number of identical set of blocks
  * @param width		block width (Y)
  * @param height	block height (Y)
- * @param align		block alignment (default: PAGE_SIZE)
- * @param offs		block offset
  */
-void tiler_reserve_nv12(u32 n, u32 width, u32 height, u32 align, u32 offs);
+void tiler_reserve_nv12(u32 n, u32 width, u32 height);
 
 /**
  * Reserves tiler area for n identical NV12 blocks.  Use this method to get
@@ -303,13 +291,10 @@ void tiler_reserve_nv12(u32 n, u32 width, u32 height, u32 align, u32 offs);
  * @param n		number of identical set of blocks
  * @param width		block width (Y)
  * @param height	block height (Y)
- * @param align		block alignment (default: PAGE_SIZE)
- * @param offs		block offset
  * @param gid		group ID
  * @param pid		process ID
  */
-void tiler_reservex_nv12(u32 n, u32 width, u32 height, u32 align, u32 offs,
-							u32 gid, pid_t pid);
+void tiler_reservex_nv12(u32 n, u32 width, u32 height, u32 gid, pid_t pid);
 
 /**
  * Create a view based on a tiler address and width and height
@@ -393,9 +378,90 @@ struct tiler_pa_info {
 
 typedef struct mem_info *tiler_blk_handle;
 
-/* NOTE: this will take ownership pa->mem (will free it) */
+/**
+ * Allocate a 1D area of container space in the Tiler
+ *
+ * @param pa		ptr to tiler_pa_info structure
+ *
+ * @return handle	Handle to tiler block information.  NULL on error.
+ *
+ * NOTE: this will take ownership pa->mem (will free it)
+ *
+ */
 tiler_blk_handle tiler_map_1d_block(struct tiler_pa_info *pa);
-void tiler_free_block(tiler_blk_handle block);
+
+/**
+ * Allocate an area of container space in the Tiler
+ *
+ * @param fmt		Tiler bpp mode
+ * @param width		Width in pixels
+ * @param height	Height in pixels
+ * @param ssptr		Value of tiler physical address of allocation
+ * @param virt_array	Array of physical address for the start of each virtual
+			page
+ *
+ * @return handle	Handle to tiler block information.  NULL on error.
+ *
+ * NOTE: For 1D allocations, specify the full size in the width field, and
+ *       specify a height of 1.
+ */
+tiler_blk_handle tiler_alloc_block_area(enum tiler_fmt fmt, u32 width,
+					u32 height, u32 *ssptr,
+					u32 *virt_array);
+
+/**
+ * Free a reserved area in the Tiler
+ *
+ * @param handle	Handle to tiler block information
+ *
+ */
+void tiler_free_block_area(tiler_blk_handle block);
+
+/**
+ * Pins a set of physical pages into the Tiler using the area defined in a
+ * handle
+ *
+ * @param handle	Handle to tiler block information
+ * @param addr_array	Array of addresses
+ * @param nents		Number of addresses in array
+ *
+ * @return error status.
+ */
+s32 tiler_pin_block(tiler_blk_handle handle, u32 *addr_array, u32 nents);
+
+/**
+ * Unpins a set of physical pages from the Tiler
+ *
+ * @param handle	Handle to tiler block information
+ *
+ */
+void tiler_unpin_block(tiler_blk_handle handle);
+
+/**
+ * Gives memory requirements for a given container allocation
+ *
+ * @param fmt		Tiler bpp mode
+ * @param width		Width in pixels
+ * @param height	Height in pixels
+ * @param alloc_pages	Number of pages required to back tiler container
+ * @param virt_pages    Number of pages required to back the virtual address space
+ *
+ * @return 0 for success.  Non zero for error
+ */
+s32 tiler_memsize(enum tiler_fmt fmt, u32 width, u32 height, u32 *alloc_pages,
+		  u32 *virt_pages);
+
+/**
+ * Returns virtual stride of a tiler block
+ *
+ * @param handle	Handle to tiler block allocation
+ *
+ * @return Size of virtual stride
+ */
+u32 tiler_block_vstride(tiler_blk_handle handle);
+
+struct tiler_pa_info *user_block_to_pa(u32 usr_addr, u32 num_pg);
+void tiler_pa_free(struct tiler_pa_info *pa);
 
 /*
  * ---------------------------- IOCTL Definitions ----------------------------
@@ -431,8 +497,6 @@ struct tiler_block_info {
 	u32 id;
 	u32 key;
 	u32 group_id;
-	u32 align;	/* alignment requirements for ssptr */
-	u32 offs;	/* offset (ssptr & (align - 1) will equal offs) */
 	u32 ssptr;	/* physical address, may not exposed by default */
 };
 

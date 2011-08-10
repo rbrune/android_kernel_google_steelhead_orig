@@ -41,6 +41,8 @@
 
 #include "lists.h"
 
+#include <linux/module.h>
+
 IMG_UINT32	g_ui32InitFlags;
 
 #define		INIT_DATA_ENABLE_PDUMPINIT	0x1U
@@ -647,6 +649,31 @@ PVRSRV_ERROR IMG_CALLCONV PollForValueKM (volatile IMG_UINT32*	pui32LinMemAddr,
 										  IMG_UINT32			ui32PollPeriodus,
 										  IMG_BOOL				bAllowPreemption)
 {
+#if defined (EMULATOR)
+	{
+		PVR_UNREFERENCED_PARAMETER(bAllowPreemption);
+		#if !defined(__linux__)
+		PVR_UNREFERENCED_PARAMETER(ui32PollPeriodus);
+		#endif	
+		
+		
+		
+		do
+		{
+			if((*pui32LinMemAddr & ui32Mask) == ui32Value)
+			{
+				return PVRSRV_OK;
+			}
+
+			#if defined(__linux__)
+			OSWaitus(ui32PollPeriodus);
+			#else
+			OSReleaseThreadQuanta();
+			#endif	
+
+		} while (ui32Timeoutus); 
+	}
+#else
 	{
 		IMG_UINT32	ui32ActualValue = 0xFFFFFFFFU; 
 
@@ -677,6 +704,7 @@ PVRSRV_ERROR IMG_CALLCONV PollForValueKM (volatile IMG_UINT32*	pui32LinMemAddr,
 		PVR_DPF((PVR_DBG_ERROR,"PollForValueKM: Timeout. Expected 0x%x but found 0x%x (mask 0x%x).",
 				ui32Value, ui32ActualValue, ui32Mask));
 	}
+#endif 
 
 	return PVRSRV_ERROR_TIMEOUT;
 }
@@ -935,8 +963,8 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVGetMiscInfoKM(PVRSRV_MISC_INFO *psMiscInfo)
 		
 		psMiscInfo->aui32DDKVersion[0] = PVRVERSION_MAJ;
 		psMiscInfo->aui32DDKVersion[1] = PVRVERSION_MIN;
-		psMiscInfo->aui32DDKVersion[2] = PVRVERSION_BRANCH;
-		psMiscInfo->aui32DDKVersion[3] = PVRVERSION_BUILD;
+		psMiscInfo->aui32DDKVersion[2] = PVRVERSION_BUILD_HI;
+		psMiscInfo->aui32DDKVersion[3] = PVRVERSION_BUILD_LO;
 
 		pszStr = psMiscInfo->pszMemoryStr;
 		ui32StrLen = psMiscInfo->ui32MemoryStrLen;
@@ -1167,7 +1195,6 @@ IMG_VOID IMG_CALLCONV PVRSRVMISR(IMG_VOID *pvSysData)
 		}
 	}
 }
-
 
 IMG_EXPORT
 PVRSRV_ERROR IMG_CALLCONV PVRSRVProcessConnect(IMG_UINT32	ui32PID, IMG_UINT32 ui32Flags)

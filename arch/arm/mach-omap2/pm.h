@@ -19,11 +19,11 @@ extern void *omap3_secure_ram_storage;
 extern void omap3_pm_off_mode_enable(int);
 extern void omap_sram_idle(void);
 extern int omap3_can_sleep(void);
-extern int omap4_can_sleep(void);
 extern int omap_set_pwrdm_state(struct powerdomain *pwrdm, u32 state);
 extern int omap3_idle_init(void);
 extern int omap4_idle_init(void);
-extern void omap4_enter_sleep(unsigned int cpu, unsigned int power_state);
+extern void omap4_enter_sleep(unsigned int cpu, unsigned int power_state,
+				bool suspend);
 extern void omap4_trigger_ioctrl(void);
 
 #if defined(CONFIG_PM_OPP)
@@ -80,6 +80,11 @@ extern u32 sleep_while_idle;
 #define omap2_pm_debug				0
 #define enable_off_mode 0
 #define sleep_while_idle 0
+#endif
+#ifdef CONFIG_PM_ADVANCED_DEBUG
+extern void omap4_pm_suspend_save_regs(void);
+#else
+static inline void omap4_pm_suspend_save_regs(void) { }
 #endif
 
 #if defined(CONFIG_PM_DEBUG) && defined(CONFIG_DEBUG_FS)
@@ -157,11 +162,20 @@ static inline int omap_pmic_register_data(struct omap_pmic_map *map)
 #endif
 extern void omap_pmic_data_init(void);
 
+extern int omap_pmic_update(struct omap_pmic_map *tmp_map, char *name,
+		u16 old_chip_id, u16 new_chip_id);
+
 #ifdef CONFIG_TWL4030_CORE
 extern int omap_twl_init(void);
 extern int omap3_twl_set_sr_bit(bool enable);
+extern int omap_twl_pmic_update(char *name, u16 old_chip_id, u16 new_chip_id);
 #else
 static inline int omap_twl_init(void)
+{
+	return -EINVAL;
+}
+static inline int omap_twl_pmic_update(char *name, u16 old_chip_id,
+		u16 new_chip_id)
 {
 	return -EINVAL;
 }
@@ -172,6 +186,7 @@ extern int omap_tps6236x_board_setup(bool use_62361, int gpio_vsel0,
 	                int gpio_vsel1, int pull0, int pull1);
 extern int omap_tps6236x_init(void);
 
+extern int omap_tps6236x_update(char *name, u16 old_chip_id, u16 new_chip_id);
 #else
 static inline int omap_tps6236x_board_setup(bool use_62361, int gpio_vsel0,
 	                int gpio_vsel1, int pull0, int pull1)
@@ -182,6 +197,29 @@ static inline int omap_tps6236x_init(void)
 {
 	return -EINVAL;
 }
+static inline int omap_tps6236x_update(char *name, u16 old_chip_id,
+		u16 new_chip_id)
+{
+	return -EINVAL;
+}
 #endif
 
+#ifdef CONFIG_PM
+extern bool omap_pm_is_ready_status;
+/**
+ * omap_pm_is_ready() - tells if OMAP pm framework is done it's initialization
+ *
+ * In few cases, to sequence operations properly, we'd like to know if OMAP's PM
+ * framework has completed all it's expected initializations.
+ */
+static inline bool omap_pm_is_ready(void)
+{
+	return omap_pm_is_ready_status;
+}
+#else
+static inline bool omap_pm_is_ready(void)
+{
+	return false;
+}
+#endif
 #endif

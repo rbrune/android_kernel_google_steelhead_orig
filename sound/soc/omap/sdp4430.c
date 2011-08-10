@@ -33,25 +33,155 @@
 #include <asm/mach-types.h>
 #include <plat/hardware.h>
 #include <plat/mux.h>
+#include <plat/mcbsp.h>
 
+#include <linux/gpio.h>
 #include "omap-mcpdm.h"
 #include "omap-abe.h"
 #include "omap-pcm.h"
 #include "omap-mcbsp.h"
 #include "../codecs/twl6040.h"
 
+#include "../../../arch/arm/mach-omap2/board-tuna.h"
+
+#define TUNA_MAIN_MIC_GPIO  48
+#define TUNA_SUB_MIC_GPIO   171
+
 static int twl6040_power_mode;
 static int mcbsp_cfg;
+
+int omap4_tuna_get_type(void);
+
+static int main_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(TUNA_MAIN_MIC_GPIO, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static int sub_mic_bias_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	gpio_set_value(TUNA_SUB_MIC_GPIO, SND_SOC_DAPM_EVENT_ON(event));
+	return 0;
+}
+
+static int sdp4430_modem_mcbsp_configure(struct snd_pcm_substream *substream,
+				struct snd_pcm_hw_params *params, int flag)
+{
+	int ret = 0;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_pcm_substream *modem_substream[2];
+	struct snd_soc_pcm_runtime *modem_rtd;
+	int channels;
+
+	if (flag) {
+		modem_substream[substream->stream] =
+		snd_soc_get_dai_substream(rtd->card,
+						OMAP_ABE_BE_MM_EXT1,
+						substream->stream);
+		if (unlikely(modem_substream[substream->stream] == NULL))
+			return -ENODEV;
+
+		modem_rtd =
+			modem_substream[substream->stream]->private_data;
+
+		if (!mcbsp_cfg) {
+			if (omap4_tuna_get_type() == TUNA_TYPE_TORO) {
+				/* Set cpu DAI configuration */
+				ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
+						SND_SOC_DAIFMT_I2S |
+						SND_SOC_DAIFMT_NB_NF |
+						SND_SOC_DAIFMT_CBS_CFS);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI format\n");
+					goto exit;
+				}
+
+				/* McBSP2 fclk reparented to ABE_24M_FCLK */
+				ret = snd_soc_dai_set_sysclk(modem_rtd->cpu_dai,
+						OMAP_MCBSP_SYSCLK_CLKS_FCLK,
+						32 * 96 * params_rate(params),
+						SND_SOC_CLOCK_IN);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI sysclk\n");
+					goto exit;
+				}
+
+				/* assuming McBSP2 is S16_LE stereo */
+				ret = snd_soc_dai_set_clkdiv(modem_rtd->cpu_dai, 0, 96);
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI clkdiv\n");
+					goto exit;
+				}
+			} else {
+				/* Set cpu DAI configuration */
+				ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
+						SND_SOC_DAIFMT_I2S |
+						SND_SOC_DAIFMT_NB_NF |
+						SND_SOC_DAIFMT_CBM_CFM);
+
+				if (unlikely(ret < 0)) {
+					printk(KERN_ERR "can't set Modem cpu DAI configuration\n");
+					goto exit;
+				}
+			}
+			mcbsp_cfg = 1;
+		}
+
+		if (params != NULL) {
+			/* Configure McBSP internal buffer usage */
+			/* this need to be done for playback and/or record */
+			channels = params_channels(params);
+			if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+				omap_mcbsp_set_rx_threshold(
+					modem_rtd->cpu_dai->id, channels);
+			else
+				omap_mcbsp_set_tx_threshold(
+					modem_rtd->cpu_dai->id, channels);
+		}
+	} else {
+		mcbsp_cfg = 0;
+	}
+
+exit:
+	return ret;
+}
+
+static int sdp4430_modem_hw_params(struct snd_pcm_substream *substream,
+	struct snd_pcm_hw_params *params)
+{
+	int ret;
+
+	ret = sdp4430_modem_mcbsp_configure(substream, params, 1);
+	if (ret)
+		printk(KERN_ERR "can't set modem cpu DAI configuration\n");
+
+	return ret;
+}
+
+static int sdp4430_modem_hw_free(struct snd_pcm_substream *substream)
+{
+	int ret;
+
+	ret = sdp4430_modem_mcbsp_configure(substream, NULL, 0);
+	if (ret)
+		printk(KERN_ERR "can't clear modem cpu DAI configuration\n");
+
+	return ret;
+}
+
+static struct snd_soc_ops sdp4430_modem_ops = {
+	.hw_params = sdp4430_modem_hw_params,
+	.hw_free = sdp4430_modem_hw_free,
+};
 
 static int sdp4430_mcpdm_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_pcm_runtime *modem_rtd;
-	struct snd_pcm_substream *modem_substream[2];
-	struct snd_soc_dsp_params *dsp_params;
-	int clk_id, freq, ret, stream = substream->stream;
+	int clk_id, freq, ret;
 
 	if (twl6040_power_mode) {
 		clk_id = TWL6040_SYSCLK_SEL_HPPLL;
@@ -64,37 +194,9 @@ static int sdp4430_mcpdm_hw_params(struct snd_pcm_substream *substream,
 	/* set the codec mclk */
 	ret = snd_soc_dai_set_sysclk(codec_dai, clk_id, freq,
 				SND_SOC_CLOCK_IN);
-	if (ret) {
+	if (ret)
 		printk(KERN_ERR "can't set codec system clock\n");
-		return ret;
-	}
-	list_for_each_entry(dsp_params, &rtd->dsp[stream].fe_clients, list_fe) {
 
-		if (dsp_params->fe->cpu_dai->id != ABE_FRONTEND_DAI_MODEM)
-			continue;
-
-		if (!mcbsp_cfg) {
-			modem_substream[stream] =
-				snd_soc_get_dai_substream(rtd->card,
-							OMAP_ABE_BE_MM_EXT1,
-							substream->stream);
-			if (modem_substream[stream] == NULL)
-				return -ENODEV;
-
-			modem_rtd = modem_substream[stream]->private_data;
-
-			/* Set cpu DAI configuration */
-			ret = snd_soc_dai_set_fmt(modem_rtd->cpu_dai,
-					  SND_SOC_DAIFMT_I2S |
-					  SND_SOC_DAIFMT_NB_NF |
-					  SND_SOC_DAIFMT_CBM_CFM);
-			mcbsp_cfg = 1;
-		}
-		if (ret < 0) {
-			printk(KERN_ERR "can't set Modem cpu DAI configuration\n");
-			return ret;
-		}
-	}
 	return ret;
 }
 
@@ -108,23 +210,27 @@ static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
 	int ret = 0;
-	unsigned int be_id;
+	unsigned int be_id, fmt;
+
 
         be_id = rtd->dai_link->be_id;
 
-	if (be_id == OMAP_ABE_DAI_MM_FM) {
-		/* Set cpu DAI configuration */
-		ret = snd_soc_dai_set_fmt(cpu_dai,
-				  SND_SOC_DAIFMT_I2S |
-				  SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBM_CFM);
-	} else if (be_id == OMAP_ABE_DAI_BT_VX) {
-	        ret = snd_soc_dai_set_fmt(cpu_dai,
-                                  SND_SOC_DAIFMT_DSP_B |
-                                  SND_SOC_DAIFMT_NB_IF |
-                                  SND_SOC_DAIFMT_CBM_CFM);
+	if (be_id == OMAP_ABE_DAI_BT_VX) {
+		if (machine_is_tuna())
+			fmt = SND_SOC_DAIFMT_I2S |
+				SND_SOC_DAIFMT_NB_NF |
+				SND_SOC_DAIFMT_CBM_CFM;
+		else
+			fmt = SND_SOC_DAIFMT_DSP_B |
+				SND_SOC_DAIFMT_NB_IF |
+				SND_SOC_DAIFMT_CBM_CFM;
+	} else {
+		fmt = SND_SOC_DAIFMT_I2S |
+			SND_SOC_DAIFMT_NB_NF |
+			SND_SOC_DAIFMT_CBM_CFM;
 	}
 
+	ret = snd_soc_dai_set_fmt(cpu_dai, fmt);
 	if (ret < 0) {
 		printk(KERN_ERR "can't set cpu DAI configuration\n");
 		return ret;
@@ -138,11 +244,10 @@ static int sdp4430_mcbsp_hw_params(struct snd_pcm_substream *substream,
 	ret = snd_soc_dai_set_sysclk(cpu_dai, OMAP_MCBSP_SYSCLK_CLKS_FCLK,
 				     64 * params_rate(params),
 				     SND_SOC_CLOCK_IN);
-	if (ret < 0) {
+	if (ret < 0)
 		printk(KERN_ERR "can't set cpu system clock\n");
-		return ret;
-	}
-	return 0;
+
+	return ret;
 }
 
 static struct snd_soc_ops sdp4430_mcbsp_ops = {
@@ -212,7 +317,15 @@ static const struct snd_kcontrol_new sdp4430_controls[] = {
 
 /* SDP4430 machine DAPM */
 static const struct snd_soc_dapm_widget sdp4430_twl6040_dapm_widgets[] = {
-	SND_SOC_DAPM_MIC("Ext Mic", NULL),
+
+	SND_SOC_DAPM_MIC("Ext Main Mic", NULL),
+	SND_SOC_DAPM_MIC("Ext Sub Mic", NULL),
+	SND_SOC_DAPM_MICBIAS_E("Ext Main Mic Bias", SND_SOC_NOPM, 0, 0,
+				main_mic_bias_event,
+				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+	SND_SOC_DAPM_MICBIAS_E("Ext Sub Mic Bias", SND_SOC_NOPM, 0, 0,
+				sub_mic_bias_event,
+				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 	SND_SOC_DAPM_SPK("Ext Spk", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_HP("Headset Stereophone", NULL),
@@ -222,9 +335,10 @@ static const struct snd_soc_dapm_widget sdp4430_twl6040_dapm_widgets[] = {
 
 static const struct snd_soc_dapm_route audio_map[] = {
 	/* External Mics: MAINMIC, SUBMIC with bias*/
-	{"MAINMIC", NULL, "Main Mic Bias"},
-	{"SUBMIC", NULL, "Main Mic Bias"},
-	{"Main Mic Bias", NULL, "Ext Mic"},
+	{"MAINMIC", NULL, "Ext Main Mic Bias"},
+	{"SUBMIC", NULL, "Ext Sub Mic Bias"},
+	{"Ext Main Mic Bias" , NULL, "Ext Main Mic"},
+	{"Ext Sub Mic Bias" , NULL, "Ext Sub Mic"},
 
 	/* External Speakers: HFL, HFR */
 	{"Ext Spk", NULL, "HFL"},
@@ -268,7 +382,10 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
 
 	/* SDP4430 connected pins */
-	snd_soc_dapm_enable_pin(dapm, "Ext Mic");
+	if (machine_is_tuna()) {
+		snd_soc_dapm_enable_pin(dapm, "Ext Main Mic");
+		snd_soc_dapm_enable_pin(dapm, "Ext Sub Mic");
+	}
 	snd_soc_dapm_enable_pin(dapm, "Ext Spk");
 	snd_soc_dapm_enable_pin(dapm, "AFML");
 	snd_soc_dapm_enable_pin(dapm, "AFMR");
@@ -276,7 +393,10 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_enable_pin(dapm, "Headset Stereophone");
 
 	/* allow audio paths from the audio modem to run during suspend */
-	snd_soc_dapm_ignore_suspend(dapm, "Ext Mic");
+	if (machine_is_tuna()) {
+		snd_soc_dapm_ignore_suspend(dapm, "Ext Main Mic");
+		snd_soc_dapm_ignore_suspend(dapm, "Ext Sub Mic");
+	}
 	snd_soc_dapm_ignore_suspend(dapm, "Ext Spk");
 	snd_soc_dapm_ignore_suspend(dapm, "AFML");
 	snd_soc_dapm_ignore_suspend(dapm, "AFMR");
@@ -477,6 +597,7 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.dynamic = 1, /* BE is dynamic */
 		.dsp_link = &fe_modem,
+		.ops = &sdp4430_modem_ops,
 		.no_host_mode = SND_SOC_DAI_LINK_NO_HOST,
 		.ignore_suspend = 1,
 	},
@@ -504,6 +625,7 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_codec = 1, /* TODO: have a dummy CODEC */
 		.ops = &sdp4430_mcbsp_ops,
+		.ignore_suspend = 1,
 	},
 	{
 		.name = "Legacy McPDM",
@@ -518,6 +640,7 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.codec_name = "twl6040-codec",
 
 		.ops = &sdp4430_mcpdm_ops,
+		.ignore_suspend = 1,
 	},
 
 /*
@@ -592,8 +715,25 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.be_id = OMAP_ABE_DAI_PDM_VIB,
 	},
 	{
-		.name = OMAP_ABE_BE_BT_VX,
-		.stream_name = "BT",
+		.name = OMAP_ABE_BE_BT_VX_UL,
+		.stream_name = "BT Capture",
+
+		/* ABE components - MCBSP1 - BT-VX */
+		.cpu_dai_name = "omap-mcbsp-dai.0",
+		.platform_name = "aess",
+
+		/* Bluetooth */
+		.codec_dai_name = "Bluetooth",
+
+		.no_pcm = 1, /* don't create ALSA pcm for this */
+		.no_codec = 1, /* TODO: have a dummy CODEC */
+		.be_hw_params_fixup = mcbsp_be_hw_params_fixup,
+		.ops = &sdp4430_mcbsp_ops,
+		.be_id = OMAP_ABE_DAI_BT_VX,
+	},
+	{
+		.name = OMAP_ABE_BE_BT_VX_DL,
+		.stream_name = "BT Playback",
 
 		/* ABE components - MCBSP1 - BT-VX */
 		.cpu_dai_name = "omap-mcbsp-dai.0",
@@ -666,6 +806,20 @@ static int __init sdp4430_soc_init(void)
 		return -ENODEV;
 	}
 	printk(KERN_INFO "SDP4430 SoC init\n");
+
+	if (machine_is_tuna()) {
+		ret = gpio_request(TUNA_MAIN_MIC_GPIO, "MAIN_MICBIAS_EN");
+		if (ret)
+			goto mainmic_gpio_err;
+
+		gpio_direction_output(TUNA_MAIN_MIC_GPIO, 0);
+
+		ret = gpio_request(TUNA_SUB_MIC_GPIO, "SUB_MICBIAS_EN");
+		if (ret)
+			goto submic_gpio_err;
+		gpio_direction_output(TUNA_SUB_MIC_GPIO, 0);
+	}
+
 	if (machine_is_omap_4430sdp())
 		snd_soc_sdp4430.name = "SDP4430";
 	else if (machine_is_omap4_panda())
@@ -676,7 +830,8 @@ static int __init sdp4430_soc_init(void)
 	sdp4430_snd_device = platform_device_alloc("soc-audio", -1);
 	if (!sdp4430_snd_device) {
 		printk(KERN_ERR "Platform device allocation failed\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto device_err;
 	}
 
 	ret = snd_soc_register_dais(&sdp4430_snd_device->dev, dai, ARRAY_SIZE(dai));
@@ -693,12 +848,23 @@ static int __init sdp4430_soc_init(void)
 err:
 	printk(KERN_ERR "Unable to add platform device\n");
 	platform_device_put(sdp4430_snd_device);
+device_err:
+	if (machine_is_tuna())
+		gpio_free(TUNA_SUB_MIC_GPIO);
+submic_gpio_err:
+	if (machine_is_tuna())
+		gpio_free(TUNA_MAIN_MIC_GPIO);
+mainmic_gpio_err:
 	return ret;
 }
 module_init(sdp4430_soc_init);
 
 static void __exit sdp4430_soc_exit(void)
 {
+	if (machine_is_tuna()) {
+		gpio_free(TUNA_SUB_MIC_GPIO);
+		gpio_free(TUNA_MAIN_MIC_GPIO);
+	}
 	platform_device_unregister(sdp4430_snd_device);
 }
 module_exit(sdp4430_soc_exit);

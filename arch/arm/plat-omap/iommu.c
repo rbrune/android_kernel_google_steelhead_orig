@@ -765,7 +765,7 @@ static irqreturn_t iommu_fault_handler(int irq, void *data)
 	if (obj->isr && !obj->isr(obj, da, errs, obj->isr_priv))
 		return IRQ_HANDLED;
 
-	iommu_disable(obj);
+	iommu_write_reg(obj, 0, MMU_IRQENABLE);
 
 	iopgd = iopgd_offset(obj, da);
 
@@ -804,7 +804,7 @@ int iommu_set_da_range(struct iommu *obj, u32 start, u32 end)
 {
 
 	if (!obj)
-		return -EFAULT;
+		return -EIO;
 
 	if (end < start || !PAGE_ALIGN(start | end))
 		return -EINVAL;

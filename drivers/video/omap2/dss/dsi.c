@@ -206,6 +206,7 @@ struct dsi_reg { u16 idx; };
 #define DSI_DT_DCS_LONG_WRITE		0x39
 
 #define DSI_DT_RX_ACK_WITH_ERR		0x02
+#define DSI_DT_RX_LONG_READ		0x1a
 #define DSI_DT_RX_DCS_LONG_READ		0x1c
 #define DSI_DT_RX_SHORT_READ_1		0x21
 #define DSI_DT_RX_SHORT_READ_2		0x22
@@ -2943,6 +2944,10 @@ static u16 dsi_vc_flush_receive_data(struct platform_device *dsidev,
 		} else if (dt == DSI_DT_RX_SHORT_READ_2) {
 			DSSERR("\tDCS short response, 2 byte: %#x\n",
 					FLD_GET(val, 23, 8));
+		} else if (dt == DSI_DT_RX_LONG_READ) {
+			DSSERR("\tlong response, len %d\n",
+					FLD_GET(val, 23, 8));
+			dsi_vc_flush_long_data(dsidev, channel);
 		} else if (dt == DSI_DT_RX_DCS_LONG_READ) {
 			DSSERR("\tDCS long response, len %d\n",
 					FLD_GET(val, 23, 8));
@@ -3287,7 +3292,7 @@ int dsi_vc_dcs_read(struct omap_dss_device *dssdev, int channel, u8 dcs_cmd,
 		buf[1] = (data >> 8) & 0xff;
 
 		return 2;
-	} else if (dt == DSI_DT_RX_DCS_LONG_READ) {
+	} else if (dt == DSI_DT_RX_DCS_LONG_READ || dt == DSI_DT_RX_LONG_READ) {
 		int w;
 		int len = FLD_GET(val, 23, 8);
 		if (dsi->debug_read)
@@ -3770,6 +3775,11 @@ int dsi_video_mode_enable(struct omap_dss_device *dssdev, u8 data_type)
 	r = FLD_MOD(r, 1, 9, 9);
 	dsi_write_reg(dsidev, DSI_VC_CTRL(0), r);
 
+	r = dsi_read_reg(dsidev, DSI_VC_CTRL(1));
+	r = FLD_MOD(r, 0, 4, 4);
+	r = FLD_MOD(r, 1, 9, 9);
+	dsi_write_reg(dsidev, DSI_VC_CTRL(1), r);
+
 	word_count = dssdev->panel.timings.x_res * 3;
 	header = FLD_VAL(0, 31, 24) | /* ECC */
 		FLD_VAL(word_count, 23, 8) | /* WORD_COUNT */
@@ -3777,6 +3787,7 @@ int dsi_video_mode_enable(struct omap_dss_device *dssdev, u8 data_type)
 		FLD_VAL(data_type, 5, 0);
 	dsi_write_reg(dsidev, DSI_VC_LONG_PACKET_HEADER(0), header);
 
+	dsi_vc_enable(dsidev, 1, 1);
 	dsi_vc_enable(dsidev, 0, 1);
 	dsi_if_enable(dsidev, 1);
 

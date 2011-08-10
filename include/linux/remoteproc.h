@@ -35,6 +35,15 @@
 
 #include <linux/mutex.h>
 #include <linux/completion.h>
+#include <linux/workqueue.h>
+#include <linux/notifier.h>
+#include <linux/pm_qos_params.h>
+
+/* Must match the BIOS version embeded in the BIOS firmware image */
+#define RPROC_BIOS_VERSION	2
+
+/* Maximum number of entries that can be added for lookup */
+#define RPROC_MAX_MEM_ENTRIES	20
 
 /**
  * The following enums and structures define the binary format of the images
@@ -78,19 +87,39 @@ enum fw_section_type {
 struct fw_resource {
 	u32 type;
 	u64 da;
+	u64 pa;
 	u32 len;
 	u32 reserved;
 	u8 name[48];
 } __packed;
 
 enum fw_resource_type {
-	RSC_MEMORY	= 0,
-	RSC_DEVICE	= 1,
-	RSC_IRQ		= 2,
-	RSC_SERVICE	= 3,
+	RSC_CARVEOUT	= 0,
+	RSC_DEVMEM	= 1,
+	RSC_DEVICE	= 2,
+	RSC_IRQ		= 3,
 	RSC_TRACE	= 4,
 	RSC_BOOTADDR	= 5,
 	RSC_END		= 6,
+};
+
+/**
+ * struct rproc_mem_pool - descriptor for the rproc's contiguous memory pool data
+ *
+ * @mem_base: starting physical address of the dynamic pool
+ * @mem_size: size of the initial dynamic pool
+ * @cur_base: current available physical address in the pool
+ * @cur_size: remaining available memory in the pool
+ * @st_base:  starting physical address of the static pool
+ * @st_size:  size of the static pool
+ */
+struct rproc_mem_pool {
+	phys_addr_t mem_base;
+	u32 mem_size;
+	phys_addr_t cur_base;
+	u32 cur_size;
+	phys_addr_t st_base;
+	u32 st_size;
 };
 
 /**
@@ -106,11 +135,24 @@ struct rproc_mem_entry {
 	u32 size;
 };
 
+enum rproc_constraint {
+	RPROC_CONSTRAINT_SCALE,
+	RPROC_CONSTRAINT_LATENCY,
+	RPROC_CONSTRAINT_BANDWIDTH,
+};
+
 struct rproc;
 
 struct rproc_ops {
 	int (*start)(struct rproc *rproc, u64 bootaddr);
 	int (*stop)(struct rproc *rproc);
+	int (*suspend)(struct rproc *rproc, bool force);
+	int (*resume)(struct rproc *rproc);
+	int (*iommu_init)(struct rproc *, int (*)(struct rproc *, u64, u32));
+	int (*iommu_exit)(struct rproc *);
+	int (*set_lat)(struct rproc *rproc, long v);
+	int (*set_bw)(struct rproc *rproc, long v);
+	int (*scale)(struct rproc *rproc, long v);
 };
 
 /*
@@ -135,6 +177,29 @@ enum rproc_state {
 	RPROC_CRASHED,
 };
 
+/*
+ * enum rproc_event - remote processor events
+ *
+ * @RPROC_ERROR: Fatal error has happened on the remote processor.
+ *
+ * @RPROC_PRE_SUSPEND: users can register for that event in order to cancel
+ *		       autosuspend, they just need to return an error in the
+ *		       callback function.
+ *
+ * @RPROC_POS_SUSPEND: users can register for that event in order to release
+ *		       resources not needed when the remote processor is
+ *		       sleeping or if they need to save some context.
+ *
+ * @RPROC_RESUME: users should use this event to revert what was done in the
+ *		  POS_SUSPEND event.
+ */
+enum rproc_event {
+	RPROC_ERROR,
+	RPROC_PRE_SUSPEND,
+	RPROC_POS_SUSPEND,
+	RPROC_RESUME,
+};
+
 #define RPROC_MAX_NAME	100
 
 /*
@@ -144,6 +209,8 @@ enum rproc_state {
  * @name: human readable name of the rproc, cannot exceed RPROC_MAN_NAME bytes
  * @memory_maps: table of da-to-pa memory maps (relevant if device is behind
  *               an iommu)
+ * @memory_pool: platform-specific contiguous memory pool data (relevant for
+ *               allocating memory needed for the remote processor image)
  * @firmware: name of firmware file to be loaded
  * @owner: reference to the platform-specific rproc module
  * @priv: private data which belongs to the platform-specific rproc module
@@ -158,11 +225,15 @@ enum rproc_state {
  * @trace_len0: length of main trace buffer of the remote processor
  * @trace_len1: length of the second (and optional) trace buffer
  * @firmware_loading_complete: flags e/o asynchronous firmware loading
+ * @mmufault_work: work in charge of notifing mmufault
+ * @nb_error: notify block for fatal errors
+ * @error_comp: completion used when an error happens
  */
 struct rproc {
 	struct list_head next;
 	const char *name;
-	const struct rproc_mem_entry *memory_maps;
+	struct rproc_mem_entry memory_maps[RPROC_MAX_MEM_ENTRIES];
+	struct rproc_mem_pool *memory_pool;
 	const char *firmware;
 	struct module *owner;
 	void *priv;
@@ -175,12 +246,36 @@ struct rproc {
 	char *trace_buf0, *trace_buf1;
 	int trace_len0, trace_len1;
 	struct completion firmware_loading_complete;
+	struct work_struct mmufault_work;
+	struct blocking_notifier_head nb_error;
+	struct completion error_comp;
+#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
+	unsigned sus_timeout;
+	bool force_suspend;
+	bool need_resume;
+	struct blocking_notifier_head nb_presus;
+	struct blocking_notifier_head nb_possus;
+	struct blocking_notifier_head nb_resume;
+	struct mutex pm_lock;
+#endif
+	struct pm_qos_request_list *qos_request;
 };
 
 struct rproc *rproc_get(const char *);
 void rproc_put(struct rproc *);
+int rproc_event_register(struct rproc *, struct notifier_block *, int);
+int rproc_event_unregister(struct rproc *, struct notifier_block *, int);
 int rproc_register(struct device *, const char *, const struct rproc_ops *,
-		const char *, const struct rproc_mem_entry *, struct module *);
+		const char *, struct rproc_mem_pool *, struct module *,
+		unsigned int timeout);
 int rproc_unregister(const char *);
+void rproc_last_busy(struct rproc *);
+#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
+extern const struct dev_pm_ops rproc_gen_pm_ops;
+#define GENERIC_RPROC_PM_OPS	(&rproc_gen_pm_ops)
+#else
+#define GENERIC_RPROC_PM_OPS	NULL
+#endif
+int rproc_set_constraints(struct rproc *, enum rproc_constraint type, long v);
 
 #endif /* REMOTEPROC_H */

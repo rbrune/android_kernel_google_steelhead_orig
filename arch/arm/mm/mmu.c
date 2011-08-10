@@ -273,6 +273,14 @@ static struct mem_type mem_types[] = {
 		.prot_l1   = PMD_TYPE_TABLE,
 		.domain    = DOMAIN_KERNEL,
 	},
+	[MT_MEMORY_SO] = {
+		.prot_pte  = L_PTE_PRESENT | L_PTE_YOUNG | L_PTE_DIRTY |
+				L_PTE_MT_UNCACHED,
+		.prot_l1   = PMD_TYPE_TABLE,
+		.prot_sect = PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_S |
+				PMD_SECT_UNCACHED | PMD_SECT_XN,
+		.domain    = DOMAIN_KERNEL,
+	},
 };
 
 const struct mem_type *get_mem_type(unsigned int type)
@@ -759,7 +767,7 @@ early_param("vmalloc", early_vmalloc);
 
 static phys_addr_t lowmem_limit __initdata = 0;
 
-static void __init sanity_check_meminfo(void)
+void __init sanity_check_meminfo(void)
 {
 	int i, j, highmem = 0;
 
@@ -1032,8 +1040,9 @@ void __init paging_init(struct machine_desc *mdesc)
 {
 	void *zero_page;
 
+	memblock_set_current_limit(lowmem_limit);
+
 	build_mem_type_table();
-	sanity_check_meminfo();
 	prepare_page_table();
 	map_lowmem();
 	devicemaps_init(mdesc);

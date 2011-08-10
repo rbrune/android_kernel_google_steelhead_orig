@@ -176,7 +176,7 @@ static struct omap_voltdm_pmic omap3_core_pmic = {
 };
 
 static struct omap_voltdm_pmic omap443x_mpu_pmic = {
-	.slew_rate		= 4000,
+	.slew_rate		= 9000,
 	.step_size		= 12660,
 	.on_volt		= 1375000,
 	.onlp_volt		= 1375000,
@@ -202,7 +202,7 @@ static struct omap_voltdm_pmic omap443x_mpu_pmic = {
 };
 
 static struct omap_voltdm_pmic omap4_iva_pmic = {
-	.slew_rate		= 4000,
+	.slew_rate		= 9000,
 	.step_size		= 12660,
 	.on_volt		= 1188000,
 	.onlp_volt		= 1188000,
@@ -228,7 +228,7 @@ static struct omap_voltdm_pmic omap4_iva_pmic = {
 };
 
 static struct omap_voltdm_pmic omap443x_core_pmic = {
-	.slew_rate		= 4000,
+	.slew_rate		= 9000,
 	.step_size		= 12660,
 	.on_volt		= 1200000,
 	.onlp_volt		= 1200000,
@@ -255,7 +255,7 @@ static struct omap_voltdm_pmic omap443x_core_pmic = {
 
 /* Core uses the MPU rail of 4430 */
 static struct omap_voltdm_pmic omap446x_core_pmic = {
-	.slew_rate		= 4000,
+	.slew_rate		= 9000,
 	.step_size		= 12660,
 	.on_volt		= 1200000,
 	.onlp_volt		= 1200000,
@@ -390,4 +390,9 @@ int __init omap3_twl_set_sr_bit(bool enable)
 err:
 	pr_err("%s: Error access to TWL4030 (%d)\n", __func__, ret);
 	return ret;
+}
+
+int __init omap_twl_pmic_update(char *name, u16 old_chip_id, u16 new_chip_id)
+{
+	return omap_pmic_update(omap_twl_map, name, old_chip_id, new_chip_id);
 }

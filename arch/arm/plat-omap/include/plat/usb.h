@@ -100,9 +100,6 @@ extern void usb_musb_init(struct omap_musb_board_data *board_data);
 
 extern void usbhs_init(const struct usbhs_omap_board_data *pdata);
 
-extern int omap_usbhs_enable(struct device *dev);
-extern void omap_usbhs_disable(struct device *dev);
-
 extern int omap4430_phy_power(struct device *dev, int ID, int on);
 extern int omap4430_phy_set_clk(struct device *dev, int on);
 extern int omap4430_phy_init(struct device *dev);
@@ -292,5 +289,10 @@ static inline u32 omap1_usb2_init(unsigned nwires, unsigned alt_pingroup)
 	return 0;
 }
 #endif
+
+extern void usbhs_wakeup(void);
+extern void omap4_trigger_ioctrl(void);
+
+#define USBHS_EHCI_HWMODNAME	"usbhs_ehci"
 
 #endif	/* __ASM_ARCH_OMAP_USB_H */

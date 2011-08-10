@@ -17,6 +17,8 @@
 #include <linux/slab.h>
 #include <linux/opp.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
 #include <plat/common.h>
 #include <plat/omap_device.h>
 #include <plat/omap_hwmod.h>
@@ -24,6 +26,7 @@
 #include "dvfs.h"
 #include "smartreflex.h"
 #include "powerdomain.h"
+#include "pm.h"
 
 /**
  * DOC: Introduction
@@ -172,6 +175,8 @@ struct omap_vdd_user_list {
  * @vdd_user_list: The vdd user list
  * @voltdm:	Voltage domains for which dvfs info stored
  * @dev_list:	Device list maintained per domain
+ * @is_scaling: flag to store information about scaling in progress or not
+ *		this flag is already protected by the global mutex.
  *
  * This is a fundamental structure used to store all the required
  * DVFS related information for a vdd.
@@ -183,6 +188,7 @@ struct omap_vdd_dvfs_info {
 	struct plist_head vdd_user_list;
 	struct voltagedomain *voltdm;
 	struct list_head dev_list;
+	bool is_scaling;
 };
 
 static LIST_HEAD(omap_dvfs_info_list);
@@ -692,6 +698,11 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 	}
 	vdd = voltdm->vdd;
 
+	/* Mark that we are scaling for this device */
+	tdvfs_info->is_scaling = true;
+	/* let the other CPU know as well */
+	smp_wmb();
+
 	/* Find the highest voltage being requested */
 	node = plist_last(&tdvfs_info->vdd_user_list);
 	new_volt = node->prio;
@@ -748,12 +759,19 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 			node = plist_last(&temp_dev->freq_user_list);
 			freq = node->prio;
 		} else {
-			/* dep domain? we'd probably have a voltage request */
-			rcu_read_lock();
-			opp = _volt_to_opp(dev, new_volt);
-			if (!IS_ERR(opp))
-				freq = opp_get_freq(opp);
-			rcu_read_unlock();
+			/*
+			 * Is the dev of dep domain target_device?
+			 * we'd probably have a voltage request without
+			 * a frequency dependency, scale appropriate frequency
+			 * if there are none pending
+			 */
+			if (target_dev == dev) {
+				rcu_read_lock();
+				opp = _volt_to_opp(dev, new_volt);
+				if (!IS_ERR(opp))
+					freq = opp_get_freq(opp);
+				rcu_read_unlock();
+			}
 			if (!freq)
 				continue;
 		}
@@ -789,6 +807,11 @@ fail:
 out:
 	/* Re-enable Smartreflex module */
 	omap_sr_enable(voltdm);
+
+	/* Mark done */
+	tdvfs_info->is_scaling = false;
+	/* let the other CPU know as well */
+	smp_wmb();
 
 	return ret;
 }
@@ -833,11 +856,19 @@ int omap_device_scale(struct device *req_dev, struct device *target_dev,
 		return -EINVAL;
 	}
 
+	if (!omap_pm_is_ready()) {
+		dev_dbg(target_dev, "%s: pm is not ready yet\n", __func__);
+		return -EBUSY;
+	}
+
 	/* Lock me to ensure cross domain scaling is secure */
 	mutex_lock(&omap_dvfs_lock);
 
 	rcu_read_lock();
 	opp = opp_find_freq_ceil(target_dev, &freq);
+	/* If we dont find a max, try a floor at least */
+	if (IS_ERR(opp))
+		opp = opp_find_freq_floor(target_dev, &freq);
 	if (IS_ERR(opp)) {
 		rcu_read_unlock();
 		dev_err(target_dev, "%s: Unable to find OPP for freq%ld\n",
@@ -890,6 +921,204 @@ out:
 EXPORT_SYMBOL(omap_device_scale);
 
 /**
+ * omap_dvfs_is_scaling() - Tells the caller if the domain is scaling
+ * @voltdm:	voltage domain we are interested in
+ *
+ * Returns true if the domain is in the middle of scale operation,
+ * returns false if there is no scale operation is in progress or an
+ * invalid parameter was passed.
+ */
+bool omap_dvfs_is_scaling(struct voltagedomain *voltdm)
+{
+	struct omap_vdd_dvfs_info *dvfs_info;
+
+	if (IS_ERR_OR_NULL(voltdm)) {
+		pr_err("%s: bad voltdm\n", __func__);
+		return false;
+	}
+
+	dvfs_info = _voltdm_to_dvfs_info(voltdm);
+	if (IS_ERR_OR_NULL(dvfs_info)) {
+		pr_err("%s: no dvfsinfo for voltdm %s\n",
+			__func__, voltdm->name);
+		return false;
+	}
+
+	return dvfs_info->is_scaling;
+}
+EXPORT_SYMBOL(omap_dvfs_is_scaling);
+
+#ifdef CONFIG_PM_DEBUG
+static int dvfs_dump_vdd(struct seq_file *sf, void *unused)
+{
+	int k;
+	struct omap_vdd_dvfs_info *dvfs_info;
+	struct omap_vdd_dev_list *tdev;
+	struct omap_dev_user_list *duser;
+	struct omap_vdd_user_list *vuser;
+	struct omap_vdd_info *vdd;
+	struct omap_vdd_dep_info *dep_info;
+	struct voltagedomain *voltdm;
+	struct omap_volt_data *volt_data;
+	int anyreq;
+	int anyreq2;
+
+	dvfs_info = (struct omap_vdd_dvfs_info *)sf->private;
+	if (IS_ERR_OR_NULL(dvfs_info)) {
+		pr_err("%s: NO DVFS?\n", __func__);
+		return -EINVAL;
+	}
+
+	voltdm = dvfs_info->voltdm;
+	if (IS_ERR_OR_NULL(voltdm)) {
+		pr_err("%s: NO voltdm?\n", __func__);
+		return -EINVAL;
+	}
+
+	vdd = voltdm->vdd;
+	if (IS_ERR_OR_NULL(vdd)) {
+		pr_err("%s: NO vdd data?\n", __func__);
+		return -EINVAL;
+	}
+
+	seq_printf(sf, "vdd_%s\n", voltdm->name);
+	mutex_lock(&omap_dvfs_lock);
+	spin_lock(&dvfs_info->user_lock);
+
+	seq_printf(sf, "|- voltage requests\n|  |\n");
+	anyreq = 0;
+	plist_for_each_entry(vuser, &dvfs_info->vdd_user_list, node) {
+		seq_printf(sf, "|  |-%d: %s:%s\n",
+			   vuser->node.prio,
+			   dev_driver_string(vuser->dev), dev_name(vuser->dev));
+		anyreq = 1;
+	}
+
+	spin_unlock(&dvfs_info->user_lock);
+
+	if (!anyreq)
+		seq_printf(sf, "|  `-none\n");
+	else
+		seq_printf(sf, "|  X\n");
+	seq_printf(sf, "|\n");
+
+	seq_printf(sf, "|- frequency requests\n|  |\n");
+	anyreq2 = 0;
+	list_for_each_entry(tdev, &dvfs_info->dev_list, node) {
+		anyreq = 0;
+		seq_printf(sf, "|  |- %s:%s\n",
+			   dev_driver_string(tdev->dev), dev_name(tdev->dev));
+		spin_lock(&tdev->user_lock);
+		plist_for_each_entry(duser, &tdev->freq_user_list, node) {
+			seq_printf(sf, "|  |  |-%d: %s:%s\n",
+				   duser->node.prio,
+				   dev_driver_string(duser->dev),
+				   dev_name(duser->dev));
+			anyreq = 1;
+		}
+
+		spin_unlock(&tdev->user_lock);
+
+		if (!anyreq)
+			seq_printf(sf, "|  |  `-none\n");
+		else
+			seq_printf(sf, "|  |  X\n");
+		anyreq2 = 1;
+	}
+	if (!anyreq2)
+		seq_printf(sf, "|  `-none\n");
+	else
+		seq_printf(sf, "|  X\n");
+
+	volt_data = vdd->volt_data;
+	seq_printf(sf, "|- Supported voltages\n|  |\n");
+	anyreq = 0;
+	while (volt_data && volt_data->volt_nominal) {
+		seq_printf(sf, "|  |-%d\n", volt_data->volt_nominal);
+		anyreq = 1;
+		volt_data++;
+	}
+	if (!anyreq)
+		seq_printf(sf, "|  `-none\n");
+	else
+		seq_printf(sf, "|  X\n");
+
+	dep_info = vdd->dep_vdd_info;
+	seq_printf(sf, "`- voltage dependencies\n   |\n");
+	anyreq = 0;
+	while (dep_info && dep_info->nr_dep_entries) {
+		struct omap_vdd_dep_volt *dep_table = dep_info->dep_table;
+
+		seq_printf(sf, "   |-on vdd_%s\n", dep_info->name);
+
+		for (k = 0; k < dep_info->nr_dep_entries; k++) {
+			seq_printf(sf, "   |  |- %d => %d\n",
+				   dep_table[k].main_vdd_volt,
+				   dep_table[k].dep_vdd_volt);
+		}
+
+		anyreq = 1;
+		dep_info++;
+	}
+
+	if (!anyreq)
+		seq_printf(sf, "   `- none\n");
+	else
+		seq_printf(sf, "   X  X\n");
+
+	mutex_unlock(&omap_dvfs_lock);
+	return 0;
+}
+
+static int dvfs_dbg_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dvfs_dump_vdd, inode->i_private);
+}
+
+static struct file_operations debugdvfs_fops = {
+	.open = dvfs_dbg_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static struct dentry __initdata *dvfsdebugfs_dir;
+
+static void __init dvfs_dbg_init(struct omap_vdd_dvfs_info *dvfs_info)
+{
+	struct dentry *ddir;
+
+	/* create a base dir */
+	if (!dvfsdebugfs_dir)
+		dvfsdebugfs_dir = debugfs_create_dir("dvfs", NULL);
+	if (IS_ERR_OR_NULL(dvfsdebugfs_dir)) {
+		WARN_ONCE("%s: Unable to create base DVFS dir\n", __func__);
+		return;
+	}
+
+	if (IS_ERR_OR_NULL(dvfs_info->voltdm)) {
+		pr_err("%s: no voltdm\n", __func__);
+		return;
+	}
+
+	ddir = debugfs_create_dir(dvfs_info->voltdm->name, dvfsdebugfs_dir);
+	if (IS_ERR_OR_NULL(ddir)) {
+		pr_warning("%s: unable to create subdir %s\n", __func__,
+			   dvfs_info->voltdm->name);
+		return;
+	}
+
+	debugfs_create_file("info", S_IRUGO, ddir,
+			    (void *)dvfs_info, &debugdvfs_fops);
+}
+#else				/* CONFIG_PM_DEBUG */
+static inline void dvfs_dbg_init(struct omap_vdd_dvfs_info *dvfs_info)
+{
+	return;
+}
+#endif				/* CONFIG_PM_DEBUG */
+
+/**
  * omap_dvfs_register_device - Add a parent device into dvfs managed list
  * @dev:		Device to be added
  * @voltdm_name:	Name of the voltage domain for the device
@@ -907,6 +1136,7 @@ int __init omap_dvfs_register_device(struct device *dev, char *voltdm_name,
 	struct omap_vdd_dev_list *temp_dev;
 	struct omap_vdd_dvfs_info *dvfs_info;
 	struct clk *clk = NULL;
+	struct voltagedomain *voltdm;
 	int ret = 0;
 
 	if (!voltdm_name) {
@@ -921,7 +1151,14 @@ int __init omap_dvfs_register_device(struct device *dev, char *voltdm_name,
 	/* Lock me to secure structure changes */
 	mutex_lock(&omap_dvfs_lock);
 
-	dvfs_info = _dev_to_dvfs_info(dev);
+	voltdm = voltdm_lookup(voltdm_name);
+	if (!voltdm) {
+		dev_warn(dev, "%s: unable to find voltdm %s!\n",
+			__func__, voltdm_name);
+		ret = -EINVAL;
+		goto out;
+	}
+	dvfs_info = _voltdm_to_dvfs_info(voltdm);
 	if (!dvfs_info) {
 		dvfs_info = kzalloc(sizeof(struct omap_vdd_dvfs_info),
 				GFP_KERNEL);
@@ -931,23 +1168,17 @@ int __init omap_dvfs_register_device(struct device *dev, char *voltdm_name,
 			ret = -ENOMEM;
 			goto out;
 		}
-		dvfs_info->voltdm = voltdm_lookup(voltdm_name);
-		if (!dvfs_info->voltdm) {
-			dev_warn(dev, "%s: unable to find voltdm %s!\n",
-				__func__, voltdm_name);
-			kfree(dvfs_info);
-			ret = -EINVAL;
-			goto out;
-		}
+		dvfs_info->voltdm = voltdm;
 
 		/* Init the plist */
 		spin_lock_init(&dvfs_info->user_lock);
-		plist_head_init(&dvfs_info->vdd_user_list,
-					&dvfs_info->user_lock);
+		plist_head_init(&dvfs_info->vdd_user_list);
 		/* Init the device list */
 		INIT_LIST_HEAD(&dvfs_info->dev_list);
 
 		list_add(&dvfs_info->node, &omap_dvfs_info_list);
+
+		dvfs_dbg_init(dvfs_info);
 	}
 
 	/* If device already added, we dont need to do more.. */
@@ -974,7 +1205,7 @@ int __init omap_dvfs_register_device(struct device *dev, char *voltdm_name,
 
 	/* Initialize priority ordered list */
 	spin_lock_init(&temp_dev->user_lock);
-	plist_head_init(&temp_dev->freq_user_list, &temp_dev->user_lock);
+	plist_head_init(&temp_dev->freq_user_list);
 
 	temp_dev->dev = dev;
 	temp_dev->clk = clk;

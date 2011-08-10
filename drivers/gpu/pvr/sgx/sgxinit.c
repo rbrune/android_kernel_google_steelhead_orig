@@ -167,9 +167,6 @@ static PVRSRV_ERROR InitDevInfo(PVRSRV_PER_PROCESS_DATA *psPerProc,
 #if defined(SGX_FEATURE_OVERLAPPED_SPM)
 	psDevInfo->psKernelTmpRgnHeaderMemInfo = (PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelTmpRgnHeaderMemInfo;
 #endif
-#if defined(SGX_FEATURE_SPM_MODE_0)
-	psDevInfo->psKernelTmpDPMStateMemInfo = (PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelTmpDPMStateMemInfo;
-#endif
 	
 	psDevInfo->ui32ClientBuildOptions = psInitInfo->ui32ClientBuildOptions;
 
@@ -1993,7 +1990,6 @@ PVRSRV_ERROR SGXDevInitCompatCheck(PVRSRV_DEVICE_NODE *psDeviceNode)
 		PVR_LOG(("(FAIL) SGXInit: Incompatible driver DDK revision (%d)/device DDK revision (%d).",
 				PVRVERSION_BUILD, psSGXFeatures->ui32DDKBuild));
 		eError = PVRSRV_ERROR_DDK_VERSION_MISMATCH;
-		PVR_DBG_BREAK;
 		goto chk_exit;
 	}
 	else

@@ -33,10 +33,14 @@
 #include <plat/omap_hwmod.h>
 #include <plat/omap_device.h>
 #include <plat/omap4-keypad.h>
+#include <plat/mcpdm.h>
+
+#include <sound/omap-abe-dsp.h>
 
 #include "mux.h"
 #include "control.h"
 #include "devices.h"
+#include "dvfs.h"
 
 #define L3_MODULES_MAX_LEN 12
 #define L3_MODULES 3
@@ -292,6 +296,94 @@ static inline void omap_init_mbox(void) { }
 #endif /* CONFIG_OMAP_MBOX_FWK */
 
 static inline void omap_init_sti(void) {}
+
+#if defined(CONFIG_SND_OMAP_SOC_MCPDM) || \
+		defined(CONFIG_SND_OMAP_SOC_MCPDM_MODULE)
+
+static struct omap_device_pm_latency omap_mcpdm_latency[] = {
+	{
+		.deactivate_func = omap_device_idle_hwmods,
+		.activate_func = omap_device_enable_hwmods,
+		.flags = OMAP_DEVICE_LATENCY_AUTO_ADJUST,
+	},
+};
+
+static void omap_init_mcpdm(void)
+{
+	struct omap_hwmod *oh;
+	struct omap_device *od;
+	struct omap_mcpdm_platform_data *pdata;
+	char *oh_name = "mcpdm";
+	char *dev_name = "omap-mcpdm";
+
+	oh = omap_hwmod_lookup(oh_name);
+	if (!oh) {
+		pr_err("%s: could not look up %s\n", __func__, oh_name);
+		return;
+	}
+
+	pdata = kzalloc(sizeof(struct omap_mcpdm_platform_data), GFP_KERNEL);
+	if (!pdata) {
+		pr_err("%s: could not allocate platform data\n", __func__);
+		return;
+	}
+
+	od = omap_device_build(dev_name, -1, oh, pdata,
+				sizeof(struct omap_mcpdm_platform_data),
+				omap_mcpdm_latency,
+				ARRAY_SIZE(omap_mcpdm_latency), 0);
+	WARN(IS_ERR(od), "could not build omap_device for %s:%s\n",
+				oh_name, dev_name);
+}
+#else
+static inline void omap_init_mcpdm(void) {}
+#endif
+
+#if defined(CONFIG_SND_OMAP_SOC_ABE_DSP) || \
+	defined(CONFIG_SND_OMAP_SOC_ABE_DSP_MODULE)
+
+static struct omap_device_pm_latency omap_aess_latency[] = {
+	{
+		.deactivate_func = omap_device_idle_hwmods,
+		.activate_func = omap_device_enable_hwmods,
+		.flags = OMAP_DEVICE_LATENCY_AUTO_ADJUST,
+	},
+};
+
+static void omap_init_aess(void)
+{
+	struct omap_hwmod *oh;
+	struct omap_device *od;
+	struct omap4_abe_dsp_pdata *pdata;
+	char *oh_name = "aess";
+	char *dev_name = "aess";
+
+	oh = omap_hwmod_lookup(oh_name);
+	if (!oh) {
+		pr_err("%s: could not look up %s\n", __func__, oh_name);
+		return;
+	}
+
+	pdata = kzalloc(sizeof(struct omap4_abe_dsp_pdata), GFP_KERNEL);
+	if (!pdata) {
+		pr_err("%s: could not allocate platform data\n", __func__);
+		return;
+	}
+
+	pdata->device_scale = omap_device_scale;
+
+	od = omap_device_build(dev_name, -1, oh, pdata,
+				sizeof(struct omap4_abe_dsp_pdata),
+				omap_aess_latency,
+				ARRAY_SIZE(omap_aess_latency), 0);
+	WARN(IS_ERR(od), "could not build omap_device for %s:%s\n",
+				oh_name, dev_name);
+
+	kfree(pdata);
+}
+#else
+static inline void omap_init_aess(void) {}
+#endif
 
 #if defined CONFIG_ARCH_OMAP4
 
@@ -732,9 +824,14 @@ static void omap_init_gpu(void)
 		return;
 	}
 
+	pdata->device_scale = omap_device_scale;
 	pdata->device_enable = omap_device_enable;
 	pdata->device_idle = omap_device_idle;
 	pdata->device_shutdown = omap_device_shutdown;
+
+	pdata->ovfreqs = 0;
+	if (cpu_is_omap446x())
+		pdata->ovfreqs = 1;
 
 	od = omap_device_build(name, 0, oh, pdata,
 			     sizeof(struct gpu_platform_data),
@@ -754,6 +851,8 @@ static int __init omap2_init_devices(void)
 	 * please keep these calls, and their implementations above,
 	 * in alphabetical order so they're easier to sort through.
 	 */
+	omap_init_mcpdm();
+	omap_init_aess();
 	omap_init_abe();
 	omap_init_audio();
 	omap_init_camera();

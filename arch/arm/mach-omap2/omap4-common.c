@@ -14,11 +14,14 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/hardware/gic.h>
 #include <asm/hardware/cache-l2x0.h>
 #include <asm/cacheflush.h>
+#include <asm/smp_twd.h>
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -36,6 +39,15 @@ static void __iomem *gic_dist_base_addr;
 static void __iomem *gic_cpu_base;
 static void __iomem *sar_ram_base;
 static struct clockdomain *l4_secure_clkdm;
+static void *dram_barrier_base;
+
+static void omap_bus_sync_noop(void)
+{ }
+
+struct omap_bus_post_fns omap_bus_post = {
+	.sync = omap_bus_sync_noop,
+};
+EXPORT_SYMBOL(omap_bus_post);
 
 void __iomem *omap4_get_gic_dist_base(void)
 {
@@ -45,6 +57,11 @@ void __iomem *omap4_get_gic_dist_base(void)
 void __iomem *omap4_get_gic_cpu_base(void)
 {
 	return gic_cpu_base;
+}
+
+void *omap_get_dram_barrier_base(void)
+{
+	return dram_barrier_base;
 }
 
 void __init gic_init_irq(void)
@@ -80,13 +97,41 @@ void gic_cpu_disable(void)
 	__raw_writel(0, gic_cpu_base + GIC_CPU_CTRL);
 }
 
+
+bool gic_dist_disabled(void)
+{
+	return !(__raw_readl(gic_dist_base_addr + GIC_DIST_CTRL) & 0x1);
+}
+
 void gic_dist_enable(void)
 {
-	__raw_writel(0x1, gic_dist_base_addr + GIC_DIST_CTRL);
+	if (cpu_is_omap443x() || gic_dist_disabled())
+		__raw_writel(0x1, gic_dist_base_addr + GIC_DIST_CTRL);
 }
 void gic_dist_disable(void)
 {
 	__raw_writel(0, gic_dist_base_addr + GIC_CPU_CTRL);
+}
+
+void gic_timer_retrigger(void)
+{
+	u32 twd_int = __raw_readl(twd_base + TWD_TIMER_INTSTAT);
+	u32 gic_int = __raw_readl(gic_dist_base_addr + GIC_DIST_PENDING_SET);
+	u32 twd_ctrl = __raw_readl(twd_base + TWD_TIMER_CONTROL);
+
+	if (twd_int && !(gic_int & BIT(OMAP44XX_IRQ_LOCALTIMER))) {
+		/*
+		 * The local timer interrupt got lost while the distributor was
+		 * disabled.  Ack the pending interrupt, and retrigger it.
+		 */
+		pr_warn("%s: lost localtimer interrupt\n", __func__);
+		__raw_writel(1, twd_base + TWD_TIMER_INTSTAT);
+		if (!(twd_ctrl & TWD_TIMER_CONTROL_PERIODIC)) {
+			__raw_writel(1, twd_base + TWD_TIMER_COUNTER);
+			twd_ctrl |= TWD_TIMER_CONTROL_ENABLE;
+			__raw_writel(twd_ctrl, twd_base + TWD_TIMER_CONTROL);
+		}
+	}
 }
 
 #ifdef CONFIG_CACHE_L2X0
@@ -113,6 +158,7 @@ static int __init omap_l2_cache_init(void)
 	u32 aux_ctrl = 0;
 	u32 por_ctrl = 0;
 	u32 lockdown = 0;
+	bool mpu_prefetch_disable_errata = false;
 
 	/*
 	 * To avoid code running on other OMAPs in
@@ -120,6 +166,12 @@ static int __init omap_l2_cache_init(void)
 	 */
 	if (!cpu_is_omap44xx())
 		return -ENODEV;
+
+#ifdef CONFIG_OMAP_ALLOW_OSWR
+	/* TODO: add revision info once verified */
+	if (cpu_is_omap446x())
+		mpu_prefetch_disable_errata = true;
+#endif
 
 	/* Static mapping, never released */
 	l2cache_base = ioremap(OMAP44XX_L2CACHE_BASE, SZ_4K);
@@ -144,8 +196,10 @@ static int __init omap_l2_cache_init(void)
 	 */
 	aux_ctrl |= ((0x3 << L2X0_AUX_CTRL_WAY_SIZE_SHIFT) |
 		(1 << L2X0_AUX_CTRL_SHARE_OVERRIDE_SHIFT) |
-		(1 << L2X0_AUX_CTRL_DATA_PREFETCH_SHIFT) |
 		(1 << L2X0_AUX_CTRL_EARLY_BRESP_SHIFT));
+
+	if (!mpu_prefetch_disable_errata)
+		aux_ctrl |= (1 << L2X0_AUX_CTRL_DATA_PREFETCH_SHIFT);
 
 	omap_smc1(0x109, aux_ctrl);
 
@@ -157,20 +211,14 @@ static int __init omap_l2_cache_init(void)
 	 * Undocumented bit 25 is set for better performance.
 	 */
 	if (cpu_is_omap446x())
-		por_ctrl |= ((1 << L2X0_PREFETCH_DATA_PREFETCH_SHIFT) |
-			(1 << L2X0_PREFETCH_DOUBLE_LINEFILL_SHIFT) |
-			(1 << 25));
+		por_ctrl |= 1 << L2X0_PREFETCH_DOUBLE_LINEFILL_SHIFT;
+	por_ctrl |= 1 << 25;
+	if (!mpu_prefetch_disable_errata)
+		por_ctrl |= 1 << L2X0_PREFETCH_DATA_PREFETCH_SHIFT;
 
 	if (cpu_is_omap446x() || (omap_rev() >= OMAP4430_REV_ES2_2)) {
 		por_ctrl |= L2X0_POR_OFFSET_VALUE;
 		omap_smc1(0x113, por_ctrl);
-	}
-
-	if (cpu_is_omap446x()) {
-		writel_relaxed(0xa5a5, l2cache_base + 0x900);
-		writel_relaxed(0xa5a5, l2cache_base + 0x908);
-		writel_relaxed(0xa5a5, l2cache_base + 0x904);
-		writel_relaxed(0xa5a5, l2cache_base + 0x90C);
 	}
 
 	/*
@@ -203,6 +251,26 @@ skip_aux_por_api:
 }
 early_initcall(omap_l2_cache_init);
 #endif
+
+static int __init omap_barriers_init(void)
+{
+	dma_addr_t dram_phys;
+
+	if (!cpu_is_omap44xx())
+		return -ENODEV;
+
+	dram_barrier_base = dma_alloc_stronglyordered(NULL, SZ_4K,
+				(dma_addr_t *)&dram_phys, GFP_KERNEL);
+	if (!dram_barrier_base) {
+		pr_err("%s: failed to allocate memory.\n", __func__);
+		return -ENOMEM;
+	}
+
+	omap_bus_post.sync = omap_bus_sync;
+
+	return 0;
+}
+core_initcall(omap_barriers_init);
 
 void __iomem *omap4_get_sar_ram_base(void)
 {

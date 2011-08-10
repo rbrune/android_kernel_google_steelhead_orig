@@ -19,8 +19,11 @@
 #include <linux/interrupt.h>
 #include <linux/gpio.h>
 #include <linux/max17040_battery.h>
+#include <linux/moduleparam.h>
 #include <linux/pda_power.h>
 #include <linux/platform_device.h>
+
+#include <plat/cpu.h>
 
 #include "board-tuna.h"
 #include "mux.h"
@@ -30,15 +33,18 @@
 #define GPIO_CHARGING_N		83
 #define GPIO_TA_NCONNECTED	142
 #define GPIO_CHARGE_N		13
-#define CHG_CUR_ADJ		102
+#define GPIO_CHG_CUR_ADJ	102
 
 #define TPS62361_GPIO   7
+
+static bool enable_sr = true;
+module_param(enable_sr, bool, S_IRUSR | S_IRGRP | S_IROTH);
 
 static struct gpio charger_gpios[] = {
 	{ .gpio = GPIO_CHARGING_N, .flags = GPIOF_IN, .label = "charging_n" },
 	{ .gpio = GPIO_TA_NCONNECTED, .flags = GPIOF_IN, .label = "charger_n" },
 	{ .gpio = GPIO_CHARGE_N, .flags = GPIOF_OUT_INIT_HIGH, .label = "charge_n" },
-	{ .gpio = CHG_CUR_ADJ, .flags = GPIOF_OUT_INIT_LOW, .label = "charge_cur_adj" },
+	{ .gpio = GPIO_CHG_CUR_ADJ, .flags = GPIOF_OUT_INIT_LOW, .label = "charge_cur_adj" },
 };
 
 static int charger_init(struct device *dev)
@@ -53,10 +59,11 @@ static void charger_exit(struct device *dev)
 
 static void charger_set_charge(int state)
 {
+	gpio_set_value(GPIO_CHG_CUR_ADJ, !!(state & PDA_POWER_CHARGE_AC));
 	gpio_set_value(GPIO_CHARGE_N, !state);
 }
 
-static int charger_is_ac_online(void)
+static int charger_is_online(void)
 {
 	return !gpio_get_value(GPIO_TA_NCONNECTED);
 }
@@ -66,36 +73,25 @@ static int charger_is_charging(void)
 	return !gpio_get_value(GPIO_CHARGING_N);
 }
 
-static const __initdata struct resource charger_resources[] = {
-	{
-		.name = "ac",
-		.start = OMAP_GPIO_IRQ(GPIO_TA_NCONNECTED),
-		.end = OMAP_GPIO_IRQ(GPIO_TA_NCONNECTED),
-		.flags = IORESOURCE_IRQ |
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
-	},
-	{
-		.name = "usb",
-		.start = OMAP_GPIO_IRQ(GPIO_TA_NCONNECTED),
-		.end = OMAP_GPIO_IRQ(GPIO_TA_NCONNECTED),
-		.flags = IORESOURCE_IRQ |
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
-	}
+static char *tuna_charger_supplied_to[] = {
+	"battery",
 };
 
 static const __initdata struct pda_power_pdata charger_pdata = {
 	.init = charger_init,
 	.exit = charger_exit,
-	.is_ac_online = charger_is_ac_online,
-	.is_usb_online = charger_is_ac_online,
 	.set_charge = charger_set_charge,
 	.wait_for_status = 500,
 	.wait_for_charger = 500,
+	.supplied_to = tuna_charger_supplied_to,
+	.num_supplicants = ARRAY_SIZE(tuna_charger_supplied_to),
+	.use_otg_notifier = true,
 };
 
 static struct max17040_platform_data max17043_pdata = {
-	.charger_online = charger_is_ac_online,
+	.charger_online = charger_is_online,
 	.charger_enable = charger_is_charging,
+	.skip_reset	= true,
 };
 
 static const __initdata struct i2c_board_info max17043_i2c[] = {
@@ -110,12 +106,22 @@ void __init omap4_tuna_power_init(void)
 	struct platform_device *pdev;
 	int status;
 
-	if (omap4_tuna_final_gpios()) {
-		/* Vsel0 = gpio, vsel1 = gnd */
-		status = omap_tps6236x_board_setup(true, TPS62361_GPIO, -1,
-					OMAP_PIN_OFF_OUTPUT_HIGH, -1);
-		if (status)
-			pr_err("TPS62361 initialization failed: %d\n", status);
+	/* Vsel0 = gpio, vsel1 = gnd */
+	status = omap_tps6236x_board_setup(true, TPS62361_GPIO, -1,
+				OMAP_PIN_OFF_OUTPUT_HIGH, -1);
+	if (status)
+		pr_err("TPS62361 initialization failed: %d\n", status);
+	/*
+	 * Some Tuna devices have a 4430 chip on a 4460 board, manually
+	 * tweak the power tree to the 4460 style with the TPS regulator.
+	 */
+	if (cpu_is_omap443x()) {
+		/* Disable 4430 mapping */
+		omap_twl_pmic_update("mpu", CHIP_IS_OMAP443X, 0x0);
+		omap_twl_pmic_update("core", CHIP_IS_OMAP443X, 0x0);
+		/* make 4460 map usable for 4430 */
+		omap_twl_pmic_update("core", CHIP_IS_OMAP446X, CHIP_IS_OMAP443X);
+		omap_tps6236x_update("mpu", CHIP_IS_OMAP446X, CHIP_IS_OMAP443X);
 	}
 
 	if (omap4_tuna_get_revision() == TUNA_REV_PRE_LUNCHBOX) {
@@ -129,10 +135,15 @@ void __init omap4_tuna_power_init(void)
 	omap_mux_init_gpio(charger_gpios[0].gpio, OMAP_PIN_INPUT);
 	omap_mux_init_gpio(charger_gpios[1].gpio, OMAP_PIN_INPUT);
 	omap_mux_init_gpio(charger_gpios[2].gpio, OMAP_PIN_OUTPUT);
+	omap_mux_init_gpio(charger_gpios[3].gpio, OMAP_PIN_OUTPUT);
 
 	pdev = platform_device_register_resndata(NULL, "pda-power", -1,
-		charger_resources, ARRAY_SIZE(charger_resources),
-		&charger_pdata, sizeof(charger_pdata));
+		NULL, 0, &charger_pdata, sizeof(charger_pdata));
+	if (IS_ERR_OR_NULL(pdev))
+		pr_err("cannot register pda-power\n");
 
 	i2c_register_board_info(4, max17043_i2c, ARRAY_SIZE(max17043_i2c));
+
+	if (enable_sr)
+		omap_enable_smartreflex_on_init();
 }

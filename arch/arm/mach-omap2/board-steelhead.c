@@ -603,37 +603,15 @@ static struct omap_device_pad serial4_pads[] __initdata = {
 			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
 };
 
-static struct omap_board_data serial2_data __initdata = {
-	.id             = 1,
-	.pads           = serial2_pads,
-	.pads_cnt       = ARRAY_SIZE(serial2_pads),
-};
-
-static struct omap_board_data serial3_data __initdata = {
-	.id             = 2,
-	.pads           = serial3_pads,
-	.pads_cnt       = ARRAY_SIZE(serial3_pads),
-};
-
-static struct omap_board_data serial4_data __initdata = {
-	.id             = 3,
-	.pads           = serial4_pads,
-	.pads_cnt       = ARRAY_SIZE(serial4_pads),
-};
-
 static inline void __init board_serial_init(void)
 {
-	struct omap_board_data bdata;
-	bdata.flags     = 0;
-	bdata.pads      = NULL;
-	bdata.pads_cnt  = 0;
-	bdata.id        = 0;
-	/* pass dummy data for UART1 */
-	omap_serial_init_port(&bdata);
-
-	omap_serial_init_port(&serial2_data);
-	omap_serial_init_port(&serial3_data);
-	omap_serial_init_port(&serial4_data);
+	omap_serial_init_port_pads(0, NULL, 0, NULL);
+	omap_serial_init_port_pads(1, serial2_pads, ARRAY_SIZE(serial2_pads),
+			NULL);
+	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
+			NULL);
+	omap_serial_init_port_pads(3, serial4_pads, ARRAY_SIZE(serial4_pads),
+			NULL);
 }
 #else
 #define board_mux	NULL
@@ -1044,8 +1022,19 @@ static void __init steelhead_init(void)
 	omap4_ehci_init();
 	usb_musb_init(&musb_board_data);
 	omap4_steelhead_display_init();
-	steelhead_platform_init_counter();
 }
+
+static int __init steelhead_init_late(void)
+{
+	steelhead_platform_init_counter();
+	return 0;
+}
+
+/*
+ * This is needed because the platform counter is dependent on omap_dm_timers
+ * which get initialized at device_init time
+ */
+late_initcall(steelhead_init_late);
 
 static void __init steelhead_map_io(void)
 {
