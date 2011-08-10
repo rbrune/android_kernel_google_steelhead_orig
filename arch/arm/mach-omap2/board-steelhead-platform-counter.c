@@ -72,7 +72,9 @@ static s64 get_counter_internal_l(struct counter_state *state, u32 lower)
 
 static u32 get_counter_lower(void)
 {
-	BUG_ON(IS_ERR_OR_NULL(counter_timer));
+	if (IS_ERR_OR_NULL(counter_timer))
+		return 0;
+
 	return (u32)omap_dm_timer_read_counter(counter_timer);
 }
 
