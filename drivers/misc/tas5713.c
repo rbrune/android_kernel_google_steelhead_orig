@@ -42,6 +42,9 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define BYTES_PER_OUTPUT_SLOT 4
 #define SAMPLE_RATE 48000
 
+/* McBSP transmit buffer threshold */
+#define MCBSP_TX_THRESHOLD 16
+
 /* McBSP IRQSTATUS register */
 #define XUNDFLSTAT 0x0800
 
@@ -198,10 +201,14 @@ static int setup_mcbsp(struct tas5713_driver_state *state)
 	if (rc)
 		return rc;
 
-	/* TODO(jsimmons): this is failing.  are we missing the definition
-	 * for the "prcm_fck" clock?
-	 */
-	/*err = omap2_mcbsp_set_clks_src(id, MCBSP_CLKS_PRCM_SRC); */
+	rc = omap2_mcbsp_set_clks_src(id, MCBSP_CLKS_PRCM_SRC);
+	if (rc) {
+		dev_err(&state->i2c_client->dev,
+                        "%s: unable to set McBSP clock source\n",
+			__func__);
+		omap_mcbsp_free(id);
+		return rc;
+	}
 
 	memset(&regs, 0, sizeof(regs));
 
@@ -249,7 +256,7 @@ static int setup_mcbsp(struct tas5713_driver_state *state)
 
 	omap_mcbsp_write_reg(id, OMAP_MCBSP_REG_DXR, 0);
 
-	omap_mcbsp_set_tx_threshold(id, 16);
+	omap_mcbsp_set_tx_threshold(id, MCBSP_TX_THRESHOLD);
 
 	rc = request_irq(omap_mcbsp_get_tx_irq(id),
 			 tas5713_mcbsp_irq_handler,
@@ -281,9 +288,9 @@ static void launch_next_dma(struct tas5713_driver_state *state)
 
 	omap_set_dma_transfer_params(state->dma_lch,
 				     OMAP_DMA_DATA_TYPE_S16,
-				     req->size >> 1,
-				     1,
-				     OMAP_DMA_SYNC_ELEMENT,
+				     MCBSP_TX_THRESHOLD,
+				     req->size / (MCBSP_TX_THRESHOLD * 2),
+				     OMAP_DMA_SYNC_FRAME,
 				     omap_mcbsp_dma_ch_params(id, 0),
 				     0);
 
