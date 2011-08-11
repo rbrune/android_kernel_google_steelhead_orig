@@ -12,7 +12,7 @@
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <asm/gpio.h>
+#include <linux/gpio.h>
 
 #include "board-steelhead.h"
 #include "mux.h"

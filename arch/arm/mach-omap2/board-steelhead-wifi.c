@@ -14,7 +14,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
-#include <asm/gpio.h>
+#include <linux/gpio.h>
 #include <linux/skbuff.h>
 #include <linux/wlan_plat.h>
 #include <plat/mmc.h>
