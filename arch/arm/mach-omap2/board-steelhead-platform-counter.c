@@ -147,6 +147,7 @@ static void steelhead_set_vcxo_rate(s16 rate) {
 	 * quickly (esp since we just shut off interrupts) so the disruption
 	 * should be minimized */
 	omap_mux_init_signal(VCXO_PWM_SAFE_MODE_PIN_NAME, OMAP_PIN_INPUT);
+
 	omap_dm_timer_stop(vcxo_pwm_timer);
 
 	if (!match_pos) {
@@ -199,6 +200,8 @@ static int __init steelhead_setup_vcxo_control(void) {
 	/* set up the timer to source from the sysclk */
 	omap_dm_timer_set_source(vcxo_pwm_timer, VCKO_PWM_CLK);
 
+	omap_dm_timer_start(vcxo_pwm_timer);
+
 	/* set the timer up in PWM mode with a 50/50 duty cycle to begin with */
 	steelhead_set_vcxo_rate(0);
 
@@ -222,7 +225,6 @@ void __init steelhead_platform_init_counter(void)
 	counter_timer = omap_dm_timer_request_specific(DM_TIMER_ID);
 	BUG_ON(IS_ERR_OR_NULL(counter_timer));
 
-	omap_dm_timer_enable(counter_timer);
 	omap_dm_timer_set_source(counter_timer, DM_TIMER_CLK);
 	omap_dm_timer_set_load(counter_timer, 1, 0);
 
