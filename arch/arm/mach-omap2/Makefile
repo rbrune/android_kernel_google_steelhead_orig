@@ -272,6 +272,7 @@ obj-$(CONFIG_MACH_STEELHEAD)		+= board-steelhead.o \
 					   omap_phy_internal.o \
 					   board-steelhead-platform-counter.o \
 					   board-steelhead-bluetooth.o \
+					   board-tuna-bluetooth.o \
 					   board-steelhead-wifi.o
 
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \

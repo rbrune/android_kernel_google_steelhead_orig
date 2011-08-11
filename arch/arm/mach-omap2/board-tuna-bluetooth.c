@@ -30,11 +30,17 @@
 #include <linux/wakelock.h>
 #include <asm/mach-types.h>
 
-#define BT_REG_GPIO 103
-#define BT_RESET_GPIO 42
-
-#define BT_WAKE_GPIO 27
-#define BT_HOST_WAKE_GPIO 177
+#ifdef CONFIG_MACH_STEELHEAD
+#define BT_REG_GPIO		46
+#define BT_RESET_GPIO		52
+#define BT_WAKE_GPIO		45
+#define BT_HOST_WAKE_GPIO	47
+#else
+#define BT_REG_GPIO		103
+#define BT_RESET_GPIO		42
+#define BT_WAKE_GPIO		27
+#define BT_HOST_WAKE_GPIO	177
+#endif
 
 static struct rfkill *bt_rfkill;
 

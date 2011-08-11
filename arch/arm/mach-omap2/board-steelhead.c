@@ -351,7 +351,6 @@ static struct omap_device_pad serial3_pads[] __initdata = {
 static inline void __init board_serial_init(void)
 {
 	omap_serial_init_port_pads(0, NULL, 0, NULL);
-	omap_serial_init_port_pads(1, NULL, 0, NULL);
 	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
 			NULL);
 	omap_serial_init_port_pads(3, NULL, 0, NULL);

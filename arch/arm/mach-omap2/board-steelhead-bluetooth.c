@@ -12,54 +12,45 @@
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/gpio.h>
+#include <linux/platform_device.h>
+#include <plat/serial.h>
 
 #include "board-steelhead.h"
 #include "mux.h"
 
-#define GPIO_BT_EN			46
-#define GPIO_BT_EN_MUX_NAME             "gpmc_a22.gpio_46"
-#define GPIO_BT_RST_N			52
-#define GPIO_BT_RST_N_MUX_NAME          "gpmc_ncs2.gpio_52"
-#define GPIO_BT_HOST_WAKE_BT		45
-#define GPIO_BT_HOST_WAKE_BT_MUX_NAME   "gpmc_a21.gpio_45"
-#define GPIO_BT_WAKEUP_HOST		47
-#define GPIO_BT_WAKEUP_HOST_MUX_NAME    "gpmc_a23.gpio_47"
+static struct omap_device_pad steelhead_bt_serial_pads[] __initdata = {
+	OMAP_MUX_STATIC("uart2_cts.uart2_cts",
+			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
+	OMAP_MUX_STATIC("uart2_rts.uart2_rts",
+			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
+	OMAP_MUX_STATIC("uart2_rx.uart2_rx",
+			 OMAP_PIN_INPUT | OMAP_MUX_MODE0),
+	OMAP_MUX_STATIC("uart2_tx.uart2_tx",
+			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
+};
 
-static struct steelhead_gpio_reservation bluetooth_gpios[] = {
-	{
-		.gpio_name = "bt_en",
-		.gpio_id = GPIO_BT_EN,
-		.mux_name = GPIO_BT_EN_MUX_NAME,
-		.pin_mode = OMAP_PIN_OUTPUT,
-		.init_state = GPIOF_OUT_INIT_LOW,
-	},
-	{
-		.gpio_name = "bt_rst_n",
-		.gpio_id = GPIO_BT_RST_N,
-		.mux_name = GPIO_BT_RST_N_MUX_NAME,
-		.pin_mode = OMAP_PIN_OUTPUT,
-		.init_state = GPIOF_OUT_INIT_LOW,
-	},
-	{
-		.gpio_name = "bt_host_wake_bt",
-		.gpio_id = GPIO_BT_HOST_WAKE_BT,
-		.mux_name = GPIO_BT_HOST_WAKE_BT_MUX_NAME,
-		.pin_mode = OMAP_PIN_OUTPUT,
-		.init_state = GPIOF_OUT_INIT_LOW,
-	},
-	{
-		.gpio_name = "bt_wakeup_host",
-		.gpio_id = GPIO_BT_WAKEUP_HOST,
-		.mux_name = GPIO_BT_WAKEUP_HOST_MUX_NAME,
-		.pin_mode = OMAP_PIN_INPUT,
-		.init_state = GPIOF_IN,
-	},
+static struct platform_device bcm4330_bluetooth_device = {
+	.name = "bcm4330_bluetooth",
+	.id = -1,
 };
 
 int __init steelhead_init_bluetooth(void)
 {
-	return steelhead_reserve_gpios(bluetooth_gpios,
-			ARRAY_SIZE(bluetooth_gpios),
-			"steelhead_bluetooth");
+	/* Setup the GPIOs we use to control the regulator enable, reset, and
+	 * wakeup signals */
+	omap_mux_init_signal("gpmc_a22.gpio_46", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("gpmc_ncs2.gpio_52", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("gpmc_a21.gpio_45", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("gpmc_a23.gpio_47", OMAP_PIN_INPUT);
+
+	/* Add the serial port we will use to communicate with the BCM4330 */
+	omap_serial_init_port_pads(1,
+			steelhead_bt_serial_pads,
+			ARRAY_SIZE(steelhead_bt_serial_pads),
+			NULL);
+
+	/* Add the platform device used for BT power management */
+	platform_device_register(&bcm4330_bluetooth_device);
+
+	return 0;
 }
