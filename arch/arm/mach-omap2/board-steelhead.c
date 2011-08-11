@@ -848,10 +848,8 @@ static void __init steelhead_init(void)
 	steelhead_platform_init_avr();
 #endif
 	steelhead_platform_init_tas5713_audio();
-#if 0
 #if defined(CONFIG_SND_OMAP_SOC_MCASP)
 	steelhead_platform_init_mcasp_audio();
-#endif
 #endif
 
 	steelhead_i2c_init();
