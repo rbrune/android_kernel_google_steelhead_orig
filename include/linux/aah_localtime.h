@@ -46,7 +46,7 @@ struct aah_localtime_platform_data {
 	 * should attempt to speed up its counter.  The correction parameter is
 	 * always absolute, not cumulative and is expressed in ppm.
 	 */
-	 void (*set_counter_slew_rate)(s32 correction);
+	 void (*set_counter_slew_rate)(s16 correction);
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	/**********************************************************************
@@ -80,7 +80,7 @@ struct aah_localtime_platform_data {
 
 #define AAHLT_IOCTL_LOCALTIME_GET       _IOR(AAH_LOCALTIME_MAGIC, 1, __s64)
 #define AAHLT_IOCTL_LOCALTIME_GETFREQ   _IOR(AAH_LOCALTIME_MAGIC, 2, __u64)
-#define AAHLT_IOCTL_LOCALTIME_SET_SLEW  _IOW(AAH_LOCALTIME_MAGIC, 3, __s32)
+#define AAHLT_IOCTL_LOCALTIME_SET_SLEW  _IOW(AAH_LOCALTIME_MAGIC, 3, __s16)
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 

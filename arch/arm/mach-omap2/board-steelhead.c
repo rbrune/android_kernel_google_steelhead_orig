@@ -67,28 +67,6 @@
 #define GPIO_NFC_EN 173
 #endif
 
-static struct aah_localtime_platform_data localtime_pdata = {
-	.get_raw_counter = steelhead_get_raw_counter,
-	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
-	.set_counter_slew_rate = NULL,
-#ifdef CONFIG_AAH_TIMESYNC_DEBUG
-	.register_timesync_event_handler =
-			steelhead_register_timesync_event_handler,
-#endif
-};
-
-static struct platform_device aah_localtime_device = {
-	.name	= "aah_localtime",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &localtime_pdata,
-	},
-};
-
-static struct platform_device *steelhead_devices[] __initdata = {
-	&aah_localtime_device,
-};
-
 static void __init steelhead_init_early(void)
 {
 	omap2_init_common_infrastructure();
@@ -853,7 +831,6 @@ static void __init steelhead_init(void)
 #endif
 
 	steelhead_i2c_init();
-	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
 	board_serial_init();
 	omap4_twl6030_hsmmc_init(mmc);
 	omap4_ehci_init();

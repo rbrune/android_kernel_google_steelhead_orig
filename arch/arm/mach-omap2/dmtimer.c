@@ -54,7 +54,10 @@ static int omap2_dm_timer_set_src(struct platform_device *pdev, int source)
 
 	switch (source) {
 	case OMAP_TIMER_SRC_SYS_CLK:
-		fclk_name = "sys_ck";
+		if ((pdev->id >= 5) && (pdev->id <= 8))
+			fclk_name = "syc_clk_div_ck";
+		else
+			fclk_name = "sys_clkin_ck";
 		break;
 
 	case OMAP_TIMER_SRC_32_KHZ:

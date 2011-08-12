@@ -13,6 +13,7 @@
 
 #include <linux/err.h>
 #include <linux/clk.h>
+#include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/aah_localtime.h>
@@ -22,7 +23,7 @@
 #include "mux.h"
 
 #define DM_TIMER_ID 8
-#define DM_TIMER_CLK OMAP_TIMER_SRC_ABE_SYSCLK
+#define DM_TIMER_CLK OMAP_TIMER_SRC_SYS_CLK
 
 struct counter_state {
 	u32 upper;
@@ -38,7 +39,7 @@ static struct timer_list	rollover_check_timer;
 #define VCXO_PWM_TIMER_ID 9
 #define VCXO_PWM_PIN_NAME "dpm_emu17.dmtimer9_pwm_evt"
 #define VCXO_PWM_SAFE_MODE_PIN_NAME "dpm_emu17.safe_mode"
-#define VCKO_PWM_CLK OMAP_TIMER_SRC_SYS_CLK
+#define VCXO_PWM_CLK OMAP_TIMER_SRC_SYS_CLK
 
 static struct omap_dm_timer	*vcxo_pwm_timer = NULL;
 static spinlock_t		vcxo_lock;
@@ -121,8 +122,82 @@ static void counter_rollover_check(unsigned long arg)
 #define VCXO_CYCLE_TICKS 1024
 #define VCXO_TIMER_START (0xFFFFFFFF - VCXO_CYCLE_TICKS)
 
+/* Note: we do all of our VCXO timer setup using direct register reads and
+ * writes.  We used to use the omap_dm_timer routines, but the code underneath
+ * kept changing in ways which were breaking our use case.  For now, we go
+ * directly to the registers. If/when the omap_dm_timer routines get fixed, we
+ * can go back to using them. */
+
+#define TIMER_ID_OFFSET				0x00
+#define TIMER_OCP_CFG_OFFSET			0x10
+#define TIMER_SYS_STAT_OFFSET			0x14
+#define TIMER_STAT_OFFSET			0x18
+#define TIMER_INT_EN_OFFSET			0x1c
+#define TIMER_WAKEUP_EN_OFFSET			0x20
+#define TIMER_CTRL_OFFSET			0x24
+#define		TIMER_CTRL_GPOCFG		(1 << 14)
+#define		TIMER_CTRL_CAPTMODE		(1 << 13)
+#define		TIMER_CTRL_PT			(1 << 12)
+#define		TIMER_CTRL_TRIG_NONE		(0x0 << 10)
+#define		TIMER_CTRL_TRIG_OVFL		(0x1 << 10)
+#define		TIMER_CTRL_TRIG_OVFL_MATCH	(0x2 << 10)
+#define		TIMER_CTRL_TRIG_MASK		(0x3 << 10)
+#define		TIMER_CTRL_TCM_LOWTOHIGH	(0x1 << 8)
+#define		TIMER_CTRL_TCM_HIGHTOLOW	(0x2 << 8)
+#define		TIMER_CTRL_TCM_BOTHEDGES	(0x3 << 8)
+#define		TIMER_CTRL_SCPWM		(1 << 7)
+#define		TIMER_CTRL_CE			(1 << 6) /* compare enable */
+#define		TIMER_CTRL_PRE			(1 << 5) /* prescaler enable */
+#define		TIMER_CTRL_PTV_SHIFT		2 /* prescaler value shift */
+#define		TIMER_CTRL_POSTED		(1 << 2)
+#define		TIMER_CTRL_AR			(1 << 1) /* auto-reload enable */
+#define		TIMER_CTRL_ST			(1 << 0) /* start timer */
+#define TIMER_COUNTER_OFFSET			0x28
+#define TIMER_LOAD_OFFSET			0x2c
+#define TIMER_TRIGGER_OFFSET			0x30
+#define TIMER_WRITE_PEND_OFFSET			0x34
+#define TIMER_MATCH_OFFSET			0x38
+#define TIMER_CAPTURE_OFFSET			0x3c
+#define TIMER_IF_CTRL_OFFSET			0x40
+
+static inline void timer_wait_no_write_pending(struct omap_dm_timer* t) {
+	if (t->posted) {
+		int i;
+		void* tgt = (void*)((u32)t->io_base + t->func_offset
+				+ TIMER_WRITE_PEND_OFFSET);
+
+		for (i = 0; (i < 100000) && (readl(tgt) & 0xff); ++i)
+			;
+
+		if (WARN_ON_ONCE(i == 100000))
+			dev_err(&t->pdev->dev, "wp timeout.\n");
+	}
+}
+
+static inline u32 timer_read_reg(struct omap_dm_timer* t, u32 reg) {
+	timer_wait_no_write_pending(t);
+
+	if (reg >= TIMER_WAKEUP_EN_OFFSET)
+		reg += t->func_offset;
+	else if (reg >= TIMER_STAT_OFFSET)
+		reg += t->intr_offset;
+
+	return readl(t->io_base + reg);
+}
+
+static inline void timer_write_reg(struct omap_dm_timer* t, u32 reg, u32 val) {
+	timer_wait_no_write_pending(t);
+
+	if (reg >= TIMER_WAKEUP_EN_OFFSET)
+		reg += t->func_offset;
+	else if (reg >= TIMER_STAT_OFFSET)
+		reg += t->intr_offset;
+
+	writel(val, t->io_base + reg);
+}
+
 static void steelhead_set_vcxo_rate(s16 rate) {
-	u32 match_pos;
+	u32 match_pos, ctrl;
 	unsigned long irq_state;
 
 	/* If we never had a timer, then there is nothing to do. */
@@ -138,49 +213,59 @@ static void steelhead_set_vcxo_rate(s16 rate) {
 
 	spin_lock_irqsave(&vcxo_lock, irq_state);
 
-	/* Shut off the output pin while we re-init the PWM.  There is no
-	 * perfectly safe way to change the duty cycle of the PWM output while
-	 * its running, so we stop it an re-initialze it when we need to make a
-	 * change.  Putting the pin into safe mode for the duration of the
-	 * operation should cause it to float in the direction of the VCXO's
-	 * external bias point.  We'll have the PWM up and running again pretty
-	 * quickly (esp since we just shut off interrupts) so the disruption
-	 * should be minimized */
-	omap_mux_init_signal(VCXO_PWM_SAFE_MODE_PIN_NAME, OMAP_PIN_INPUT);
-
-	omap_dm_timer_stop(vcxo_pwm_timer);
+	/* Make sure the timer is stopped.  It is not safe to change the PWM's
+	 * duty cycle while the timer is running. Remember to wait at least 3.5
+	 * timer fClk cycles after stopping before touching anything else in the
+	 * timer.  At 38.4 MHz, 3.5 cycles is ~91nSec, so we just wait a
+	 * microsecond and call it good. */
+	ctrl = timer_read_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET);
+	ctrl &= ~TIMER_CTRL_ST;
+	timer_write_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET, ctrl);
+	udelay(1);
 
 	if (!match_pos) {
-		/* always off case */
-		omap_dm_timer_set_pwm(vcxo_pwm_timer, 0, 1, 0);
+		/* always off case.  Just set the config to indicate an output
+		 * with a default value of 0 and get out without bothering to
+		 * start the timer. ctrl holds the current value of CTRL, so we
+		 * can just modify ctrl and write. */
+		ctrl &= ~(TIMER_CTRL_GPOCFG | TIMER_CTRL_SCPWM);
+		timer_write_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET, ctrl);
 		goto finished;
 	}
 
 	match_pos += VCXO_TIMER_START;
 	if (match_pos >= 0xFFFFFFFE) {
-		/* always on case */
-		omap_dm_timer_set_pwm(vcxo_pwm_timer, 1, 1, 0);
+		/* always on case.  See above, s/0/1/ */
+		ctrl &= ~TIMER_CTRL_GPOCFG;
+		ctrl |= TIMER_CTRL_SCPWM;
+		timer_write_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET, ctrl);
 		goto finished;
 	}
 
 	/* Set the reload and match values for the timer. */
-	omap_dm_timer_set_load(vcxo_pwm_timer, 1, VCXO_TIMER_START);
-	omap_dm_timer_set_match(vcxo_pwm_timer, 1, match_pos);
+	timer_write_reg(vcxo_pwm_timer, TIMER_LOAD_OFFSET, VCXO_TIMER_START);
+	timer_write_reg(vcxo_pwm_timer, TIMER_MATCH_OFFSET, match_pos);
 
-	/* Position the counter just before overflow and then turn on PWM mode
-	 * to start the output at 0, and to toggle the output on both match and
-	 * overflow.  This should avoid the missed match event (see section
-	 * 22.2.4.10 of the OMAP44xx TRM) and cause the PWM to output high until
-	 * the match event, and then low until the overflow event. */
-	omap_dm_timer_write_counter(vcxo_pwm_timer, 0xFFFFFFFD);
-	omap_dm_timer_set_pwm(vcxo_pwm_timer, 0, 1, 2);
+	/* Position the counter just before overflow and then start the timer up
+	 * in PWM mode with an initial output value of 0 and configured to
+	 * toggle the output on both match and overflow.  This should avoid the
+	 * missed match event (see section 22.2.4.10 of the OMAP44xx TRM) and
+	 * cause the PWM to output high until the match event, and then low
+	 * until the overflow event. */
+	timer_write_reg(vcxo_pwm_timer, TIMER_COUNTER_OFFSET, 0xFFFFFFFD);
 
-	/* Finally, go ahead and start the timer up */
-	omap_dm_timer_start(vcxo_pwm_timer);
+	ctrl &= ~(TIMER_CTRL_GPOCFG			/* pwm output */
+			| TIMER_CTRL_SCPWM		/* initial out == 0 */
+			| TIMER_CTRL_TRIG_MASK);	/* clear trig bits */
+	ctrl |=  (TIMER_CTRL_CE				/* compare enabled */
+			| TIMER_CTRL_AR			/* autoreload == 1 */
+			| TIMER_CTRL_ST			/* start == 1 */
+			| TIMER_CTRL_PT			/* pwm toggle mode */
+			| TIMER_CTRL_TRIG_OVFL_MATCH);	/* toggle on both */
+	timer_write_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET, ctrl);
 
 finished:
-	/* turn the PWM pin back on, release our lock and get out */
-	omap_mux_init_signal(VCXO_PWM_PIN_NAME, OMAP_PIN_OUTPUT);
+	/* release our lock and get out */
 	spin_unlock_irqrestore(&vcxo_lock, irq_state);
 }
 
@@ -197,13 +282,16 @@ static int __init steelhead_setup_vcxo_control(void) {
 		goto failed_to_fetch_timer;
 	}
 
-	/* set up the timer to source from the sysclk */
-	omap_dm_timer_set_source(vcxo_pwm_timer, VCKO_PWM_CLK);
-
-	omap_dm_timer_start(vcxo_pwm_timer);
+	/* set up the timer to source from the sysclk and make sure it is
+	 * enabled so that power management does not shut it off. */
+	omap_dm_timer_set_source(vcxo_pwm_timer, VCXO_PWM_CLK);
+	omap_dm_timer_enable(vcxo_pwm_timer);
 
 	/* set the timer up in PWM mode with a 50/50 duty cycle to begin with */
 	steelhead_set_vcxo_rate(0);
+
+	/* turn the pin on and we are done */
+	omap_mux_init_signal(VCXO_PWM_PIN_NAME, OMAP_PIN_OUTPUT);
 
 	return 0;
 
@@ -211,6 +299,60 @@ failed_to_fetch_timer:
 	vcxo_pwm_timer = NULL;
 	return -1;
 }
+
+/******************************************************************************
+ *                                                                            *
+ *                          API implementation                                *
+ *                                                                            *
+ ******************************************************************************/
+s64 steelhead_get_raw_counter(void)
+{
+	unsigned long irq_state;
+	s64 ret;
+
+	spin_lock_irqsave(&counter_state.lock, irq_state);
+
+	ret = get_counter_internal_l(&counter_state, get_counter_lower());
+
+	spin_unlock_irqrestore(&counter_state.lock, irq_state);
+	return ret;
+}
+
+u32 steelhead_get_raw_counter_nominal_freq(void)
+{
+	return counter_freq;
+}
+
+#ifdef CONFIG_AAH_TIMESYNC_DEBUG
+void steelhead_register_timesync_event_handler(void *user_data,
+					       void (*handler)(void *d, u64))
+{
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&timesync_event_handler_lock, irq_state);
+	timesync_event_handler = handler;
+	timesync_event_handler_data = user_data;
+	spin_unlock_irqrestore(&timesync_event_handler_lock, irq_state);
+}
+#endif
+
+static struct aah_localtime_platform_data localtime_pdata = {
+	.get_raw_counter = steelhead_get_raw_counter,
+	.get_raw_counter_nominal_freq = steelhead_get_raw_counter_nominal_freq,
+	.set_counter_slew_rate = steelhead_set_vcxo_rate,
+#ifdef CONFIG_AAH_TIMESYNC_DEBUG
+	.register_timesync_event_handler =
+			steelhead_register_timesync_event_handler,
+#endif
+};
+
+static struct platform_device aah_localtime_device = {
+	.name	= "aah_localtime",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &localtime_pdata,
+	},
+};
 
 void __init steelhead_platform_init_counter(void)
 {
@@ -289,45 +431,8 @@ void __init steelhead_platform_init_counter(void)
 	/* Now setup the PWM we use to control the VCXO used to slew the main
 	 * system oscillator. */
 	steelhead_setup_vcxo_control();
+
+	/* Finally, register the platform driver which will give user-land
+	 * access to the local time clock */
+	platform_device_register(&aah_localtime_device);
 }
-
-/******************************************************************************
- *                                                                            *
- *                          API implementation                                *
- *                                                                            *
- ******************************************************************************/
-s64 steelhead_get_raw_counter(void)
-{
-	unsigned long irq_state;
-	s64 ret;
-
-	spin_lock_irqsave(&counter_state.lock, irq_state);
-
-	ret = get_counter_internal_l(&counter_state, get_counter_lower());
-
-	spin_unlock_irqrestore(&counter_state.lock, irq_state);
-	return ret;
-}
-
-u32 steelhead_get_raw_counter_nominal_freq(void)
-{
-	return counter_freq;
-}
-
-void steelhead_set_counter_slew_rate(s32 correction)
-{
-	steelhead_set_vcxo_rate((s16)(correction >> 16));
-}
-
-#ifdef CONFIG_AAH_TIMESYNC_DEBUG
-void steelhead_register_timesync_event_handler(void *user_data,
-					       void (*handler)(void *d, u64))
-{
-	unsigned long irq_state;
-
-	spin_lock_irqsave(&timesync_event_handler_lock, irq_state);
-	timesync_event_handler = handler;
-	timesync_event_handler_data = user_data;
-	spin_unlock_irqrestore(&timesync_event_handler_lock, irq_state);
-}
-#endif

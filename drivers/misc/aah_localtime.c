@@ -143,12 +143,12 @@ static long aah_localtime_ioctl(struct file *file, unsigned int cmd,
 	} break;
 
 	case AAHLT_IOCTL_LOCALTIME_SET_SLEW: {
-		s32 ppm = (s32)arg;
+		s16 rate = (s16)arg;
 
 		if (!tdata->pdata->set_counter_slew_rate)
 			return -EINVAL;
 
-		tdata->pdata->set_counter_slew_rate(ppm);
+		tdata->pdata->set_counter_slew_rate(rate);
 	} break;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
