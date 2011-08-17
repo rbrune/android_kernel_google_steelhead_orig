@@ -43,4 +43,6 @@ extern void steelhead_register_timesync_event_handler(
 extern int platform_set_counter_slew_rate(int ppm);
 #endif
 
+extern struct mmc_platform_data steelhead_wifi_data;
+
 #endif

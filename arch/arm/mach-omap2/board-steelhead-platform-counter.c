@@ -31,7 +31,7 @@ struct counter_state {
 	spinlock_t lock;
 };
 
-static struct omap_dm_timer	*counter_timer = NULL;
+static struct omap_dm_timer	*counter_timer;
 static u32			counter_freq = 1;
 static unsigned long		rollover_check_timer_period;
 static struct timer_list	rollover_check_timer;
@@ -41,7 +41,7 @@ static struct timer_list	rollover_check_timer;
 #define VCXO_PWM_SAFE_MODE_PIN_NAME "dpm_emu17.safe_mode"
 #define VCXO_PWM_CLK OMAP_TIMER_SRC_SYS_CLK
 
-static struct omap_dm_timer	*vcxo_pwm_timer = NULL;
+static struct omap_dm_timer	*vcxo_pwm_timer;
 static spinlock_t		vcxo_lock;
 
 static struct counter_state counter_state = {
@@ -150,7 +150,8 @@ static void counter_rollover_check(unsigned long arg)
 #define		TIMER_CTRL_PRE			(1 << 5) /* prescaler enable */
 #define		TIMER_CTRL_PTV_SHIFT		2 /* prescaler value shift */
 #define		TIMER_CTRL_POSTED		(1 << 2)
-#define		TIMER_CTRL_AR			(1 << 1) /* auto-reload enable */
+#define		TIMER_CTRL_AR			(1 << 1) /* auto-reload
+							    enable */
 #define		TIMER_CTRL_ST			(1 << 0) /* start timer */
 #define TIMER_COUNTER_OFFSET			0x28
 #define TIMER_LOAD_OFFSET			0x2c
@@ -160,10 +161,11 @@ static void counter_rollover_check(unsigned long arg)
 #define TIMER_CAPTURE_OFFSET			0x3c
 #define TIMER_IF_CTRL_OFFSET			0x40
 
-static inline void timer_wait_no_write_pending(struct omap_dm_timer* t) {
+static inline void timer_wait_no_write_pending(struct omap_dm_timer *t)
+{
 	if (t->posted) {
 		int i;
-		void* tgt = (void*)((u32)t->io_base + t->func_offset
+		void *tgt = (void *)((u32)t->io_base + t->func_offset
 				+ TIMER_WRITE_PEND_OFFSET);
 
 		for (i = 0; (i < 100000) && (readl(tgt) & 0xff); ++i)
@@ -174,7 +176,8 @@ static inline void timer_wait_no_write_pending(struct omap_dm_timer* t) {
 	}
 }
 
-static inline u32 timer_read_reg(struct omap_dm_timer* t, u32 reg) {
+static inline u32 timer_read_reg(struct omap_dm_timer *t, u32 reg)
+{
 	timer_wait_no_write_pending(t);
 
 	if (reg >= TIMER_WAKEUP_EN_OFFSET)
@@ -185,7 +188,8 @@ static inline u32 timer_read_reg(struct omap_dm_timer* t, u32 reg) {
 	return readl(t->io_base + reg);
 }
 
-static inline void timer_write_reg(struct omap_dm_timer* t, u32 reg, u32 val) {
+static inline void timer_write_reg(struct omap_dm_timer *t, u32 reg, u32 val)
+{
 	timer_wait_no_write_pending(t);
 
 	if (reg >= TIMER_WAKEUP_EN_OFFSET)
@@ -196,7 +200,8 @@ static inline void timer_write_reg(struct omap_dm_timer* t, u32 reg, u32 val) {
 	writel(val, t->io_base + reg);
 }
 
-static void steelhead_set_vcxo_rate(s16 rate) {
+static void steelhead_set_vcxo_rate(s16 rate)
+{
 	u32 match_pos, ctrl;
 	unsigned long irq_state;
 
@@ -269,7 +274,8 @@ finished:
 	spin_unlock_irqrestore(&vcxo_lock, irq_state);
 }
 
-static int __init steelhead_setup_vcxo_control(void) {
+static int __init steelhead_setup_vcxo_control(void)
+{
 	/* Set up our lock */
 	spin_lock_init(&vcxo_lock);
 

@@ -145,7 +145,6 @@ static struct twl4030_usb_data omap4_usbphy_data = {
 	.phy_suspend	= omap4430_phy_suspend,
 };
 
-extern struct mmc_platform_data steelhead_wifi_data;
 static struct omap2_hsmmc_info mmc[] = {
 	{
 		.mmc		= 1,
@@ -450,7 +449,7 @@ static void steelhead_platform_init_tas5713_audio(void)
 		pr_err("tas5713: failed to fetch mcbsp2_sync_mux_ck\n");
 		goto err;
 	}
-	
+
 	abe_24m_clk = clk_get(NULL, "abe_24m_fclk");
 	if (IS_ERR_OR_NULL(abe_24m_clk)) {
 		pr_err("tas5713: failed to fetch abe_24m_clk\n");
@@ -562,7 +561,8 @@ static void steelhead_platform_init_mcasp_audio(void)
 {
 	int res;
 
-	res = omap_mux_init_signal("abe_mcbsp2_dr.abe_mcasp_axr", OMAP_PIN_OUTPUT);
+	res = omap_mux_init_signal("abe_mcbsp2_dr.abe_mcasp_axr",
+				   OMAP_PIN_OUTPUT);
 	if (res) {
 		pr_err("omap-mcasp: failed to enable MCASP_AXR pin mux, S/PDIF"
 				"will be unavailable. (res = %d)\n", res);
