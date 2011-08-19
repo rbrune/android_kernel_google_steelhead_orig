@@ -890,6 +890,7 @@ static void __init steelhead_init(void)
 	omap4_mux_init(NULL, NULL, package);
 
 	omap4_steelhead_init_hw_rev();
+	omap4_steelhead_emif_init();
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
 

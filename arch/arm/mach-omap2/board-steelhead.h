@@ -30,6 +30,7 @@ extern int __init steelhead_reserve_gpios(
 extern void __init steelhead_platform_init_counter(void);
 extern int __init steelhead_init_wlan(void);
 extern int __init steelhead_init_bluetooth(void);
+extern void __init omap4_steelhead_emif_init(void);
 
 extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
