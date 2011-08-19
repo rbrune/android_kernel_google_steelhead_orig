@@ -20,14 +20,16 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/ion.h>
 #include <linux/leds.h>
 #include <linux/gpio.h>
+#include <linux/memblock.h>
+#include <linux/omap_ion.h>
 #include <linux/usb/otg.h>
 #include <linux/i2c/twl.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
 #include <linux/reboot.h>
-#include <linux/memblock.h>
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -43,6 +45,7 @@
 #include <plat/dma.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
+#include <plat/remoteproc.h>
 #include <mach/id.h>
 #include "timer-gp.h"
 
@@ -157,8 +160,54 @@ static void __init omap4_steelhead_init_hw_rev(void)
 		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460");
 }
 
+#define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
+#define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 101)
+#define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE)
+#define OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE	SZ_64M
+#define OMAP_STEELHEAD_ION_HEAP_TILER_SIZE		SZ_128M
+#define OMAP_STEELHEAD_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
+
+static struct ion_platform_data sh_ion_data = {
+	.nr = 3,
+	.heaps = {
+		{
+			.type = ION_HEAP_TYPE_CARVEOUT,
+			.id = OMAP_ION_HEAP_SECURE_INPUT,
+			.name = "secure_input",
+			.base = PHYS_ADDR_DUCATI_MEM -
+				OMAP_STEELHEAD_ION_HEAP_TILER_SIZE -
+				OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE,
+			.size = OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE,
+		},
+		{	.type = OMAP_ION_HEAP_TYPE_TILER,
+			.id = OMAP_ION_HEAP_TILER,
+			.name = "tiler",
+			.base = PHYS_ADDR_DUCATI_MEM -
+					OMAP_STEELHEAD_ION_HEAP_TILER_SIZE,
+			.size = OMAP_STEELHEAD_ION_HEAP_TILER_SIZE,
+		},
+		{
+			.type = ION_HEAP_TYPE_CARVEOUT,
+			.id = OMAP_ION_HEAP_LARGE_SURFACES,
+			.name = "large_surfaces",
+			.base = 0x80000000 + SZ_512M + SZ_2M,
+			.size = OMAP_STEELHEAD_ION_HEAP_LARGE_SURFACES_SIZE,
+		},
+	},
+};
+
+static struct platform_device steelhead_ion_device = {
+	.name = "ion-omap4",
+	.id = -1,
+	.dev = {
+		.platform_data = &sh_ion_data,
+	},
+};
+
 static struct platform_device *steelhead_devices[] __initdata = {
 	&ramconsole_device,
+	&steelhead_ion_device,
 };
 
 static void __init steelhead_init_early(void)
@@ -1086,8 +1135,30 @@ static void __init steelhead_map_io(void)
 
 static void __init steelhead_reserve(void)
 {
-	omap_reserve();
+	int i;
+	int ret;
+
+	/* do the static reservations first */
 	memblock_remove(STEELHEAD_RAMCONSOLE_START, STEELHEAD_RAMCONSOLE_SIZE);
+
+	memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
+	memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
+	omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM,
+				    PHYS_ADDR_DUCATI_SIZE);
+
+	for (i = 0; i < sh_ion_data.nr; i++) {
+		if (sh_ion_data.heaps[i].type == ION_HEAP_TYPE_CARVEOUT ||
+		    sh_ion_data.heaps[i].type == OMAP_ION_HEAP_TYPE_TILER) {
+			ret = memblock_remove(sh_ion_data.heaps[i].base,
+					      sh_ion_data.heaps[i].size);
+			if (ret)
+				pr_err("memblock remove of %x@%lx failed\n",
+				       sh_ion_data.heaps[i].size,
+				       sh_ion_data.heaps[i].base);
+		}
+	}
+
+	omap_reserve();
 }
 
 MACHINE_START(STEELHEAD, "Steelhead")
