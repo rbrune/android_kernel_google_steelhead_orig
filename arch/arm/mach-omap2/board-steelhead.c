@@ -27,6 +27,7 @@
 #include <linux/regulator/machine.h>
 #include <linux/regulator/fixed.h>
 #include <linux/reboot.h>
+#include <linux/memblock.h>
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -67,6 +68,25 @@
 #define GPIO_NFC_FIRMWARE 172
 #define GPIO_NFC_EN 173
 #endif
+
+#define STEELHEAD_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
+#define STEELHEAD_RAMCONSOLE_SIZE	SZ_2M
+
+static struct resource ramconsole_resources[] = {
+	{
+		.flags  = IORESOURCE_MEM,
+		.start	= STEELHEAD_RAMCONSOLE_START,
+		.end	= (STEELHEAD_RAMCONSOLE_START +
+			   STEELHEAD_RAMCONSOLE_SIZE - 1),
+	},
+};
+
+static struct platform_device ramconsole_device = {
+	.name           = "ram_console",
+	.id             = -1,
+	.num_resources  = ARRAY_SIZE(ramconsole_resources),
+	.resource       = ramconsole_resources,
+};
 
 int steelhead_hw_rev;
 
@@ -136,6 +156,10 @@ static void __init omap4_steelhead_init_hw_rev(void)
 		omap4_steelhead_hw_rev_name(),
 		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460");
 }
+
+static struct platform_device *steelhead_devices[] __initdata = {
+	&ramconsole_device,
+};
 
 static void __init steelhead_init_early(void)
 {
@@ -1031,6 +1055,7 @@ static void __init steelhead_init(void)
 #endif
 
 	steelhead_i2c_init();
+	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
 	board_serial_init();
 	omap4_twl6030_hsmmc_init(mmc);
 	omap4_ehci_init();
@@ -1059,10 +1084,16 @@ static void __init steelhead_map_io(void)
 	omap44xx_map_common_io();
 }
 
+static void __init steelhead_reserve(void)
+{
+	omap_reserve();
+	memblock_remove(STEELHEAD_RAMCONSOLE_START, STEELHEAD_RAMCONSOLE_SIZE);
+}
+
 MACHINE_START(STEELHEAD, "Steelhead")
 	/* Maintainer: Google, Inc */
 	.boot_params	= 0x80000100,
-	.reserve	= omap_reserve,
+	.reserve	= steelhead_reserve,
 	.map_io		= steelhead_map_io,
 	.init_early	= steelhead_init_early,
 	.init_irq	= gic_init_irq,
