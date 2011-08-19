@@ -700,17 +700,26 @@ static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
 
 static int __init steelhead_i2c_init(void)
 {
+	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c1_scl.i2c1_scl", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c1_sda.i2c1_sda", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c2_scl.i2c2_scl", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c2_sda.i2c2_sda", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c3_scl.i2c3_scl", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c3_sda.i2c3_sda", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c4_scl.i2c4_scl", OMAP_PIN_INPUT);
+	omap_mux_init_signal("i2c4_sda.i2c4_sda", OMAP_PIN_INPUT);
+
+	/* i2c1 - PMIC */
 	omap4_pmic_init("twl6030", &steelhead_twldata);
-#if 0
+	/* i2c2 - AVR */
 	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
 			      ARRAY_SIZE(steelhead_i2c_bus2));
+	/* i2c3 - NFC TBD */
 	omap_register_i2c_bus(3, 400, NULL, 0);
-#else
-	omap_register_i2c_bus(2, 400, NULL, 0);
-	omap_register_i2c_bus(3, 400, NULL, 0);
+	/* i2c4 - TAS5713 */
 	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
 			      ARRAY_SIZE(steelhead_i2c_bus4));
-#endif
 
 	return 0;
 }
@@ -894,9 +903,7 @@ static void __init steelhead_init(void)
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
 
-#if 0
 	steelhead_platform_init_avr();
-#endif
 	steelhead_platform_init_tas5713_audio();
 #if defined(CONFIG_SND_OMAP_SOC_MCASP)
 	steelhead_platform_init_mcasp_audio();
