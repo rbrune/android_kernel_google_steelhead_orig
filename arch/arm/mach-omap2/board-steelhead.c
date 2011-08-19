@@ -456,31 +456,27 @@ static struct twl4030_platform_data steelhead_twldata = {
 	.usb		= &omap4_usbphy_data,
 };
 
-#ifdef CONFIG_OMAP_MUX
 static struct omap_device_pad serial3_pads[] __initdata = {
-	OMAP_MUX_STATIC("uart3_cts_rctx.uart3_cts_rctx",
-			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart3_rts_sd.uart3_rts_sd",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart3_rx_irrx.uart3_rx_irrx",
-			 OMAP_PIN_INPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart3_tx_irtx.uart3_tx_irtx",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
+	{
+		.name   = "uart3_tx_irtx.uart3_tx_irtx",
+		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart3_rx_irrx.uart3_rx_irrx",
+		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
+		.enable = OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+		.idle   = OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+	},
 };
 
 static inline void __init board_serial_init(void)
 {
 	omap_serial_init_port_pads(0, NULL, 0, NULL);
+	/* port1 for bluetooth is done in board-steelhead-bluetooth.c */
 	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
 			NULL);
 	omap_serial_init_port_pads(3, NULL, 0, NULL);
 }
-#else
-static inline void __init board_serial_init(void)
-{
-	omap_serial_init();
-}
-#endif
 
 int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 				   int count,

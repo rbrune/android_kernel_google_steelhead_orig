@@ -14,19 +14,32 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <plat/serial.h>
+#include <plat/omap-serial.h>
 
 #include "board-steelhead.h"
 #include "mux.h"
 
 static struct omap_device_pad steelhead_bt_serial_pads[] __initdata = {
-	OMAP_MUX_STATIC("uart2_cts.uart2_cts",
-			 OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_rts.uart2_rts",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_rx.uart2_rx",
-			 OMAP_PIN_INPUT | OMAP_MUX_MODE0),
-	OMAP_MUX_STATIC("uart2_tx.uart2_tx",
-			 OMAP_PIN_OUTPUT | OMAP_MUX_MODE0),
+	{
+		.name   = "uart2_cts.uart2_cts",
+		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
+		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart2_rts.uart2_rts",
+		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart2_rx.uart2_rx",
+		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
+		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart2_tx.uart2_tx",
+		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
 };
 
 static struct platform_device bcm4330_bluetooth_device = {
@@ -41,13 +54,14 @@ int __init steelhead_init_bluetooth(void)
 	omap_mux_init_signal("gpmc_a22.gpio_46", OMAP_PIN_OUTPUT);
 	omap_mux_init_signal("gpmc_ncs2.gpio_52", OMAP_PIN_OUTPUT);
 	omap_mux_init_signal("gpmc_a21.gpio_45", OMAP_PIN_OUTPUT);
-	omap_mux_init_signal("gpmc_a23.gpio_47", OMAP_PIN_INPUT);
+	omap_mux_init_signal("gpmc_a23.gpio_47",
+			     OMAP_WAKEUP_EN | OMAP_PIN_INPUT);
 
 	/* Add the serial port we will use to communicate with the BCM4330 */
 	omap_serial_init_port_pads(1,
-			steelhead_bt_serial_pads,
-			ARRAY_SIZE(steelhead_bt_serial_pads),
-			NULL);
+				   steelhead_bt_serial_pads,
+				   ARRAY_SIZE(steelhead_bt_serial_pads),
+				   NULL);
 
 	/* Add the platform device used for BT power management */
 	platform_device_register(&bcm4330_bluetooth_device);
