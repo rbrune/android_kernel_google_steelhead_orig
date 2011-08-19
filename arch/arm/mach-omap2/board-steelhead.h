@@ -22,9 +22,10 @@ struct steelhead_gpio_reservation {
 	int init_state;
 };
 
-extern int steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
-		int count,
-		const char *log_tag);
+extern int __init steelhead_reserve_gpios(
+				struct steelhead_gpio_reservation *data,
+				int count,
+				const char *log_tag);
 
 extern void __init steelhead_platform_init_counter(void);
 extern int __init steelhead_init_wlan(void);
@@ -33,6 +34,9 @@ extern int __init steelhead_init_bluetooth(void);
 extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
 extern void steelhead_set_counter_slew_rate(s32 correction);
+
+#define STEELHEAD_REV_PRE_EVT 0x3
+extern int steelhead_hw_rev;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 extern void steelhead_register_timesync_event_handler(
