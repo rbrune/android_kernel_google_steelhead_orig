@@ -38,7 +38,9 @@
 #include <asm/mach/map.h>
 
 #include <video/omapdss.h>
+#include <linux/omapfb.h>
 #include <video/omap-panel-generic-dpi.h>
+#include <plat/vram.h>
 
 #include <plat/board.h>
 #include <plat/common.h>
@@ -397,6 +399,16 @@ static struct regulator_init_data steelhead_vana = {
 	},
 };
 
+static struct regulator_consumer_supply steelhead_vcxio_supply[] = {
+	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dss"),
+	REGULATOR_SUPPLY("vdds_dsi", "omapdss_dsi1"),
+};
+
+/* always on for Tungsten because it provides power to a number of CPU
+ * inputs in VDDA_DPLL_CORE_AUDIO, VDDA_DPLL_MPU, VDDA_DPLL_IVA_PER,
+ * VDDS_DV_BANK7, VDDA_USBA0OTG_1P8V as well as VDDA_DSI1, VDDA_DSI2,
+ * VDDA_CSI21, VDDA_CSI22.
+ */
 static struct regulator_init_data steelhead_vcxio = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -405,7 +417,10 @@ static struct regulator_init_data steelhead_vcxio = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
+	.num_consumer_supplies	= ARRAY_SIZE(steelhead_vcxio_supply),
+	.consumer_supplies	= steelhead_vcxio_supply,
 };
 
 static struct regulator_init_data steelhead_vdac = {
@@ -439,6 +454,28 @@ static struct regulator_init_data steelhead_clk32kg = {
 	},
 };
 
+/* define a regulator so on 4460 this can be turned off because
+ * it's not needed.
+ * on 4430 however, it needs to be always on to provide vcore3 to the CPU.
+ */
+static struct regulator_init_data steelhead_vdd3 = {
+	.constraints = {
+		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.always_on              = true,
+	},
+};
+
+/* define a regulator so on 4460 this can be turned off because
+ * it's not needed.
+ * on 4430 however, it needs to be always on to provide vmem to the CPU.
+ */
+static struct regulator_init_data steelhead_vmem = {
+	.constraints = {
+		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.always_on              = true,
+	},
+};
+
 static struct twl4030_platform_data steelhead_twldata = {
 	.irq_base	= TWL6030_IRQ_BASE,
 	.irq_end	= TWL6030_IRQ_END,
@@ -454,6 +491,10 @@ static struct twl4030_platform_data steelhead_twldata = {
 	.vaux3		= &steelhead_vaux3,
 	.clk32kg	= &steelhead_clk32kg,
 	.usb		= &omap4_usbphy_data,
+
+	/* SMPS */
+	.vdd3		= &steelhead_vdd3,
+	.vmem		= &steelhead_vmem,
 };
 
 static struct omap_device_pad serial3_pads[] __initdata = {
@@ -780,6 +821,12 @@ static int __init steelhead_i2c_init(void)
 	omap_mux_init_signal("i2c4_scl.i2c4_scl", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c4_sda.i2c4_sda", OMAP_PIN_INPUT);
 
+	/*
+	 * This will allow unused regulator to be shutdown. This flag
+	 * should be set in the board file. Before regulators are registered.
+	 */
+	regulator_has_full_constraints();
+
 	/* i2c1 - PMIC */
 	omap4_pmic_init("twl6030", &steelhead_twldata);
 	/* i2c2 - AVR */
@@ -918,6 +965,7 @@ void omap4_steelhead_display_init(void)
 #if 0
 	omap4_steelhead_hdmi_mux_init();
 #endif
+
 	omap_display_init(&omap4_steelhead_dss_data);
 }
 
