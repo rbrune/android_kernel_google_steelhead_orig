@@ -24,6 +24,7 @@
 #include <linux/leds.h>
 #include <linux/gpio.h>
 #include <linux/memblock.h>
+#include <linux/moduleparam.h>
 #include <linux/omap_ion.h>
 #include <linux/usb/otg.h>
 #include <linux/i2c/twl.h>
@@ -56,6 +57,7 @@
 #include "mux.h"
 #include "board-steelhead.h"
 #include "common-board-devices.h"
+#include "pm.h"
 
 #include <linux/i2c.h>
 #include <plat/i2c.h>
@@ -94,6 +96,9 @@ static struct platform_device ramconsole_device = {
 };
 
 int steelhead_hw_rev;
+
+static bool enable_sr = true;
+module_param(enable_sr, bool, S_IRUSR | S_IRGRP | S_IROTH);
 
 #define HW_REV_0_GPIO_ID 182
 #define HW_REV_1_GPIO_ID 101
@@ -1162,6 +1167,8 @@ static void __init steelhead_init(void)
 	usb_musb_init(&musb_board_data);
 	omap4_steelhead_create_board_props();
 	omap4_steelhead_display_init();
+	if (enable_sr)
+		omap_enable_smartreflex_on_init();
 	steelhead_init_wlan();
 	steelhead_init_bluetooth();
 }
