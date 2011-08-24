@@ -336,7 +336,6 @@ config MACH_TUNA
 
 config MACH_STEELHEAD
 	bool "Steelhead"
-	default y
 	depends on ARCH_OMAP4
 	select OMAP_PACKAGE_CBL
 	select OMAP_PACKAGE_CBS
