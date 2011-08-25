@@ -141,6 +141,10 @@ static PVRSRV_ERROR InitDevInfo(PVRSRV_PER_PROCESS_DATA *psPerProc,
 
 	psDevInfo->psKernelSGXTA3DCtlMemInfo = (PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelSGXTA3DCtlMemInfo;
 
+#if defined(FIX_HW_BRN_31272) || defined(FIX_HW_BRN_31780) || defined(FIX_HW_BRN_33920)
+	psDevInfo->psKernelSGXPTLAWriteBackMemInfo = (PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelSGXPTLAWriteBackMemInfo;
+#endif
+
 	psDevInfo->psKernelSGXMiscMemInfo = (PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelSGXMiscMemInfo;
 
 #if defined(SGX_SUPPORT_HWPROFILING)
@@ -1004,10 +1008,13 @@ static IMG_VOID SGXDumpDebugReg (PVRSRV_SGXDEV_INFO	*psDevInfo,
 	PVR_LOG(("(P%u) %s%08X", ui32CoreNum, pszName, ui32RegVal));
 }
 
+void dsscomp_kdump(void);
 static IMG_VOID SGXDumpDebugInfo (PVRSRV_SGXDEV_INFO	*psDevInfo,
 								  IMG_BOOL				bDumpSGXRegs)
 {
 	IMG_UINT32	ui32CoreNum;
+
+	dsscomp_kdump();
 
 	PVR_LOG(("SGX debug (%s)", PVRVERSION_STRING));
 
@@ -1329,7 +1336,7 @@ SGX_NoUKernel_LockUp:
 		psSGXHostCtl->ui32HostDetectedLockups ++;
 
 		
-		HWRecoveryResetSGX(psDeviceNode, 0, KERNEL_ID);
+		HWRecoveryResetSGX(psDeviceNode, 0, ISR_ID);
 	}
 }
 #endif 

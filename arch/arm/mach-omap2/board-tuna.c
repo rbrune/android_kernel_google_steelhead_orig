@@ -33,9 +33,12 @@
 #include <linux/reboot.h>
 #include <linux/memblock.h>
 #include <linux/sysfs.h>
+#include <linux/uaccess.h>
+#include <linux/proc_fs.h>
 #include <linux/spi/spi.h>
 #include <linux/platform_data/lte_modem_bootloader.h>
 #include <plat/mcspi.h>
+#include <linux/i2c-gpio.h>
 
 #include <mach/hardware.h>
 #include <mach/omap4-common.h>
@@ -43,12 +46,16 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 
+#include <plat/board-tuna-bluetooth.h>
+#include <plat/omap-serial.h>
 #include <plat/board.h>
 #include <plat/common.h>
 #include <plat/cpu.h>
 #include <plat/usb.h>
 #include <plat/mmc.h>
 #include <plat/remoteproc.h>
+#include <plat/omap-serial.h>
+
 #include <mach/id.h>
 #include "timer-gp.h"
 
@@ -77,9 +84,14 @@ EXPORT_SYMBOL(sec_class);
 #define GPIO_GPS_PWR_EN	137
 #define GPIO_GPS_UART_SEL	164
 
+#define GPIO_MHL_SCL_18V	99
+#define GPIO_MHL_SDA_18V	98
+
 #define REBOOT_FLAG_RECOVERY	0x52564352
 #define REBOOT_FLAG_FASTBOOT	0x54534146
 #define REBOOT_FLAG_NORMAL	0x4D524F4E
+
+#define UART_NUM_FOR_GPS	0
 
 static int tuna_hw_rev;
 
@@ -96,7 +108,7 @@ static const char const *omap4_tuna_hw_name_maguro[] = {
 	[0x01] = "Maguro 1st Sample",
 	[0x02] = "Maguro 2nd Sample",
 	[0x03] = "Maguro 4th Sample",
-	[0x05] = "Toro Pre-Lunchbox",
+	[0x05] = "Maguro 5th sample",
 };
 
 static const char const *omap4_tuna_hw_name_toro[] = {
@@ -104,6 +116,7 @@ static const char const *omap4_tuna_hw_name_toro[] = {
 	[0x01] = "Toro 1st Sample",
 	[0x02] = "Toro 2nd Sample",
 	[0x03] = "Toro 4th Sample",
+	[0x05] = "Toro 5th Sample",
 };
 
 int omap4_tuna_get_revision(void)
@@ -140,6 +153,11 @@ static const char *omap4_tuna_hw_rev_name(void) {
 	return names[rev];
 }
 
+/*
+ * Store a handy board information string which we can use elsewhere like
+ * like in panic situation
+ */
+static char omap4_tuna_bd_info_string[255];
 static void omap4_tuna_init_hw_rev(void)
 {
 	int ret;
@@ -159,21 +177,17 @@ static void omap4_tuna_init_hw_rev(void)
 	for (i = 0; i < ARRAY_SIZE(tuna_hw_rev_gpios); i++)
 		tuna_hw_rev |= gpio_get_value(tuna_hw_rev_gpios[i].gpio) << i;
 
-	pr_info("Tuna HW revision: %02x (%s), cpu %s\n", tuna_hw_rev,
+	snprintf(omap4_tuna_bd_info_string,
+		ARRAY_SIZE(omap4_tuna_bd_info_string),
+		"Tuna HW revision: %02x (%s), cpu %s ES%d.%d ",
+		tuna_hw_rev,
 		omap4_tuna_hw_rev_name(),
-		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460");
-}
+		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460",
+		(GET_OMAP_REVISION() >> 4) & 0xf,
+		GET_OMAP_REVISION() & 0xf);
 
-bool omap4_tuna_final_gpios(void)
-{
-	int type = omap4_tuna_get_type();
-	int rev = omap4_tuna_get_revision();
-
-	if (type == TUNA_TYPE_TORO ||
-	    (rev != TUNA_REV_PRE_LUNCHBOX && rev != TUNA_REV_LUNCHBOX))
-		return true;
-
-	return false;
+	pr_info("%s\n", omap4_tuna_bd_info_string);
+	mach_panic_string = omap4_tuna_bd_info_string;
 }
 
 /* wl127x BT, FM, GPS connectivity chip */
@@ -215,7 +229,7 @@ static void __init tuna_bt_init(void)
 	/* BT_WAKE - GPIO 27 */
 	omap_mux_init_signal("dpm_emu16.gpio_27", OMAP_PIN_OUTPUT);
 	/* BT_HOST_WAKE  - GPIO 177 */
-	omap_mux_init_signal("kpd_row5.gpio_177", OMAP_PIN_INPUT);
+	omap_mux_init_signal("kpd_row5.gpio_177", OMAP_WAKEUP_EN | OMAP_PIN_INPUT);
 }
 
 static struct twl4030_madc_platform_data twl6030_madc = {
@@ -230,13 +244,30 @@ static struct platform_device twl6030_madc_device = {
 	},
 };
 
-#define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
-#define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 101)
-#define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE)
-#define OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE	SZ_64M
+
+static struct i2c_gpio_platform_data tuna_gpio_i2c5_pdata = {
+	.sda_pin = GPIO_MHL_SDA_18V,
+	.scl_pin = GPIO_MHL_SCL_18V,
+	.udelay = 3,
+	.timeout = 0,
+};
+
+static struct platform_device tuna_gpio_i2c5_device = {
+	.name = "i2c-gpio",
+	.id = 5,
+	.dev = {
+		.platform_data = &tuna_gpio_i2c5_pdata,
+	}
+};
+
+#define OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 30)
 #define OMAP_TUNA_ION_HEAP_TILER_SIZE		SZ_128M
 #define OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
+#define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
+#define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE -\
+				OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE)
 
 static struct ion_platform_data tuna_ion_data = {
 	.nr = 3,
@@ -245,8 +276,7 @@ static struct ion_platform_data tuna_ion_data = {
 			.type = ION_HEAP_TYPE_CARVEOUT,
 			.id = OMAP_ION_HEAP_SECURE_INPUT,
 			.name = "secure_input",
-			.base = PHYS_ADDR_DUCATI_MEM -
-					OMAP_TUNA_ION_HEAP_TILER_SIZE -
+			.base = PHYS_ADDR_SMC_MEM -
 					OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE,
 			.size = OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE,
 		},
@@ -281,7 +311,50 @@ static struct platform_device *tuna_devices[] __initdata = {
 	&bcm4330_bluetooth_device,
 	&twl6030_madc_device,
 	&tuna_ion_device,
+	&tuna_gpio_i2c5_device,
 };
+
+/*
+ * The UART1 is for GPS, and CSR GPS chip should control uart1 rts level
+ * for gps firmware download.
+ */
+static int uart1_rts_ctrl_write(struct file *file, const char __user *buffer,
+						size_t count, loff_t *offs)
+{
+	char buf[10] = {0,};
+
+	if (count > sizeof(buf) - 1)
+		return -EINVAL;
+	if (copy_from_user(buf, buffer, count))
+		return -EFAULT;
+
+	if (!strncmp(buf, "1", 1)) {
+		omap_rts_mux_write(OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE7,
+							UART_NUM_FOR_GPS);
+	} else if (!strncmp(buf, "0", 1)) {
+		omap_rts_mux_write(OMAP_PIN_OUTPUT | OMAP_MUX_MODE1,
+							UART_NUM_FOR_GPS);
+	}
+
+	return count;
+}
+
+static const struct file_operations uart1_rts_ctrl_proc_fops = {
+	.write	= uart1_rts_ctrl_write,
+};
+
+static int __init tuna_gps_rts_ctrl_init(void)
+{
+	struct proc_dir_entry *p_entry;
+
+	p_entry = proc_create("mcspi1_cs3_ctrl", 0666, NULL,
+						&uart1_rts_ctrl_proc_fops);
+
+	if (!p_entry)
+		return -ENOMEM;
+
+	return 0;
+}
 
 static void tuna_gsd4t_gps_gpio(void)
 {
@@ -293,15 +366,6 @@ static void tuna_gsd4t_gps_gpio(void)
 	omap_mux_init_signal("mcspi1_cs0.gpio_137", OMAP_PIN_OUTPUT);
 	/* GPS_UART_SEL - GPIO 164 */
 	omap_mux_init_signal("usbb2_ulpitll_dat3.gpio_164", OMAP_PIN_OUTPUT);
-
-	if (omap4_tuna_get_revision() >= TUNA_REV_03) {
-		/* GPS_UART_CTS - GPIO 139 */
-		omap_mux_init_signal("mcspi1_cs2.gpio_139",
-					OMAP_MUX_MODE1 | OMAP_PIN_INPUT);
-		/* GPS_UART_RTS - GPIO 140 */
-		omap_mux_init_signal("mcspi1_cs3.gpio_140",
-					OMAP_MUX_MODE1 | OMAP_PIN_OUTPUT);
-	}
 }
 
 static void tuna_gsd4t_gps_init(void)
@@ -332,6 +396,8 @@ static void tuna_gsd4t_gps_init(void)
 
 	gpio_export_link(gps_dev, "GPS_nRST", GPIO_GPS_nRST);
 	gpio_export_link(gps_dev, "GPS_PWR_EN", GPIO_GPS_PWR_EN);
+
+	tuna_gps_rts_ctrl_init();
 
 err:
 	return;
@@ -392,6 +458,19 @@ static struct regulator_consumer_supply tuna_vmmc_supply[] = {
 	{
 		.supply = "vmmc",
 		.dev_name = "omap_hsmmc.1",
+	},
+};
+
+static struct regulator_init_data tuna_vaux1 = {
+	.constraints = {
+		.min_uV			= 3000000,
+		.max_uV			= 3000000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 =	REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
 	},
 };
 
@@ -457,6 +536,25 @@ static struct regulator_init_data tuna_vpp = {
 	},
 };
 
+static struct regulator_consumer_supply tuna_vusim_supplies[] = {
+	{
+		.supply = "vlcd-iovcc",
+	},
+};
+
+static struct regulator_init_data tuna_vusim = {
+	.constraints = {
+		.min_uV			= 2200000,
+		.max_uV 		= 2200000,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 	= REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies = ARRAY_SIZE(tuna_vusim_supplies),
+	.consumer_supplies = tuna_vusim_supplies,
+};
+
 static struct regulator_init_data tuna_vana = {
 	.constraints = {
 		.min_uV			= 2100000,
@@ -488,6 +586,12 @@ static struct regulator_init_data tuna_vcxio = {
 
 };
 
+static struct regulator_consumer_supply tuna_vdac_supply[] = {
+	{
+		.supply = "hdmi_vref",
+	},
+};
+
 static struct regulator_init_data tuna_vdac = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -497,6 +601,8 @@ static struct regulator_init_data tuna_vdac = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 	},
+	.num_consumer_supplies	= ARRAY_SIZE(tuna_vdac_supply),
+	.consumer_supplies	= tuna_vdac_supply,
 };
 
 static struct regulator_consumer_supply tuna_vusb_supply[] = {
@@ -540,6 +646,18 @@ static struct regulator_init_data tuna_vmem = {
 	},
 };
 
+static struct regulator_init_data tuna_v2v1 = {
+	.constraints = {
+		.min_uV			= 2100000,
+		.max_uV			= 2100000,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask		= REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
+	},
+};
+
 static struct twl4030_codec_audio_data twl6040_audio = {
 	/* single-step ramp for headset and handsfree */
 	.hs_left_step   = 0x0f,
@@ -562,10 +680,12 @@ static struct twl4030_platform_data tuna_twldata = {
 	/* Regulators */
 	.vmmc		= &tuna_vmmc,
 	.vpp		= &tuna_vpp,
+	.vusim		= &tuna_vusim,
 	.vana		= &tuna_vana,
 	.vcxio		= &tuna_vcxio,
 	.vdac		= &tuna_vdac,
 	.vusb		= &tuna_vusb,
+	.vaux1		= &tuna_vaux1,
 	.vaux2		= &tuna_vaux2,
 	.vaux3		= &tuna_vaux3,
 	.clk32kg	= &tuna_clk32kg,
@@ -577,6 +697,7 @@ static struct twl4030_platform_data tuna_twldata = {
 	/* SMPS */
 	.vdd3		= &tuna_vdd3,
 	.vmem		= &tuna_vmem,
+	.v2v1		= &tuna_v2v1,
 };
 
 static void tuna_audio_init(void)
@@ -606,6 +727,12 @@ static struct i2c_board_info __initdata tuna_i2c1_boardinfo[] = {
 		.flags = I2C_CLIENT_WAKE,
 		.irq = OMAP44XX_IRQ_SYS_1N,
 		.platform_data = &tuna_twldata,
+	},
+};
+
+static struct i2c_board_info __initdata tuna_i2c4_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("an30259a", 0x30),
 	},
 };
 
@@ -669,6 +796,14 @@ static struct omap_board_mux board_wkup_mux[] __initdata = {
 
 static struct omap_device_pad tuna_uart1_pads[] __initdata = {
 	{
+		.name	= "mcspi1_cs3.uart1_rts",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE1,
+	},
+	{
+		.name	= "mcspi1_cs2.uart1_cts",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE1,
+	},
+	{
 		.name   = "uart3_cts_rctx.uart1_tx",
 		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE1,
 	},
@@ -677,6 +812,26 @@ static struct omap_device_pad tuna_uart1_pads[] __initdata = {
 		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
 		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE1,
 		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE1,
+	},
+};
+
+
+static struct omap_device_pad tuna_uart2_pads[] __initdata = {
+	{
+		.name	= "uart2_cts.uart2_cts",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_rts.uart2_rts",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_tx.uart2_tx",
+		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name	= "uart2_rx.uart2_rx",
+		.enable	= OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
 	},
 };
 
@@ -693,11 +848,22 @@ static struct omap_device_pad tuna_uart3_pads[] __initdata = {
 	},
 };
 
+static struct omap_uart_port_info tuna_uart2_info __initdata = {
+	.use_dma	= 0,
+	.dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+	.dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
+	.dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+	.auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+	.wake_peer	= bcm_bt_lpm_exit_lpm_locked,
+	.rts_mux_driver_control = 1,
+};
+
 static inline void __init board_serial_init(void)
 {
 	omap_serial_init_port_pads(0, tuna_uart1_pads,
 		ARRAY_SIZE(tuna_uart1_pads), NULL);
-	omap_serial_init_port_pads(1, NULL, 0, NULL);
+	omap_serial_init_port_pads(1, tuna_uart2_pads,
+		ARRAY_SIZE(tuna_uart2_pads), &tuna_uart2_info);
 	omap_serial_init_port_pads(2, tuna_uart3_pads,
 		ARRAY_SIZE(tuna_uart3_pads), NULL);
 	omap_serial_init_port_pads(3, NULL, 0, NULL);
@@ -884,6 +1050,12 @@ err_board_obj:
 #define HSMMC2_MUX	(OMAP_MUX_MODE1 | OMAP_PIN_INPUT_PULLUP)
 #define HSMMC1_MUX	OMAP_PIN_INPUT_PULLUP
 
+static void __init omap4_tuna_led_init(void)
+{
+	i2c_register_board_info(4, tuna_i2c4_boardinfo,
+				ARRAY_SIZE(tuna_i2c4_boardinfo));
+}
+
 static void __init tuna_init(void)
 {
 	int package = OMAP_PACKAGE_CBS;
@@ -898,43 +1070,26 @@ static void __init tuna_init(void)
 
 	register_reboot_notifier(&tuna_reboot_notifier);
 
-	if (omap4_tuna_final_gpios()) {
-		/* hsmmc d0-d7 */
-		omap_mux_init_signal("sdmmc1_dat0.sdmmc1_dat0", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat1.sdmmc1_dat1", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat2.sdmmc1_dat2", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat3.sdmmc1_dat3", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat4.sdmmc1_dat4", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat5.sdmmc1_dat5", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat6.sdmmc1_dat6", HSMMC1_MUX);
-		omap_mux_init_signal("sdmmc1_dat7.sdmmc1_dat7", HSMMC1_MUX);
-		/* hsmmc cmd */
-		omap_mux_init_signal("sdmmc1_cmd.sdmmc1_cmd", HSMMC1_MUX);
-		/* hsmmc clk */
-		omap_mux_init_signal("sdmmc1_clk.sdmmc1_clk", HSMMC1_MUX);
-	} else {
-		/* hsmmc d0-d7 */
-		omap_mux_init_signal("gpmc_ad0", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad1", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad2", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad3", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad4", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad5", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad6", HSMMC2_MUX);
-		omap_mux_init_signal("gpmc_ad7", HSMMC2_MUX);
-		/* hsmmc cmd */
-		omap_mux_init_signal("gpmc_nwe", HSMMC2_MUX);
-		/* hsmmc clk */
-		omap_mux_init_signal("gpmc_noe", HSMMC2_MUX);
+	/* hsmmc d0-d7 */
+	omap_mux_init_signal("sdmmc1_dat0.sdmmc1_dat0", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat1.sdmmc1_dat1", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat2.sdmmc1_dat2", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat3.sdmmc1_dat3", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat4.sdmmc1_dat4", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat5.sdmmc1_dat5", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat6.sdmmc1_dat6", HSMMC1_MUX);
+	omap_mux_init_signal("sdmmc1_dat7.sdmmc1_dat7", HSMMC1_MUX);
+	/* hsmmc cmd */
+	omap_mux_init_signal("sdmmc1_cmd.sdmmc1_cmd", HSMMC1_MUX);
+	/* hsmmc clk */
+	omap_mux_init_signal("sdmmc1_clk.sdmmc1_clk", HSMMC1_MUX);
 
-		mmc[0].mmc = 2;
-	}
+	gpio_request(158, "emmc_en");
+	gpio_direction_output(158, 1);
+	omap_mux_init_gpio(158, OMAP_PIN_INPUT_PULLUP);
 
-	if (omap4_tuna_get_revision() != TUNA_REV_PRE_LUNCHBOX) {
-		gpio_request(158, "emmc_en");
-		gpio_direction_output(158, 1);
-		omap_mux_init_gpio(158, OMAP_PIN_INPUT_PULLUP);
-	}
+	omap_mux_init_gpio(GPIO_MHL_SDA_18V, OMAP_PIN_INPUT_PULLUP);
+	omap_mux_init_gpio(GPIO_MHL_SCL_18V, OMAP_PIN_INPUT_PULLUP);
 
 	sec_common_init();
 
@@ -970,6 +1125,7 @@ static void __init tuna_init(void)
 	omap4_tuna_power_init();
 	omap4_tuna_jack_init();
 	omap4_tuna_sensors_init();
+	omap4_tuna_led_init();
 	omap4_tuna_connector_init();
 #ifdef CONFIG_OMAP_HSI_DEVICE
 	if (TUNA_TYPE_MAGURO == omap4_tuna_get_type())
@@ -977,7 +1133,9 @@ static void __init tuna_init(void)
 #endif
 #ifdef CONFIG_USB_EHCI_HCD_OMAP
 	if (TUNA_TYPE_TORO == omap4_tuna_get_type()) {
+#ifdef CONFIG_SEC_MODEM
 		modem_toro_init();
+#endif
 		omap4_ehci_init();
 	}
 #endif
@@ -998,7 +1156,6 @@ static void __init tuna_reserve(void)
 	memblock_remove(TUNA_RAMCONSOLE_START, TUNA_RAMCONSOLE_SIZE);
 	memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);
 	memblock_remove(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
-	omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE);
 
 	for (i = 0; i < tuna_ion_data.nr; i++)
 		if (tuna_ion_data.heaps[i].type == ION_HEAP_TYPE_CARVEOUT ||
@@ -1011,6 +1168,9 @@ static void __init tuna_reserve(void)
 				       tuna_ion_data.heaps[i].base);
 		}
 
+	/* ipu needs to recognize secure input buffer area as well */
+	omap_ipu_set_static_mempool(PHYS_ADDR_DUCATI_MEM, PHYS_ADDR_DUCATI_SIZE +
+					OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE);
 	omap_reserve();
 }
 

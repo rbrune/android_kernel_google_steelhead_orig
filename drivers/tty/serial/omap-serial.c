@@ -44,6 +44,7 @@
 #include <plat/omap-serial.h>
 #include <plat/omap_device.h>
 #include <plat/serial.h>
+#include <plat/omap-pm.h>
 
 static struct uart_omap_port *ui[OMAP_MAX_HSUART_PORTS];
 
@@ -128,6 +129,20 @@ u32 omap_uart_resume_idle()
 		}
 	}
 	return ret;
+}
+
+int omap_uart_wake(u8 uart_num)
+{
+	if (uart_num > OMAP_MAX_HSUART_PORTS)
+		return -ENODEV;
+
+	if (!ui[uart_num - 1])
+		return -ENODEV;
+
+	serial_omap_port_enable(ui[uart_num - 1]);
+	serial_omap_port_disable(ui[uart_num - 1]);
+
+	return 0;
 }
 
 static void serial_omap_stop_rxdma(struct uart_omap_port *up)
@@ -600,9 +615,10 @@ static void serial_omap_shutdown(struct uart_port *port)
 
 	serial_omap_port_enable(up);
 	/*
-	 * Disable interrupts from this port
+	 * Disable interrupts & wakeup events from this port
 	 */
 	up->ier = 0;
+	serial_out(up, UART_OMAP_WER, 0);
 	serial_out(up, UART_IER, 0);
 
 	spin_lock_irqsave(&up->port.lock, flags);
@@ -894,6 +910,12 @@ serial_omap_set_termios(struct uart_port *port, struct ktermios *termios,
 	/* Software Flow Control Configuration */
 	serial_omap_configure_xonxoff(up, termios);
 
+	/* Now we are ready for RX data: enable rts line */
+	if (up->rts_mux_driver_control && up->rts_pullup_in_suspend) {
+		omap_rts_mux_write(0, up->port.line);
+		up->rts_pullup_in_suspend = 0;
+	}
+
 	spin_unlock_irqrestore(&up->port.lock, flags);
 	serial_omap_port_disable(up);
 	dev_dbg(up->port.dev, "serial_omap_set_termios+%d\n", up->pdev->id);
@@ -924,6 +946,14 @@ serial_omap_pm(struct uart_port *port, unsigned int state,
 		pm_runtime_put_sync(&up->pdev->dev);
 	else
 		serial_omap_port_disable(up);
+}
+
+static void serial_omap_wake_peer(struct uart_port *port)
+{
+	struct uart_omap_port *up = (struct uart_omap_port *)port;
+
+	if (up->wake_peer)
+		up->wake_peer(port);
 }
 
 static void serial_omap_release_port(struct uart_port *port)
@@ -1163,6 +1193,7 @@ static struct uart_ops serial_omap_pops = {
 	.shutdown	= serial_omap_shutdown,
 	.set_termios	= serial_omap_set_termios,
 	.pm		= serial_omap_pm,
+	.wake_peer	= serial_omap_wake_peer,
 	.type		= serial_omap_type,
 	.release_port	= serial_omap_release_port,
 	.request_port	= serial_omap_request_port,
@@ -1187,6 +1218,10 @@ static int serial_omap_suspend(struct device *dev)
 	struct uart_omap_port *up = dev_get_drvdata(dev);
 
 	if (up) {
+		if (up->rts_mux_driver_control) {
+			up->rts_pullup_in_suspend = 1;
+			omap_rts_mux_write(MUX_PULL_UP, up->port.line);
+		}
 		uart_suspend_port(&serial_omap_reg, &up->port);
 		up->console_lock = console_trylock();
 		serial_omap_pm(&up->port, 3, 0);
@@ -1421,6 +1456,9 @@ static int serial_omap_probe(struct platform_device *pdev)
 	up->enable_wakeup = omap_up_info->enable_wakeup;
 	up->wer = omap_up_info->wer;
 	up->chk_wakeup = omap_up_info->chk_wakeup;
+	up->wake_peer = omap_up_info->wake_peer;
+	up->rts_mux_driver_control = omap_up_info->rts_mux_driver_control;
+	up->rts_pullup_in_suspend = 0;
 
 	if (omap_up_info->use_dma) {
 		up->uart_dma.uart_dma_tx = dma_tx->start;
@@ -1569,7 +1607,9 @@ static int omap_serial_runtime_suspend(struct device *dev)
 	if (!up)
 		goto done;
 
-	up->context_loss_cnt = omap_device_get_context_loss_count(up->pdev);
+	if (up->rts_mux_driver_control)
+		omap_rts_mux_write(MUX_PULL_UP, up->port.line);
+	up->context_loss_cnt = omap_pm_get_dev_context_loss_count(dev);
 	if (device_may_wakeup(dev))
 		up->enable_wakeup(up->pdev, true);
 	else
@@ -1584,8 +1624,13 @@ static int omap_serial_runtime_resume(struct device *dev)
 	struct omap_device *od;
 
 	if (up) {
-		u32 loss_cnt = omap_device_get_context_loss_count(up->pdev);
-		if (up->context_loss_cnt < loss_cnt)
+		int loss_cnt = omap_pm_get_dev_context_loss_count(dev);
+
+		/* We don't expect error in this function
+		 * Just in case its an error:
+		 * treat it as force-context-restore */
+		if (WARN_ON(loss_cnt < 0) ||
+				(up->context_loss_cnt != loss_cnt))
 			omap_uart_restore_context(up);
 
 		if (up->use_dma) {
@@ -1594,6 +1639,8 @@ static int omap_serial_runtime_resume(struct device *dev)
 			omap_hwmod_set_slave_idlemode(od->hwmods[0],
 						HWMOD_IDLEMODE_NO);
 		}
+		if (up->rts_mux_driver_control && (!up->rts_pullup_in_suspend))
+			omap_rts_mux_write(0, up->port.line);
 	}
 
 	return 0;

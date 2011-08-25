@@ -256,8 +256,7 @@ config SGI_XP
 
 config CS5535_MFGPT
 	tristate "CS5535/CS5536 Geode Multi-Function General Purpose Timer (MFGPT) support"
-	depends on PCI
-	depends on X86
+	depends on PCI && X86 && MFD_CS5535
 	default n
 	help
 	  This driver provides access to MFGPT functionality for other
@@ -570,6 +569,15 @@ config OMAP_DIE_TEMP_SENSOR
         help
           Enabling this config will give support for the on-die
           temp sensor for the OMAP platform.
+
+config LEDS_AN30259A
+        tristate "LED driver for panasonic AN30259A RGB LED"
+        depends on I2C
+        help
+          This option enables support for AN30259A RGB LED chips
+          accessed via the I2C bus.
+          AN30259A has three channel LED driver. By synchronous clock
+          function, combined operation is possible.
 
 config STEELHEAD_AVR
 	depends on I2C && INPUT

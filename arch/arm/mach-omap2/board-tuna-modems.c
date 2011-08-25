@@ -36,6 +36,7 @@
 #define OMAP_GPIO_DPRAM_VIA_RST		15
 #define OMAP_GPIO_DPRAM_PDA_ACTIVE	119
 #define OMAP_GPIO_DPRAM_PHONE_ACTIVE	120
+#define OMAP_GPIO_DPRAM_PWRHOLD_OFF		53
 
 #define OMAP_GPIO_CMC_SPI_CLK_ACK	178
 #define OMAP_GPIO_CMC_SPI_CLK_REQ	164
@@ -137,6 +138,13 @@ static struct modem_io_t umts_io_devices[] = {
 		.id = 0x1,
 		.format = IPC_MULTI_RAW,
 		.io_type = IODEV_DUMMY,
+		.link = LINKDEV_MIPI,
+	},
+	[7] = {
+		.name = "umts_ramdump0",
+		.id = 0x0,
+		.format = IPC_RAMDUMP,
+		.io_type = IODEV_MISC,
 		.link = LINKDEV_MIPI,
 	},
 };
@@ -311,6 +319,13 @@ static struct modem_io_t cdma_io_devices[] = {
 		.io_type = IODEV_MISC,
 		.link = LINKDEV_DPRAM,
 	},
+	[9] = {
+		.name = "cdma_ramdump0",
+		.id = 0x1,
+		.format = IPC_RAMDUMP,
+		.io_type = IODEV_MISC,
+		.link = LINKDEV_DPRAM,
+	},
 };
 
 /* cdma target platform data */
@@ -325,6 +340,7 @@ static struct modem_data cdma_modem_data = {
 	.gpio_phone_active = OMAP_GPIO_DPRAM_PHONE_ACTIVE,
 	.gpio_cp_dump_int = 0, /*ToDo:*/
 	.gpio_cp_warm_reset = 0,
+	.gpio_cp_off = OMAP_GPIO_DPRAM_PWRHOLD_OFF,
 
 	.modem_type = VIA_CBP71,
 	.link_type = LINKDEV_DPRAM,
@@ -364,6 +380,7 @@ static void dpram_cfg_gpio(void)
 
 	omap_mux_init_signal("gpmc_wait1.gpio_62", OMAP_WAKEUP_EN | OMAP_INPUT_EN);
 	omap_mux_init_signal("dpm_emu3", OMAP_MUX_MODE3);
+	omap_mux_init_signal("gpmc_ncs3.gpio_53", OMAP_PIN_OUTPUT);
 
 	gpio_request(GPIO_DPRAM_INT_N, "dpram_int");
 	gpio_direction_input(GPIO_DPRAM_INT_N);
@@ -432,12 +449,17 @@ static void cdma_modem_cfg_gpio(void)
 	unsigned gpio_cp_rst = cdma_modem_data.gpio_cp_reset;
 	unsigned gpio_pda_active = cdma_modem_data.gpio_pda_active;
 	unsigned gpio_phone_active = cdma_modem_data.gpio_phone_active;
+	unsigned gpio_cp_off = cdma_modem_data.gpio_cp_off;
 
 	dpram_cfg_gpio();
 	if (dpram_cfg_gpmc_clk()) {
 		pr_err("fail to enable GPMC clock\n");
 		return;
 	}
+
+	omap_mux_init_signal("abe_dmic_din1.gpio_120", OMAP_PIN_INPUT);
+	omap_mux_init_signal("abe_dmic_clk1.gpio_119", OMAP_PIN_OUTPUT |
+				OMAP_PIN_OFF_OUTPUT_LOW);
 
 	/* gpio mux setting */
 	if (gpio_cp_rst) {
@@ -453,6 +475,11 @@ static void cdma_modem_cfg_gpio(void)
 	if (gpio_phone_active) {
 		gpio_request(gpio_phone_active, "PHONE_ACTIVE");
 		gpio_direction_input(gpio_phone_active);
+	}
+
+	if (gpio_cp_off) {
+		gpio_request(gpio_cp_off, "VIA_OFF");
+		gpio_direction_output(gpio_cp_off, 1);
 	}
 
 	if (gpio_phone_active)
@@ -587,6 +614,13 @@ static struct modem_io_t lte_io_devices[] = {
 		.io_type = IODEV_MISC,
 		.link = LINKDEV_USB,
 	},
+	[9] = {
+		.name = "lte_ramdump0",
+		.id = 0x0,
+		.format = IPC_RAMDUMP,
+		.io_type = IODEV_MISC,
+		.link = LINKDEV_USB,
+	},
 };
 
 /*
@@ -626,14 +660,14 @@ static void omap_lte_mux_init(void)
 {
 	pr_debug("[MODEM_IF] %s IN!\n", __func__);
 
-	omap_mux_init_gpio(OMAP_GPIO_221_PMIC_PWRON, OMAP_PIN_OUTPUT);
-	omap_mux_init_gpio(OMAP_GPIO_221_PMIC_PWRHOLD_OFF , OMAP_PIN_OUTPUT);
-	omap_mux_init_gpio(OMAP_GPIO_CMC_RST, OMAP_PIN_OUTPUT);
-	omap_mux_init_gpio(OMAP_GPIO_AP2CMC_INT1, OMAP_PIN_OUTPUT);
-	omap_mux_init_gpio(OMAP_GPIO_CMC2AP_INT2,
+	omap_mux_init_signal("gpmc_a17.gpio_41", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("usbb2_ulpitll_dat2.gpio_163", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("gpmc_ncs0.gpio_50", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("dpm_emu7.gpio_18", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("usbb2_ulpitll_nxt.gpio_160",
 			OMAP_PIN_INPUT | OMAP_PIN_OFF_WAKEUPENABLE);
-	omap_mux_init_gpio(OMAP_GPIO_AP2CMC_INT2, OMAP_PIN_OUTPUT);
-	omap_mux_init_gpio(OMAP_GPIO_LTE_ACTIVE, OMAP_PIN_INPUT);
+	omap_mux_init_signal("dpm_emu17.gpio_28", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("gpmc_a23.gpio_47", OMAP_PIN_INPUT);
 }
 
 static void lte_modem_cfg_gpio(void)
@@ -667,7 +701,7 @@ static void lte_modem_cfg_gpio(void)
 #ifdef CONFIG_LTE_MODEM_CMC221
 	if (gpio_cp_off) {
 		gpio_request(gpio_cp_off, "LTE_OFF");
-		gpio_direction_output(gpio_cp_off, 0);
+		gpio_direction_output(gpio_cp_off, 1);
 	}
 
 	if (gpio_slave_wakeup) {
@@ -723,7 +757,7 @@ static struct platform_device lte_modem = {
 void __init modem_toro_init(void)
 {
 	lte_modem_wake.dev.platform_data =
-				(void*)lte_modem_data.gpio_slave_wakeup;
+				(void *)lte_modem_data.gpio_slave_wakeup;
 	platform_device_register(&lte_modem_wake);
 }
 

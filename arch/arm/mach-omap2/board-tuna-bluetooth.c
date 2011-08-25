@@ -26,9 +26,10 @@
 #include <linux/irq.h>
 #include <linux/rfkill.h>
 #include <linux/platform_device.h>
-#include <linux/serial_core.h>
 #include <linux/wakelock.h>
 #include <asm/mach-types.h>
+#include <plat/serial.h>
+#include <plat/board-tuna-bluetooth.h>
 
 #ifdef CONFIG_MACH_STEELHEAD
 #define BT_REG_GPIO		46
@@ -47,7 +48,6 @@ static struct rfkill *bt_rfkill;
 struct bcm_bt_lpm {
 	int wake;
 	int host_wake;
-	bool rx_wake_lock_taken;
 
 	struct hrtimer enter_lpm_timer;
 	ktime_t enter_lpm_delay;
@@ -108,15 +108,6 @@ void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport) {
 }
 EXPORT_SYMBOL(bcm_bt_lpm_exit_lpm_locked);
 
-void bcm_bt_rx_done_locked(struct uart_port *uport) {
-	if (bt_lpm.host_wake) {
-		// Release wake in 500 ms so that higher layers can take it.
-		wake_lock_timeout(&bt_lpm.wake_lock, HZ/2);
-		bt_lpm.rx_wake_lock_taken = true;
-	}
-}
-EXPORT_SYMBOL(bcm_bt_rx_done_locked);
-
 static void update_host_wake_locked(int host_wake)
 {
 	if (host_wake == bt_lpm.host_wake)
@@ -125,12 +116,11 @@ static void update_host_wake_locked(int host_wake)
 	bt_lpm.host_wake = host_wake;
 
 	if (host_wake) {
-		bt_lpm.rx_wake_lock_taken = false;
 		wake_lock(&bt_lpm.wake_lock);
-	} else if (!bt_lpm.rx_wake_lock_taken) {
-		// Failsafe timeout of wakelock.
-		// If the host wake pin is asserted and no data is sent,
-		// when its deasserted we will enter this path
+	} else  {
+		// Take a timed wakelock, so that upper layers can take it.
+		// The chipset deasserts the hostwake lock, when there is no
+		// more data to send.
 		wake_lock_timeout(&bt_lpm.wake_lock, HZ/2);
 	}
 
@@ -140,6 +130,9 @@ static irqreturn_t host_wake_isr(int irq, void *dev)
 {
 	int host_wake;
 	unsigned long flags;
+
+	/* wakeup uart by enabling the uart module */
+	omap_uart_wake(2);
 
 	host_wake = gpio_get_value(BT_HOST_WAKE_GPIO);
 	irq_set_irq_type(irq, host_wake ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);

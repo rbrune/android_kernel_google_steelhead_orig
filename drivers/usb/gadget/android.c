@@ -55,6 +55,7 @@
 #include "f_rndis.c"
 #include "rndis.c"
 #include "u_ether.c"
+#include "f_dm.c"
 
 MODULE_AUTHOR("Mike Lockwood");
 MODULE_DESCRIPTION("Android Composite USB Driver");
@@ -66,6 +67,9 @@ static const char longname[] = "Gadget Android";
 /* Default vendor and product IDs, overridden by userspace */
 #define VENDOR_ID		0x18D1
 #define PRODUCT_ID		0x0001
+
+/* DM_PORT NUM : /dev/ttyGS* port number */
+#define DM_PORT_NUM            1
 
 struct android_usb_function {
 	char *name;
@@ -373,7 +377,7 @@ static int rndis_function_bind_config(struct android_usb_function *f,
 		rndis->ethaddr[0], rndis->ethaddr[1], rndis->ethaddr[2],
 		rndis->ethaddr[3], rndis->ethaddr[4], rndis->ethaddr[5]);
 
-	ret = gether_setup(c->cdev->gadget, rndis->ethaddr);
+	ret = gether_setup_name(c->cdev->gadget, rndis->ethaddr, "rndis");
 	if (ret) {
 		pr_err("%s: gether_setup failed\n", __func__);
 		return ret;
@@ -643,6 +647,17 @@ static struct android_usb_function accessory_function = {
 };
 
 
+static int dm_function_bind_config(struct android_usb_function *f,
+					struct usb_configuration *c)
+{
+	return dm_bind_config(c, DM_PORT_NUM);
+}
+
+static struct android_usb_function dm_function = {
+	.name           = "dm",
+	.bind_config    = dm_function_bind_config,
+};
+
 static struct android_usb_function *supported_functions[] = {
 	&adb_function,
 	&acm_function,
@@ -651,6 +666,7 @@ static struct android_usb_function *supported_functions[] = {
 	&rndis_function,
 	&mass_storage_function,
 	&accessory_function,
+	&dm_function,
 	NULL
 };
 
@@ -1040,7 +1056,6 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 	struct android_dev		*dev = _android_dev;
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	struct usb_request		*req = cdev->req;
-	struct android_usb_function	**functions = dev->functions;
 	struct android_usb_function	*f;
 	int value = -EOPNOTSUPP;
 	unsigned long flags;
@@ -1050,7 +1065,7 @@ android_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *c)
 	req->length = 0;
 	gadget->ep0->driver_data = cdev;
 
-	while ((f = *functions++)) {
+	list_for_each_entry(f, &dev->enabled_functions, enabled_list) {
 		if (f->ctrlrequest) {
 			value = f->ctrlrequest(f, cdev, c);
 			if (value >= 0)

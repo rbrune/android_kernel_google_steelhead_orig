@@ -1158,6 +1158,9 @@ int snd_soc_suspend(struct device *dev)
 	struct snd_soc_codec *codec;
 	int i;
 
+	/* cancel pending deferred resume if any */
+	cancel_work_sync(&card->deferred_resume_work);
+
 	/* If the initialization of this soc device failed, there is no codec
 	 * associated with it. Just bail out in this case.
 	 */
@@ -1255,6 +1258,7 @@ int snd_soc_suspend(struct device *dev)
 			case SND_SOC_BIAS_OFF:
 				codec->driver->suspend(codec, PMSG_SUSPEND);
 				codec->suspended = 1;
+				codec->cache_sync = 1;
 				break;
 			default:
 				dev_dbg(codec->dev, "CODEC is on over suspend\n");
@@ -3727,6 +3731,7 @@ int snd_soc_register_card(struct snd_soc_card *card)
 	mutex_init(&card->mutex);
 	mutex_init(&card->dapm_mutex);
 	mutex_init(&card->dsp_mutex);
+	mutex_init(&card->power_mutex);
 
 	mutex_lock(&client_mutex);
 	list_add(&card->list, &card_list);

@@ -421,16 +421,16 @@ static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 	else
 		snd_soc_jack_report(&hs_jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
 
-	/* wait 500 ms before switching of HS power */
-	rtd->pmdown_time = 500;
+	/* don't wait before switching of HS power */
+	rtd->pmdown_time = 0;
 
 	return ret;
 }
 
 static int sdp4430_twl6040_dl2_init(struct snd_soc_pcm_runtime *rtd)
 {
-	/* wait 500 ms before switching of HF power */
-	rtd->pmdown_time = 500;
+	/* don't wait before switching of HF power */
+	rtd->pmdown_time = 0;
 
 	return 0;
 }
@@ -440,7 +440,7 @@ static struct snd_soc_dai_driver dai[] = {
 {
 	.name = "Bluetooth",
 	.playback = {
-		.stream_name = "Playback",
+		.stream_name = "BT Playback",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |
@@ -448,7 +448,7 @@ static struct snd_soc_dai_driver dai[] = {
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
 	.capture = {
-		.stream_name = "Capture",
+		.stream_name = "BT Capture",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |
@@ -460,14 +460,14 @@ static struct snd_soc_dai_driver dai[] = {
 {
 	.name = "FM Digital",
 	.playback = {
-		.stream_name = "Playback",
+		.stream_name = "FM Playback",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_48000,
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,
 	},
 	.capture = {
-		.stream_name = "Capture",
+		.stream_name = "FM Capture",
 		.channels_min = 1,
 		.channels_max = 2,
 		.rates = SNDRV_PCM_RATE_48000,
@@ -477,7 +477,7 @@ static struct snd_soc_dai_driver dai[] = {
 {
 	.name = "HDMI",
 	.playback = {
-		.stream_name = "Playback",
+		.stream_name = "HDMI Playback",
 		.channels_min = 2,
 		.channels_max = 8,
 		.rates = SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |

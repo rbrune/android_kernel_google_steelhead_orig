@@ -176,7 +176,6 @@
 	((REG_CS_TIM << OMAP44XX_REG_CS_TIM_SHIFT) & OMAP44XX_REG_CS_TIM_MASK)|\
 	((REG_SR_TIM << OMAP44XX_REG_SR_TIM_SHIFT) & OMAP44XX_REG_SR_TIM_MASK)|\
 	((REG_PD_TIM << OMAP44XX_REG_PD_TIM_SHIFT) & OMAP44XX_REG_PD_TIM_MASK)|\
-	((REG_PD_TIM << OMAP44XX_REG_PD_TIM_SHIFT) & OMAP44XX_REG_PD_TIM_MASK)|\
 	((LP_MODE_SELF_REFRESH << OMAP44XX_REG_LP_MODE_SHIFT)\
 			& OMAP44XX_REG_LP_MODE_MASK) |\
 	((DPD_DISABLE << OMAP44XX_REG_DPD_EN_SHIFT)\
@@ -187,8 +186,6 @@
 			& OMAP44XX_REG_CS_TIM_SHDW_MASK) |\
 	((REG_SR_TIM << OMAP44XX_REG_SR_TIM_SHDW_SHIFT)\
 			& OMAP44XX_REG_SR_TIM_SHDW_MASK) |\
-	((REG_PD_TIM << OMAP44XX_REG_PD_TIM_SHDW_SHIFT)\
-			& OMAP44XX_REG_PD_TIM_SHDW_MASK) |\
 	((REG_PD_TIM << OMAP44XX_REG_PD_TIM_SHDW_SHIFT)\
 			& OMAP44XX_REG_PD_TIM_SHDW_MASK))
 
@@ -287,4 +284,6 @@ int omap_emif_setup_registers(u32 freq,
 int omap_emif_setup_device_details(
 			const struct emif_device_details *emif1_devices,
 			const struct emif_device_details *emif2_devices);
+
+void emif_clear_irq(int emif_id);
 #endif

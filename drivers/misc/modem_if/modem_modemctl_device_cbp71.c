@@ -39,13 +39,18 @@ static int cbp71_on(struct modem_ctl *mc)
 
 	pr_info("[MODEM_IF] cbp71_on()\n");
 
-	if (!mc->gpio_cp_reset) {
+	if (!mc->gpio_cp_off || !mc->gpio_cp_reset) {
 		pr_err("[MODEM_IF] no gpio data\n");
 		return -ENXIO;
 	}
 	gpio_set_value(mc->gpio_cp_reset, 0);
 	msleep(600);
 	gpio_set_value(mc->gpio_cp_reset, 1);
+	msleep(100);
+	gpio_set_value(mc->gpio_cp_off, 0);
+	msleep(300);
+
+	gpio_set_value(mc->gpio_pda_active, 1);
 
 	/* Wait here until the PHONE is up.
 	* Waiting as the this called from IOCTL->UM thread */
@@ -90,7 +95,7 @@ static int cbp71_off(struct modem_ctl *mc)
 {
 	pr_debug("[MODEM_IF] cbp71_off()\n");
 
-	if (!mc->gpio_cp_reset) {
+	if (!mc->gpio_cp_off || !mc->gpio_cp_reset) {
 		pr_err("[MODEM_IF] no gpio data\n");
 		return -ENXIO;
 	}
@@ -151,8 +156,6 @@ static irqreturn_t phone_active_irq_handler(int irq, void *_mc)
 	int phone_active_value = 0;
 	int phone_state = 0;
 	struct modem_ctl *mc = (struct modem_ctl *)_mc;
-	struct dpram_link_device *dpram_ld =
-				to_dpram_link_device(mc->iod->link);
 
 	if (!mc->gpio_cp_reset || !mc->gpio_phone_active) {
 		pr_err("[MODEM_IF] no gpio data\n");
@@ -161,7 +164,6 @@ static irqreturn_t phone_active_irq_handler(int irq, void *_mc)
 
 	phone_reset = gpio_get_value(mc->gpio_cp_reset);
 	phone_active_value = gpio_get_value(mc->gpio_phone_active);
-	dpram_ld->phone_status = phone_active_value;
 
 	if (phone_reset && phone_active_value)
 		phone_state = STATE_ONLINE;
@@ -169,8 +171,6 @@ static irqreturn_t phone_active_irq_handler(int irq, void *_mc)
 			phone_state = STATE_CRASH_RESET;
 	else
 		phone_state = STATE_OFFLINE;
-
-	enable_irq(mc->irq_phone_active);
 
 	return IRQ_HANDLED;
 }
@@ -198,6 +198,7 @@ int cbp71_init_modemctl_device(struct modem_ctl *mc,
 	mc->gpio_cp_dump_int = pdata->gpio_cp_dump_int;
 	mc->gpio_flm_uart_sel = pdata->gpio_flm_uart_sel;
 	mc->gpio_cp_warm_reset = pdata->gpio_cp_warm_reset;
+	mc->gpio_cp_off = pdata->gpio_cp_off;
 
 	pdev = to_platform_device(mc->dev);
 	mc->irq_phone_active = platform_get_irq(pdev, 0);

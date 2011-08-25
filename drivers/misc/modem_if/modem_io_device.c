@@ -22,6 +22,8 @@
 #include <linux/gpio.h>
 #include <linux/if_arp.h>
 #include <linux/ip.h>
+#include <linux/if_ether.h>
+#include <linux/etherdevice.h>
 
 #include <linux/platform_data/modem.h>
 #include "modem_prj.h"
@@ -72,6 +74,7 @@ static int get_header_size(struct io_device *iod)
 		/* minimum size for transaction align */
 		return 4;
 
+	case IPC_RAMDUMP:
 	default:
 		return 0;
 	}
@@ -142,22 +145,16 @@ static void *get_header(struct io_device *iod, size_t count,
 	}
 }
 
-static int rx_hdlc_head_start_check(char *buf)
+static inline int rx_hdlc_head_start_check(char *buf)
 {
-	if (strncmp(buf, hdlc_start, sizeof(hdlc_start))) {
-		pr_err("[MODEM_IF] Wrong HDLC start: 0x%x\n", *buf);
-		return -EBADMSG;
-	}
-	return sizeof(hdlc_start);
+	/* check hdlc head and return size of start byte */
+	return (buf[0] == HDLC_START) ? SIZE_OF_HDLC_START : -EBADMSG;
 }
 
-static int rx_hdlc_tail_check(char *buf)
+static inline int rx_hdlc_tail_check(char *buf)
 {
-	if (strncmp(buf, hdlc_end, sizeof(hdlc_end))) {
-		pr_err("[MODEM_IF] Wrong HDLC end: 0x%x\n", *buf);
-		return -EBADMSG;
-	}
-	return sizeof(hdlc_end);
+	/* check hdlc tail and return size of tail byte */
+	return (buf[0] == HDLC_END) ? SIZE_OF_HDLC_END : -EBADMSG;
 }
 
 /* remove hdlc header and store IPC header */
@@ -171,13 +168,16 @@ static int rx_hdlc_head_check(struct io_device *iod, char *buf, unsigned rest)
 	/* first frame, remove start header 7F */
 	if (!hdr->start) {
 		len = rx_hdlc_head_start_check(buf);
-		if (len < 0)
+		if (len < 0) {
+			pr_err("[MODEM_IF] Wrong HDLC start: 0x%x\n", *buf);
 			return len; /*Wrong hdlc start*/
+		}
 
 		pr_debug("[MODEM_IF] check len : %d, rest : %d (%d)\n", len,
 					rest, __LINE__);
 
-		memcpy(&hdr->start, hdlc_start, len);
+		/* set the start flag of current packet */
+		hdr->start = HDLC_START;
 		hdr->len = 0;
 
 		/* debug print */
@@ -191,6 +191,7 @@ static int rx_hdlc_head_check(struct io_device *iod, char *buf, unsigned rest)
 
 		case IPC_CMD:
 		case IPC_BOOT:
+		case IPC_RAMDUMP:
 		default:
 			break;
 		}
@@ -243,6 +244,20 @@ static int rx_hdlc_data_check(struct io_device *iod, char *buf, unsigned rest)
 			/* copy the RFS haeder to skb->data */
 			memcpy(skb_put(skb, head_size), hdr->hdr, head_size);
 			break;
+
+		case IPC_MULTI_RAW:
+			if (iod->net_typ == UMTS_NETWORK)
+				skb = alloc_skb(alloc_size, GFP_ATOMIC);
+			else
+				skb = alloc_skb(alloc_size +
+					sizeof(struct ethhdr), GFP_ATOMIC);
+			if (unlikely(!skb))
+				return -ENOMEM;
+
+			if (iod->net_typ != UMTS_NETWORK)
+				skb_reserve(skb, sizeof(struct ethhdr));
+			break;
+
 		default:
 			skb = alloc_skb(alloc_size, GFP_ATOMIC);
 			if (unlikely(!skb))
@@ -295,6 +310,8 @@ static int rx_iodev_skb_raw(struct io_device *iod)
 	struct sk_buff *skb = iod->skb_recv;
 	struct net_device *ndev;
 	struct iphdr *ip_header;
+	struct ethhdr *ehdr;
+	const char source[ETH_ALEN] = SOURCE_MAC_ADDR;
 
 	switch (iod->io_typ) {
 	case IODEV_MISC:
@@ -318,7 +335,21 @@ static int rx_iodev_skb_raw(struct io_device *iod)
 		else
 			skb->protocol = htons(ETH_P_IP);
 
-		err = netif_rx(skb);
+		if (iod->net_typ == UMTS_NETWORK)
+			err = netif_rx(skb);
+		else {
+			skb_push(skb, sizeof(struct ethhdr));
+			ehdr = (void *)skb->data;
+			memcpy(ehdr->h_dest, ndev->dev_addr, ETH_ALEN);
+			memcpy(ehdr->h_source, source, ETH_ALEN);
+			ehdr->h_proto = skb->protocol;
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
+			skb_reset_mac_header(skb);
+
+			skb_pull(skb, sizeof(struct ethhdr));
+			err = netif_rx_ni(skb);
+		}
+
 		if (err != NET_RX_SUCCESS)
 			dev_err(&ndev->dev, "rx error: %d\n", err);
 		return err;
@@ -329,9 +360,36 @@ static int rx_iodev_skb_raw(struct io_device *iod)
 	}
 }
 
-static int rx_multipdp(struct io_device *iod)
+static void rx_iodev_work(struct work_struct *work)
 {
 	int ret;
+	struct sk_buff *skb;
+	struct io_device *real_iod;
+	struct io_device *iod = container_of(work, struct io_device,
+				rx_work.work);
+
+	skb = skb_dequeue(&iod->sk_rx_q);
+	while (skb) {
+		real_iod = *((struct io_device **)skb->cb);
+		real_iod->skb_recv = skb;
+
+		ret = rx_iodev_skb_raw(real_iod);
+		if (ret == NET_RX_DROP) {
+			pr_err("[MODEM_IF] %s: queue delayed work!\n",
+								__func__);
+			skb_queue_head(&iod->sk_rx_q, skb);
+			schedule_delayed_work(&iod->rx_work,
+						msecs_to_jiffies(20));
+			break;
+		} else if (ret < 0)
+			dev_kfree_skb_any(skb);
+
+		skb = skb_dequeue(&iod->sk_rx_q);
+	}
+}
+
+static int rx_multipdp(struct io_device *iod)
+{
 	u8 ch;
 	struct raw_hdr *raw_header = (struct raw_hdr *)&iod->h_data.hdr;
 	struct io_raw_devices *io_raw_devs =
@@ -345,11 +403,12 @@ static int rx_multipdp(struct io_device *iod)
 		return -1;
 	}
 
-	real_iod->skb_recv = iod->skb_recv;
-	ret = rx_iodev_skb_raw(real_iod);
-	if (ret < 0)
-		pr_err("[MODEM_IF] %s: rx_iodev_skb_raw failed!\n", __func__);
-	return ret;
+	*((struct io_device **)iod->skb_recv->cb) = real_iod;
+	skb_queue_tail(&iod->sk_rx_q, iod->skb_recv);
+	pr_debug("sk_rx_qlen:%d\n", iod->sk_rx_q.qlen);
+
+	schedule_delayed_work(&iod->rx_work, 0);
+	return 0;
 }
 
 /* de-mux function draft */
@@ -375,7 +434,7 @@ static int rx_hdlc_packet(struct io_device *iod, const char *data,
 {
 	unsigned rest = recv_size;
 	char *buf = (char *)data;
-	int err;
+	int err = 0;
 	int len;
 
 	if (rest <= 0)
@@ -414,8 +473,10 @@ data_check:
 		goto exit;
 
 	err = len = rx_hdlc_tail_check(buf);
-	if (err < 0)
+	if (err < 0) {
+		pr_err("[MODEM_IF] Wrong HDLC end: 0x%x\n", *buf);
 		goto exit;
+	}
 	pr_debug("[MODEM_IF] check len : %d, rest : %d (%d)\n", len, rest,
 				__LINE__);
 
@@ -474,6 +535,7 @@ static int io_dev_recv_data_from_link_dev(struct io_device *iod,
 		return 0;
 
 	case IPC_BOOT:
+	case IPC_RAMDUMP:
 		/* save packet to sk_buff */
 		skb = alloc_skb(len, GFP_ATOMIC);
 		if (!skb) {
@@ -502,6 +564,10 @@ static void io_dev_modem_state_changed(struct io_device *iod,
 			enum modem_state state)
 {
 	iod->mc->phone_state = state;
+	pr_info("[MODEM_IF] Got modem state changed. state : %d\n", state);
+
+	if ((state == STATE_CRASH_RESET) || (state == STATE_CRASH_EXIT))
+		wake_up(&iod->wq);
 }
 
 static int misc_open(struct inode *inode, struct file *filp)
@@ -536,6 +602,9 @@ static unsigned int misc_poll(struct file *filp, struct poll_table_struct *wait)
 	if ((!skb_queue_empty(&iod->sk_rx_q))
 				&& (iod->mc->phone_state != STATE_OFFLINE))
 		return POLLIN | POLLRDNORM;
+	else if ((iod->mc->phone_state == STATE_CRASH_RESET) ||
+			(iod->mc->phone_state == STATE_CRASH_EXIT))
+		return POLLHUP;
 	else
 		return 0;
 }
@@ -609,6 +678,7 @@ static ssize_t misc_write(struct file *filp, const char __user * buf,
 
 	switch (iod->format) {
 	case IPC_BOOT:
+	case IPC_RAMDUMP:
 		if (copy_from_user(skb_put(skb, count), buf, count) != 0)
 			return -EFAULT;
 		break;
@@ -655,7 +725,7 @@ static ssize_t misc_read(struct file *filp, char *buf, size_t count,
 	}
 
 	if (skb->len > count) {
-		pr_err("[MODEM_IF] skb len is too big = %d,%d!(%d)",
+		pr_err("[MODEM_IF] skb len is too big = %d,%d!(%d)\n",
 				count, skb->len, __LINE__);
 		dev_kfree_skb_any(skb);
 		return -EFAULT;
@@ -702,6 +772,13 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct vnet *vnet = netdev_priv(ndev);
 	struct io_device *iod = vnet->iod;
 
+	/* umts doesn't need to discard ethernet header */
+	if (iod->net_typ != UMTS_NETWORK) {
+		if (iod->id >= PSD_DATA_CHID_BEGIN &&
+			iod->id <= PSD_DATA_CHID_END)
+			skb_pull(skb, sizeof(struct ethhdr));
+	}
+
 	hd.len = skb->len + sizeof(hd);
 	hd.control = 0;
 	hd.channel = iod->id & 0x1F;
@@ -743,8 +820,21 @@ static void vnet_setup(struct net_device *ndev)
 	ndev->netdev_ops = &vnet_ops;
 	ndev->type = ARPHRD_PPP;
 	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
-	ndev->hard_header_len = 0;
 	ndev->addr_len = 0;
+	ndev->hard_header_len = 0;
+	ndev->tx_queue_len = 1000;
+	ndev->mtu = ETH_DATA_LEN;
+	ndev->watchdog_timeo = 5 * HZ;
+}
+
+static void vnet_setup_ether(struct net_device *ndev)
+{
+	ndev->netdev_ops = &vnet_ops;
+	ndev->type = ARPHRD_ETHER;
+	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST | IFF_SLAVE;
+	ndev->addr_len = ETH_ALEN;
+	random_ether_addr(ndev->dev_addr);
+	ndev->hard_header_len = 0;
 	ndev->tx_queue_len = 1000;
 	ndev->mtu = ETH_DATA_LEN;
 	ndev->watchdog_timeo = 5 * HZ;
@@ -767,6 +857,7 @@ int init_io_device(struct io_device *iod)
 	case IODEV_MISC:
 		init_waitqueue_head(&iod->wq);
 		skb_queue_head_init(&iod->sk_rx_q);
+		INIT_DELAYED_WORK(&iod->rx_work, rx_iodev_work);
 
 		iod->miscdev.minor = MISC_DYNAMIC_MINOR;
 		iod->miscdev.name = iod->name;
@@ -780,7 +871,11 @@ int init_io_device(struct io_device *iod)
 		break;
 
 	case IODEV_NET:
-		iod->ndev = alloc_netdev(0, iod->name, vnet_setup);
+		if (iod->net_typ == UMTS_NETWORK)
+			iod->ndev = alloc_netdev(0, iod->name, vnet_setup);
+		else
+			iod->ndev = alloc_netdev(0, iod->name,
+						vnet_setup_ether);
 		if (!iod->ndev) {
 			pr_err("failed to alloc netdev\n");
 			return -ENOMEM;
@@ -790,14 +885,17 @@ int init_io_device(struct io_device *iod)
 		if (ret)
 			free_netdev(iod->ndev);
 
-		pr_err("%s: %d(iod:0x%p)", __func__, __LINE__, iod);
+		pr_debug("%s: %d(iod:0x%p)\n", __func__, __LINE__, iod);
 		vnet = netdev_priv(iod->ndev);
-		pr_err("%s: %d(vnet:0x%p)", __func__, __LINE__, vnet);
+		pr_debug("%s: %d(vnet:0x%p)\n", __func__, __LINE__, vnet);
 		vnet->iod = iod;
 
 		break;
 
 	case IODEV_DUMMY:
+		skb_queue_head_init(&iod->sk_rx_q);
+		INIT_DELAYED_WORK(&iod->rx_work, rx_iodev_work);
+
 		break;
 
 	default:

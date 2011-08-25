@@ -1265,6 +1265,12 @@ static void dapm_seq_run_coalesced(struct snd_soc_dapm_context *dapm,
 	}
 
 	if (reg >= 0) {
+		/* Any widget will do, they should all be updating the
+		 * same register.
+		 */
+		w = list_first_entry(pending, struct snd_soc_dapm_widget,
+				     power_list);
+
 		pop_dbg(dapm->dev, card->pop_time,
 			"pop test : Applying 0x%x/0x%x to %x in %dms\n",
 			value, mask, reg, card->pop_time);
@@ -1498,6 +1504,7 @@ static int dapm_power_widgets(struct snd_soc_dapm_context *dapm, int event)
 	/* Check which widgets we need to power and store them in
 	 * lists indicating if they should be powered up or down.
 	 */
+	mutex_lock(&card->power_mutex);
 	list_for_each_entry(w, &card->widgets, list) {
 		switch (w->id) {
 		case snd_soc_dapm_pre:
@@ -1602,6 +1609,8 @@ static int dapm_power_widgets(struct snd_soc_dapm_context *dapm, int event)
 	pop_wait(card->pop_time);
 
 	trace_snd_soc_dapm_done(card);
+
+	mutex_unlock(&card->power_mutex);
 
 	return 0;
 }
@@ -3057,12 +3066,12 @@ void snd_soc_dapm_shutdown(struct snd_soc_card *card)
 	struct snd_soc_codec *codec;
 	struct snd_soc_platform *platform;
 
-	list_for_each_entry(codec, &card->codec_dev_list, list) {
+	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
 		soc_dapm_shutdown_codec(&codec->dapm);
 		snd_soc_dapm_set_bias_level(&codec->dapm, SND_SOC_BIAS_OFF);
 	}
 
-	list_for_each_entry(platform, &card->platform_dev_list, list) {
+	list_for_each_entry(platform, &card->platform_dev_list, card_list) {
 		soc_dapm_shutdown_codec(&platform->dapm);
 		snd_soc_dapm_set_bias_level(&platform->dapm, SND_SOC_BIAS_OFF);
 	}

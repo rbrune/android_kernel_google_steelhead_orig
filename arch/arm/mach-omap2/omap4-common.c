@@ -31,7 +31,7 @@
 #include "clockdomain.h"
 
 #ifdef CONFIG_CACHE_L2X0
-#define L2X0_POR_OFFSET_VALUE		0x9
+#define L2X0_POR_OFFSET_VALUE		0x7
 static void __iomem *l2cache_base;
 #endif
 
@@ -168,8 +168,7 @@ static int __init omap_l2_cache_init(void)
 		return -ENODEV;
 
 #ifdef CONFIG_OMAP_ALLOW_OSWR
-	/* TODO: add revision info once verified */
-	if (cpu_is_omap446x())
+	if (omap_rev() == OMAP4460_REV_ES1_0)
 		mpu_prefetch_disable_errata = true;
 #endif
 
@@ -208,25 +207,28 @@ static int __init omap_l2_cache_init(void)
 
 	/*
 	 * Double linefill is available only on OMAP4460 L2X0.
-	 * Undocumented bit 25 is set for better performance.
 	 */
 	if (cpu_is_omap446x())
 		por_ctrl |= 1 << L2X0_PREFETCH_DOUBLE_LINEFILL_SHIFT;
-	por_ctrl |= 1 << 25;
-	if (!mpu_prefetch_disable_errata)
+	if (!mpu_prefetch_disable_errata) {
 		por_ctrl |= 1 << L2X0_PREFETCH_DATA_PREFETCH_SHIFT;
-
-	if (cpu_is_omap446x() || (omap_rev() >= OMAP4430_REV_ES2_2)) {
 		por_ctrl |= L2X0_POR_OFFSET_VALUE;
-		omap_smc1(0x113, por_ctrl);
 	}
+
+	/* Set POR through PPA service only in EMU/HS devices */
+	if (omap_type() != OMAP2_DEVICE_TYPE_GP)
+		omap4_secure_dispatcher(PPA_SERVICE_PL310_POR, 0x7, 1,
+				por_ctrl, 0, 0, 0);
+	else if (omap_rev() >= OMAP4430_REV_ES2_1)
+		omap_smc1(0x113, por_ctrl);
+
 
 	/*
 	 * FIXME: Temporary WA for OMAP4460 stability issue.
 	 * Lock-down specific L2 cache ways which  makes effective
 	 * L2 size as 512 KB instead of 1 MB
 	 */
-	if (cpu_is_omap446x()) {
+	if (omap_rev() == OMAP4460_REV_ES1_0) {
 		lockdown = 0xa5a5;
 		writel_relaxed(lockdown, l2cache_base + L2X0_LOCKDOWN_WAY_D0);
 		writel_relaxed(lockdown, l2cache_base + L2X0_LOCKDOWN_WAY_D1);

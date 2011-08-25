@@ -35,10 +35,12 @@
 #define IOCTL_MODEM_SEND	_IO('o', 0x25)
 #define IOCTL_MODEM_RECV	_IO('o', 0x26)
 
-#define IOCTL_MODEM_STATUS		_IO('o', 0x27)
+#define IOCTL_MODEM_STATUS	_IO('o', 0x27)
 #define IOCTL_MODEM_GOTA_START	_IO('o', 0x28)
 #define IOCTL_MODEM_FW_UPDATE	_IO('o', 0x29)
 
+#define IOCTL_MODEM_NET_SUSPEND	_IO('o', 0x30)
+#define IOCTL_MODEM_NET_RESUME	_IO('o', 0x31)
 
 /* modem status */
 #define MODEM_OFF	0
@@ -52,7 +54,12 @@
 
 #define IPC_HEADER_MAX_SIZE	6 /* fmt 3, raw 6, rfs 6 */
 
+#define PSD_DATA_CHID_BEGIN	0x2A
+#define PSD_DATA_CHID_END	0x38
+
 #define IP6VERSION	6
+
+#define SOURCE_MAC_ADDR	{0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}
 
 /* Does modem ctl structure will use state ? or status defined below ?*/
 enum modem_state {
@@ -103,8 +110,14 @@ struct io_device {
 	unsigned id;
 	enum dev_format format;
 	enum modem_io io_typ;
+	enum modem_network net_typ;
 
 	struct sk_buff_head sk_rx_q;
+
+	/* work for each io device, when delayed work needed
+	* use this for private io device rx action
+	*/
+	struct delayed_work rx_work;
 
 	/* for fragmentation data from link device */
 	struct sk_buff *skb_recv;
@@ -187,6 +200,7 @@ struct modem_ctl {
 	unsigned gpio_cp_dump_int;
 	unsigned gpio_flm_uart_sel;
 	unsigned gpio_cp_warm_reset;
+	unsigned gpio_cp_off;
 
 	int irq_phone_active;
 
@@ -194,7 +208,6 @@ struct modem_ctl {
 
 #ifdef CONFIG_LTE_MODEM_CMC221
 	const struct attribute_group *group;
-	unsigned gpio_cp_off;
 	unsigned gpio_slave_wakeup;
 	unsigned gpio_host_wakeup;
 	unsigned gpio_host_active;

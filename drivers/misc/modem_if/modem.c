@@ -67,7 +67,7 @@ static struct modem_ctl *create_modemctl_device(struct platform_device *pdev)
 }
 
 static struct io_device *create_io_device(struct modem_io_t *io_t,
-			struct modem_ctl *modemctl)
+		struct modem_ctl *modemctl, enum modem_network modem_net)
 {
 	int ret = 0;
 	struct io_device *iod = NULL;
@@ -82,6 +82,7 @@ static struct io_device *create_io_device(struct modem_io_t *io_t,
 	iod->id = io_t->id;
 	iod->format = io_t->format;
 	iod->io_typ = io_t->io_type;
+	iod->net_typ = modem_net;
 
 	/* link between io device and modem control */
 	iod->mc = modemctl;
@@ -126,7 +127,8 @@ static int __devinit modem_probe(struct platform_device *pdev)
 
 	/* create io deivces and connect to modemctl device */
 	for (i = 0; i < pdata->num_iodevs; i++) {
-		iod[i] = create_io_device(&pdata->iodevs[i], modemctl);
+		iod[i] = create_io_device(&pdata->iodevs[i], modemctl,
+					pdata->modem_net);
 		if (!iod[i])
 			goto err_free_modemctl;
 
@@ -163,6 +165,13 @@ err_free_modemctl:
 	return -ENOMEM;
 }
 
+static void modem_shutdown(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct modem_ctl *mc = dev_get_drvdata(dev);
+	mc->ops.modem_off(mc);
+}
+
 static int modem_suspend(struct device *pdev)
 {
 	struct modem_ctl *mc = dev_get_drvdata(pdev);
@@ -184,6 +193,7 @@ static const struct dev_pm_ops modem_pm_ops = {
 
 static struct platform_driver modem_driver = {
 	.probe = modem_probe,
+	.shutdown = modem_shutdown,
 	.driver = {
 		.name = "modem_if",
 		.pm   = &modem_pm_ops,
