@@ -428,6 +428,12 @@ static struct regulator_init_data steelhead_vcxio = {
 	.consumer_supplies	= steelhead_vcxio_supply,
 };
 
+static struct regulator_consumer_supply steelhead_vdac_supply[] = {
+	{
+		.supply = "hdmi_vref",
+	},
+};
+
 static struct regulator_init_data steelhead_vdac = {
 	.constraints = {
 		.min_uV			= 1800000,
@@ -437,6 +443,8 @@ static struct regulator_init_data steelhead_vdac = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 	},
+	.num_consumer_supplies	= ARRAY_SIZE(steelhead_vdac_supply),
+	.consumer_supplies	= steelhead_vdac_supply,
 };
 
 static struct regulator_init_data steelhead_vusb = {
@@ -876,13 +884,21 @@ static struct panel_generic_dpi_data omap4_dvi_panel = {
 };
 
 struct omap_dss_device omap4_steelhead_dvi_device = {
+#if 1
+	.type			= OMAP_DISPLAY_TYPE_DSI,
+#else
 	.type			= OMAP_DISPLAY_TYPE_DPI,
+#endif
 	.name			= "dvi",
 	.driver_name		= "generic_dpi_panel",
 	.data			= &omap4_dvi_panel,
 	.phy.dpi.data_lines	= 24,
 	.reset_gpio		= STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO,
+#if 1
+	.channel		= OMAP_DSS_CHANNEL_LCD,
+#else
 	.channel		= OMAP_DSS_CHANNEL_LCD2,
+#endif
 };
 
 int __init omap4_steelhead_dvi_init(void)
@@ -898,65 +914,74 @@ int __init omap4_steelhead_dvi_init(void)
 	return r;
 }
 
-#if 0
 static void omap4_steelhead_hdmi_mux_init(void)
 {
 	/* PAD0_HDMI_HPD_PAD1_HDMI_CEC */
-	omap_mux_init_signal("hdmi_hpd",
+	omap_mux_init_signal("hdmi_hpd.hdmi_hpd",
+			OMAP_PIN_INPUT_PULLDOWN);
+	omap_mux_init_signal("hdmi_cec.hdmi_cec",
 			OMAP_PIN_INPUT_PULLUP);
-	omap_mux_init_signal("hdmi_cec",
-			OMAP_PIN_INPUT_PULLUP);
-	/* PAD0_HDMI_DDC_SCL_PAD1_HDMI_DDC_SDA */
-	omap_mux_init_signal("hdmi_ddc_scl",
-			OMAP_PIN_INPUT_PULLUP);
-	omap_mux_init_signal("hdmi_ddc_sda",
-			OMAP_PIN_INPUT_PULLUP);
-}
+	/* PAD0_HDMI_DDC_SCL_PAD1_HDMI_DDC_SDA - TPD12S015A has
+	 * internal pullups
+	 */
+	omap_mux_init_signal("hdmi_ddc_scl.hdmi_ddc_scl",
+			OMAP_PIN_INPUT);
+	omap_mux_init_signal("hdmi_ddc_sda.hdmi_ddc_sda",
+			OMAP_PIN_INPUT);
 
-static struct gpio panda_hdmi_gpios[] = {
-	{ HDMI_GPIO_HPD,	GPIOF_OUT_INIT_HIGH, "hdmi_gpio_hpd"   },
-	{ HDMI_GPIO_LS_OE,	GPIOF_OUT_INIT_HIGH, "hdmi_gpio_ls_oe" },
-};
-
-static int omap4_steelhead_panel_enable_hdmi(struct omap_dss_device *dssdev)
-{
-	int status;
-
-	status = gpio_request_array(panda_hdmi_gpios,
-				    ARRAY_SIZE(panda_hdmi_gpios));
-	if (status)
-		pr_err("Cannot request HDMI GPIOs\n");
-
-	return status;
-}
-
-static void omap4_steelhead_panel_disable_hdmi(struct omap_dss_device *dssdev)
-{
-	gpio_free(HDMI_GPIO_LS_OE);
-	gpio_free(HDMI_GPIO_HPD);
+#if 0 /* tuna has these but I believe we don't need it because
+       * the TPD12S015A has internal pullups on the SDA/SCL lines
+       */
+	/* strong pullup on DDC lines using unpublished register */
+	r = ((1 << 24) | (1 << 28)) ;
+	omap4_ctrl_pad_writel(r, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_I2C_1);
+#endif
 }
 
 static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 	.name = "hdmi",
 	.driver_name = "hdmi_panel",
 	.type = OMAP_DISPLAY_TYPE_HDMI,
-	.platform_enable = omap4_steelhead_panel_enable_hdmi,
-	.platform_disable = omap4_steelhead_panel_disable_hdmi,
+	.clocks	= {
+		.dispc	= {
+			.dispc_fclk_src	= OMAP_DSS_CLK_SRC_FCK,
+		},
+		.hdmi	= {
+			.regn	= 15,
+			.regm2	= 1,
+		},
+	},
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
-#endif
 
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
+#if 1
 	&omap4_steelhead_dvi_device,
-#if 0
-	&omap4_steelhead_hdmi_device,
 #endif
+	&omap4_steelhead_hdmi_device,
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
+#if 0
 	.default_device	= &omap4_steelhead_dvi_device,
+#else
+	.default_device	= &omap4_steelhead_hdmi_device,
+#endif
+};
+
+#define STEELHEAD_FB_RAM_SIZE		SZ_16M /* ~1280*720*4 * 2 */
+
+static struct omapfb_platform_data steelhead_fb_pdata = {
+	.mem_desc = {
+		.region_cnt = 1,
+		.region = {
+			[0] = {
+				.size = STEELHEAD_FB_RAM_SIZE,
+			},
+		},
+	},
 };
 
 void omap4_steelhead_display_init(void)
@@ -967,10 +992,9 @@ void omap4_steelhead_display_init(void)
 	if (r)
 		pr_err("error initializing steelhead DVI\n");
 
-#if 0
+	omap_vram_set_sdram_vram(STEELHEAD_FB_RAM_SIZE, 0);
+	omapfb_set_platform_data(&steelhead_fb_pdata);
 	omap4_steelhead_hdmi_mux_init();
-#endif
-
 	omap_display_init(&omap4_steelhead_dss_data);
 }
 
