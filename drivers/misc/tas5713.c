@@ -639,6 +639,7 @@ static long tas5713_out_ioctl(struct file *file,
 
 	case TAS5713_DO_LOW_LEVEL_I2C: {
 		struct tas5713_i2c_request req;
+		int expected_rc;
 
 		if (copy_from_user(&req, (const void __user *)arg,
 					sizeof(req))) {
@@ -651,14 +652,20 @@ static long tas5713_out_ioctl(struct file *file,
 			break;
 		}
 
-		if (req.is_write_op)
-			rc = i2c_smbus_write_i2c_block_data(state->i2c_client,
-					req.reg, req.len, req.data);
-		else
+		if (req.is_write_op) {
+			u8 data[sizeof(req.data) + 1];
+			data[0] = req.reg;
+			memcpy(data + 1, req.data, req.len);
+			rc = i2c_master_send(state->i2c_client,
+					data, req.len + 1);
+			expected_rc = req.len + 1;
+		} else {
 			rc = i2c_smbus_read_i2c_block_data(state->i2c_client,
 					req.reg, req.len, req.data);
+			expected_rc = req.len;
+		}
 
-		if (rc != req.len) {
+		if (rc != expected_rc) {
 			if (rc >= 0)
 				rc = -EIO;
 			break;
