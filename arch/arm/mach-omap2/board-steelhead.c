@@ -861,58 +861,7 @@ static int __init steelhead_i2c_init(void)
 	return 0;
 }
 
-
-/* Display DVI */
-#define STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO	0
-
-static int omap4_steelhead_enable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 1);
-	return 0;
-}
-
-static void omap4_steelhead_disable_dvi(struct omap_dss_device *dssdev)
-{
-	gpio_set_value(dssdev->reset_gpio, 0);
-}
-
-/* Using generic display panel */
-static struct panel_generic_dpi_data omap4_dvi_panel = {
-	.name			= "generic_720p",
-	.platform_enable	= omap4_steelhead_enable_dvi,
-	.platform_disable	= omap4_steelhead_disable_dvi,
-};
-
-struct omap_dss_device omap4_steelhead_dvi_device = {
-#if 1
-	.type			= OMAP_DISPLAY_TYPE_DSI,
-#else
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-#endif
-	.name			= "dvi",
-	.driver_name		= "generic_dpi_panel",
-	.data			= &omap4_dvi_panel,
-	.phy.dpi.data_lines	= 24,
-	.reset_gpio		= STEELHEAD_DVI_TFP410_POWER_DOWN_GPIO,
-#if 1
-	.channel		= OMAP_DSS_CHANNEL_LCD,
-#else
-	.channel		= OMAP_DSS_CHANNEL_LCD2,
-#endif
-};
-
-int __init omap4_steelhead_dvi_init(void)
-{
-	int r;
-
-	/* Requesting TFP410 DVI GPIO and disabling it, at bootup */
-	r = gpio_request_one(omap4_steelhead_dvi_device.reset_gpio,
-				GPIOF_OUT_INIT_LOW, "DVI PD");
-	if (r)
-		pr_err("Failed to get DVI powerdown GPIO\n");
-
-	return r;
-}
+#define GPIO_HDMI_HPD		63
 
 static void omap4_steelhead_hdmi_mux_init(void)
 {
@@ -936,6 +885,14 @@ static void omap4_steelhead_hdmi_mux_init(void)
 	r = ((1 << 24) | (1 << 28)) ;
 	omap4_ctrl_pad_writel(r, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_I2C_1);
 #endif
+
+	/* do gpio setup of HDMI_HPD.  used by hdmi driver uses gpio
+	 * API to notify Android userland of connect.
+	 */
+	gpio_request(GPIO_HDMI_HPD, NULL);
+	omap_mux_init_gpio(GPIO_HDMI_HPD, OMAP_PIN_INPUT | OMAP_PULL_ENA);
+	gpio_direction_input(GPIO_HDMI_HPD);
+
 }
 
 static struct omap_dss_device  omap4_steelhead_hdmi_device = {
@@ -955,20 +912,13 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 };
 
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
-#if 1
-	&omap4_steelhead_dvi_device,
-#endif
 	&omap4_steelhead_hdmi_device,
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
-#if 0
-	.default_device	= &omap4_steelhead_dvi_device,
-#else
 	.default_device	= &omap4_steelhead_hdmi_device,
-#endif
 };
 
 #define STEELHEAD_FB_RAM_SIZE		SZ_16M /* ~1280*720*4 * 2 */
@@ -986,12 +936,6 @@ static struct omapfb_platform_data steelhead_fb_pdata = {
 
 void omap4_steelhead_display_init(void)
 {
-	int r;
-
-	r = omap4_steelhead_dvi_init();
-	if (r)
-		pr_err("error initializing steelhead DVI\n");
-
 	omap_vram_set_sdram_vram(STEELHEAD_FB_RAM_SIZE, 0);
 	omapfb_set_platform_data(&steelhead_fb_pdata);
 	omap4_steelhead_hdmi_mux_init();
