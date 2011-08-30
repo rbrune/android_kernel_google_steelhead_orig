@@ -863,11 +863,15 @@ static int __init steelhead_i2c_init(void)
 
 #define GPIO_HDMI_HPD		63
 
+/* control signals going to TPD12S015A level converter for HDMI */
+#define HDMI_GPIO_CT_CP_HPD	60	/* Enable for HDMI HPD and 5V output */
+#define HDMI_GPIO_LS_OE		41	/* Enable for HDMI level converter */
+
 static void omap4_steelhead_hdmi_mux_init(void)
 {
+	int err;
+
 	/* PAD0_HDMI_HPD_PAD1_HDMI_CEC */
-	omap_mux_init_signal("hdmi_hpd.hdmi_hpd",
-			OMAP_PIN_INPUT_PULLDOWN);
 	omap_mux_init_signal("hdmi_cec.hdmi_cec",
 			OMAP_PIN_INPUT_PULLUP);
 	/* PAD0_HDMI_DDC_SCL_PAD1_HDMI_DDC_SDA - TPD12S015A has
@@ -886,19 +890,58 @@ static void omap4_steelhead_hdmi_mux_init(void)
 	omap4_ctrl_pad_writel(r, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_I2C_1);
 #endif
 
-	/* do gpio setup of HDMI_HPD.  used by hdmi driver uses gpio
-	 * API to notify Android userland of connect.
+	/* do gpio setup of HDMI_HPD.  the hdmi driver uses gpio
+	 * interrupt to detect hot plug and notify Android userland
+	 * of connect/disconnect.
 	 */
-	gpio_request(GPIO_HDMI_HPD, NULL);
-	omap_mux_init_gpio(GPIO_HDMI_HPD, OMAP_PIN_INPUT | OMAP_PULL_ENA);
-	gpio_direction_input(GPIO_HDMI_HPD);
+	err = omap_mux_init_gpio(GPIO_HDMI_HPD, OMAP_PIN_INPUT_PULLDOWN);
+	if (err)
+		pr_err("omap_mux_init_gpio() of HDMI_HPD returned %d\n", err);
+	err = gpio_request_one(GPIO_HDMI_HPD, GPIOF_IN, "hdmi_hpd");
+	if (err)
+		pr_err("gpio_request_one() of hdmi_hpd returned %d\n", err);
 
+	/* enable HPD detect for HDMI in TPD12S015A */
+	err = omap_mux_init_gpio(HDMI_GPIO_CT_CP_HPD, OMAP_PIN_OUTPUT);
+	if (err)
+		pr_err("omap_mux_init_gpio() of HDMI_CT_CP_HPD returned %d\n",
+		       err);
+	err = gpio_request_one(HDMI_GPIO_CT_CP_HPD, GPIOF_OUT_INIT_HIGH,
+			       "hdmi_ct_cp_hpd");
+	if (err)
+		pr_err("gpio_request_one() of hdmi_ct_cp_hpd returned %d\n",
+		       err);
+
+}
+
+/* enable level converter */
+static int omap4_steelhead_enable_hdmi_lc(struct omap_dss_device *dssdev)
+{
+	int status;
+
+	pr_info("%s:\n", __func__);
+	status = gpio_request_one(HDMI_GPIO_LS_OE, GPIOF_OUT_INIT_HIGH,
+				  "hdmi_gpio_ls_oe");
+	if (status)
+		pr_err("Cannot request HDMI GPIOs\n");
+
+	return status;
+}
+
+/* disable level converter */
+static void omap4_steelhead_disable_hdmi_lc(struct omap_dss_device *dssdev)
+{
+	pr_info("%s:\n", __func__);
+	gpio_set_value(HDMI_GPIO_LS_OE, 0);
+	gpio_free(HDMI_GPIO_LS_OE);
 }
 
 static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 	.name = "hdmi",
 	.driver_name = "hdmi_panel",
 	.type = OMAP_DISPLAY_TYPE_HDMI,
+	.platform_enable = omap4_steelhead_enable_hdmi_lc,
+	.platform_disable = omap4_steelhead_disable_hdmi_lc,
 	.clocks	= {
 		.dispc	= {
 			.dispc_fclk_src	= OMAP_DSS_CLK_SRC_FCK,
