@@ -30,6 +30,7 @@ struct omap_mcasp {
 	struct clk *fclk;
 	int clk_active;
 	int active;
+	struct omap_hwmod *oh;
 
 	struct omap_mcasp_platform_data* pdata;
 	s64 start_time;

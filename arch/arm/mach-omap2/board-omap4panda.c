@@ -34,6 +34,7 @@
 #include <mach/omap4-common.h>
 #include <mach/emif.h>
 #include <mach/lpddr2-elpida.h>
+#include <mach/dmm.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -64,7 +65,7 @@
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define OMAP_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 30)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 105)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
 				OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
@@ -707,6 +708,7 @@ static void __init omap4_panda_init(void)
 	omap4_ehci_init();
 	usb_musb_init(&musb_board_data);
 
+	omap_dmm_init();
 	omap4_panda_display_init();
 }
 

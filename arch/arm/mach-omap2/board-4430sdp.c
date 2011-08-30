@@ -30,6 +30,7 @@
 #include <mach/omap4-common.h>
 #include <mach/emif.h>
 #include <mach/lpddr2-elpida.h>
+#include <mach/dmm.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -69,7 +70,7 @@
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define OMAP_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 30)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 105)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE - \
 				OMAP_ION_HEAP_SECURE_INPUT_SIZE)
 
@@ -854,6 +855,7 @@ static void __init omap_4430sdp_init(void)
 	if (status)
 		pr_err("Keypad initialization failed: %d\n", status);
 
+	omap_dmm_init();
 	omap_4430sdp_display_init();
 
 	if (cpu_is_omap446x()) {

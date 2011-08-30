@@ -288,25 +288,25 @@ static int mcasp_ioctl_get_start_time(
 	return 0;
 }
 
-static void mcasp_clk_on(struct omap_mcasp *mcasp) {
+static void mcasp_clk_on(struct omap_mcasp *mcasp)
+{
 	if (mcasp->clk_active)
 		return;
-	if (!clk_enable(mcasp->fclk))
+	if (!omap_hwmod_enable_clocks(mcasp->oh))
 		mcasp->clk_active = 1;
 }
 
-static void mcasp_clk_off(struct omap_mcasp *mcasp) {
+static void mcasp_clk_off(struct omap_mcasp *mcasp)
+{
 	if (!mcasp->clk_active)
 		return;
-	clk_disable(mcasp->fclk);
+	omap_hwmod_disable_clocks(mcasp->oh);
 	mcasp->clk_active = 0;
 }
 
-static int mcasp_compute_clock_dividers(
-		long fclk_rate,
-		int tgt_sample_rate,
-		int* out_div_lo,
-		int* out_div_hi) {
+static int mcasp_compute_clock_dividers(long fclk_rate, int tgt_sample_rate,
+			int *out_div_lo, int *out_div_hi)
+{
 	/* Given a particular functional clock rate and a target audio sample
 	 * rate, determine the proper values for the ACLKXCTL and AHCLKXCTL, the
 	 * dividers which produce the high frequency transmit master clock and
@@ -353,7 +353,8 @@ static int mcasp_compute_clock_dividers(
 	return (*out_div_hi <= 4096) ? 0 : -EINVAL;
 }
 
-static int mcasp_compute_playback_rates(long fclk_rate) {
+static int mcasp_compute_playback_rates(long fclk_rate)
+{
 	static const int rate_table[][2] = {
 		{ 5512, SNDRV_PCM_RATE_5512 },
 		{ 8000, SNDRV_PCM_RATE_8000 },
@@ -387,7 +388,6 @@ static int mcasp_compute_playback_rates(long fclk_rate) {
 
 	return res;
 }
-
 
 static int mcasp_start_tx(struct omap_mcasp *mcasp)
 {
@@ -694,6 +694,7 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 	mcasp = kzalloc(sizeof(struct omap_mcasp), GFP_KERNEL);
 	if (!mcasp)
 		return	-ENOMEM;
+	mcasp->oh = oh;
 
 	mcasp->base = omap_hwmod_get_mpu_rt_va(oh);
 	if (!mcasp->base) {
@@ -701,7 +702,7 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	mcasp->fclk = omap_hwmod_get_clk(oh);
+	mcasp->fclk = clk_get(&pdev->dev, "mcasp_fck");
 	if (!mcasp->fclk) {
 		ret = -ENODEV;
 		goto err;
@@ -731,7 +732,6 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 	mcasp_clk_off(mcasp);
 
 	return 0;
-
 err:
 	if (mcasp && mcasp->fclk)
 		mcasp_clk_off(mcasp);
@@ -746,6 +746,7 @@ static __devexit int omap_mcasp_remove(struct platform_device *pdev)
 
 	snd_soc_unregister_dai(&pdev->dev);
 	mcasp_clk_off(mcasp);
+	clk_put(mcasp->fclk);
 
 	kfree(mcasp);
 

@@ -64,6 +64,7 @@
 #include "control.h"
 #include "mux.h"
 #include "board-tuna.h"
+#include <mach/dmm.h>
 
 #define TUNA_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
 #define TUNA_RAMCONSOLE_SIZE	SZ_2M
@@ -265,7 +266,7 @@ static struct platform_device tuna_gpio_i2c5_device = {
 #define OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 105)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE -\
 				OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE)
 
@@ -305,6 +306,16 @@ static struct platform_device tuna_ion_device = {
 	},
 };
 
+static struct platform_device tuna_mcasp_device = {
+	.name		= "omap-mcasp-dai",
+	.id		= 0,
+};
+
+static struct platform_device tuna_spdif_dit_device = {
+	.name		= "spdif-dit",
+	.id		= 0,
+};
+
 static struct platform_device *tuna_devices[] __initdata = {
 	&ramconsole_device,
 	&wl1271_device,
@@ -312,6 +323,8 @@ static struct platform_device *tuna_devices[] __initdata = {
 	&twl6030_madc_device,
 	&tuna_ion_device,
 	&tuna_gpio_i2c5_device,
+	&tuna_mcasp_device,
+	&tuna_spdif_dit_device,
 };
 
 /*
@@ -719,6 +732,9 @@ static void tuna_audio_init(void)
 
 	omap_mux_init_signal("gpmc_a24.gpio_48", OMAP_PIN_OUTPUT | OMAP_MUX_MODE3);
 	omap_mux_init_signal("kpd_col3.gpio_171", OMAP_PIN_OUTPUT | OMAP_MUX_MODE3);
+
+	/* McASP for S/PDIF out */
+	omap_mux_init_signal("abe_dmic_din2.abe_mcasp_axr", OMAP_PIN_OUTPUT);
 }
 
 static struct i2c_board_info __initdata tuna_i2c1_boardinfo[] = {
@@ -1119,6 +1135,7 @@ static void __init tuna_init(void)
 		spi_register_board_info(tuna_lte_modem,
 				ARRAY_SIZE(tuna_lte_modem));
 	}
+	omap_dmm_init();
 	omap4_tuna_display_init();
 	omap4_tuna_input_init();
 	omap4_tuna_nfc_init();

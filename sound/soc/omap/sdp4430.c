@@ -360,6 +360,26 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"AFMR", NULL, "Aux/FM Stereo In"},
 };
 
+static int sdp4430_mcpdm_twl6040_pre(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct twl6040 *twl6040 = codec->control_data;
+
+	/* TWL6040 supplies McPDM PAD_CLKS */
+	return twl6040_enable(twl6040);
+}
+
+static void sdp4430_mcpdm_twl6040_post(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct twl6040 *twl6040 = codec->control_data;
+
+	/* TWL6040 supplies McPDM PAD_CLKS */
+	twl6040_disable(twl6040);
+}
+
 static int sdp4430_twl6040_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_codec *codec = rtd->codec;
@@ -639,8 +659,19 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.codec_dai_name =  "twl6040-dl1",
 		.codec_name = "twl6040-codec",
 
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.ignore_suspend = 1,
+	},
+	{
+		.name = "SPDIF",
+		.stream_name = "SPDIF",
+		.cpu_dai_name = "omap-mcasp-dai.0",
+		.codec_dai_name = "dit-hifi",	/* dummy s/pdif transciever
+						 * driver */
+		.platform_name = "omap-pcm-audio",
+		.no_codec = 1,
 	},
 
 /*
@@ -662,6 +693,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.init = sdp4430_twl6040_init,
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_DL1,
 	},
@@ -695,6 +728,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
 		.init = sdp4430_twl6040_dl2_init,
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_DL2,
 	},
@@ -711,6 +746,8 @@ static struct snd_soc_dai_link sdp4430_dai[] = {
 		.codec_name = "twl6040-codec",
 
 		.no_pcm = 1, /* don't create ALSA pcm for this */
+		.pre = sdp4430_mcpdm_twl6040_pre,
+		.post = sdp4430_mcpdm_twl6040_post,
 		.ops = &sdp4430_mcpdm_ops,
 		.be_id = OMAP_ABE_DAI_PDM_VIB,
 	},

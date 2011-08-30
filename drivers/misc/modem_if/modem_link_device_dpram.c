@@ -27,7 +27,6 @@
 #include <linux/proc_fs.h>
 #include <linux/if_arp.h>
 #include <linux/platform_data/modem.h>
-#include <linux/crc-ccitt.h>
 #include "modem_prj.h"
 #include "modem_link_device_dpram.h"
 
@@ -127,19 +126,17 @@ static void cmd_req_active_handler(struct dpram_link_device *dpld)
 
 static void cmd_error_display_handler(struct dpram_link_device *dpld)
 {
-	char buf[DPRAM_ERR_MSG_LEN] = {0,};
+	struct io_device *iod = NULL;
 
-	if (dpld->phone_status) {
-		memcpy(dpld->cpdump_debug_file_name,
-				dpld->m_region.fmt_in + 4,
-				sizeof(dpld->cpdump_debug_file_name));
-	} else {
-		/* --- can't catch the CDMA watchdog reset!!*/
-		sprintf((void *)buf, "8 $PHONE-OFF");
+	dpld->is_dpram_err = TRUE;
+
+	list_for_each_entry(iod, &dpld->list_of_io_devices, list) {
+		if ((iod->format == IPC_FMT) && (iod->modem_state_changed)) {
+			iod->modem_state_changed(iod, STATE_CRASH_EXIT);
+			break;
+		}
 	}
 
-	memcpy(dpld->dpram_err_buf, buf, DPRAM_ERR_MSG_LEN);
-	dpld->is_dpram_err = TRUE;
 	kill_fasync(&dpld->dpram_err_async_q, SIGIO, POLL_IN);
 }
 
@@ -878,9 +875,7 @@ static int dpram_download(struct dpram_link_device *dpld,
 	u32 dwWriteLen, dwWrittenLen, dwTotWrittenLen;
 	u16 nTotalFrame = 0;
 	u8 *pDest;
-	u8 *pDest_Data;
 	u16 pLen = 0;
-	u16 nCrc;
 	int nrRetry = 0;
 	u16 g_TotFrame = 0;
 	u16 g_CurFrame = 1;
@@ -892,7 +887,6 @@ static int dpram_download(struct dpram_link_device *dpld,
 	u32 raw_in_size = 0;
 	u32 mailbox_size = 0;
 	int buffOffest = 0;
-	const u8 *crcdata;
 	int download_send_done_RetVal = 0;
 	int download_update_done_RetVal = 0;
 
@@ -931,8 +925,6 @@ static int dpram_download(struct dpram_link_device *dpld,
 
 		*pDest++ = (u8)pLen;
 		*pDest++ = (u8)((u16)pLen >> 8);
-
-		pDest_Data = pDest;
 
 		if (pLen == DPDN_DEFAULT_WRITE_LEN) {
 			memcpy((u8 *)pDest, (u8 *)buf, fmt_out_size - 7);
@@ -975,21 +967,9 @@ static int dpram_download(struct dpram_link_device *dpld,
 						pLen - (fmt_out_size - 7));
 				pDest = (u8 *)(dpld->m_region.raw_out + pLen -
 						(fmt_out_size - 7));
-
-				memset((void *)pDest,
-					0x0,
-					DPDN_DEFAULT_WRITE_LEN -
-					(fmt_out_size - 7) - pLen);
-				pDest = (u8 *)(dpld->m_region.raw_out +
-					DPDN_DEFAULT_WRITE_LEN -
-					(fmt_out_size - 7) - pLen);
-				}
 			}
+		}
 
-		crcdata = (u8 *) pDest_Data;
-		nCrc = crc_ccitt((u16)CRC_16_L_SEED, crcdata, (size_t)pLen/2);
-		*pDest++ = (u8)(nCrc);
-		*pDest++ = (u8)((u16)nCrc >> 8) & 0xFF;
 		pDest = (u8 *)(dpld->m_region.raw_out +
 			(BSP_DPRAM_BASE_SIZE - fmt_out_size - control_size) -
 			DPRAM_INDEX_SIZE);
@@ -1094,7 +1074,6 @@ static int if_dpram_init(struct platform_device *pdev, struct link_device *ld)
 	struct dpram_link_device *dpld = to_dpram_link_device(ld);
 
 	dpld->is_dpram_err = FALSE;
-	strcpy(&dpld->cpdump_debug_file_name[0], "CDMA Crash");
 	wake_lock_init(&dpld->dpram_wake_lock, WAKE_LOCK_SUSPEND, "DPRAM");
 
 	init_waitqueue_head(&dpld->modem_pif_init_done_wait_q);
