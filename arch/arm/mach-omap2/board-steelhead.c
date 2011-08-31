@@ -50,6 +50,7 @@
 #include <plat/mmc.h>
 #include <plat/remoteproc.h>
 #include <mach/id.h>
+#include <mach/dmm.h>
 #include "timer-gp.h"
 
 #include "hsmmc.h"
@@ -172,7 +173,7 @@ static void __init omap4_steelhead_init_hw_rev(void)
 #define OMAP_STEELHEAD_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
-#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 103)
+#define PHYS_ADDR_DUCATI_SIZE	(SZ_1M * 105)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - PHYS_ADDR_DUCATI_SIZE -\
 				 OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE)
 
@@ -1177,6 +1178,7 @@ static void __init steelhead_init(void)
 	omap4_ehci_init();
 	usb_musb_init(&musb_board_data);
 	omap4_steelhead_create_board_props();
+	omap_dmm_init();
 	omap4_steelhead_display_init();
 	if (enable_sr)
 		omap_enable_smartreflex_on_init();
