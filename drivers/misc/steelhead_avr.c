@@ -773,7 +773,6 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	return rc;
 }
 
-#if 0
 static int avr_read_event_fifo(struct avr_driver_state *state, u8 *next_event)
 {
 	int rc;
@@ -810,9 +809,14 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		input_event(state->input_dev, EV_MSC, MSC_SCAN, scan);
 
 		/* Generate the translated key code. */
-		if (scan < state->input_dev->keycodemax)
+		if (scan < state->input_dev->keycodemax) {
 			input_report_key(state->input_dev, state->keymap[scan],
 					 was_down);
+			pr_info("%s: reporting key '%s' %s\n", __func__,
+				scan == AVR_KEY_VOLUME_UP ?
+				"VOLUME_UP" : "VOLUME_DOWN",
+				was_down ? "down" : "up");
+		}
 
 		input_sync(state->input_dev);
 	}
@@ -836,7 +840,6 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 	}
 	return IRQ_HANDLED;
 }
-#endif
 
 static const struct file_operations avr_led_fops = {
 	.owner = THIS_MODULE,
@@ -983,13 +986,6 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto error;
 	}
 
-	/* HACK HACK (johngro): Don't set up any of the interrupt infrastructure
-	 * for getting button press events from the AVR.  Currently the
-	 * cap-sense is not stable enought for the I/O demo.  Also, for now,
-	 * leave the LEDs in boot animation mode until the Android level driver
-	 * comes up and takes over.
-	 */
-#if 0
 	rc = avr_led_set_int_reg(state, AVR_BUTTON_INT_ENABLE
 			| AVR_BUTTON_INT_CLEAR);
 	if (rc) {
@@ -1009,11 +1005,8 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	}
 	state->irq_registered = 1;
 
-	/* Turn buttons inside of the AVR. */
-	rc = avr_led_set_button_ctrl_reg(state,
-			AVR_BUTTON_CONTROL_ENABLE0 |
-			AVR_BUTTON_CONTROL_ENABLE1 |
-			AVR_BUTTON_CONTROL_ENABLE2);
+	/* Enable buttons inside of the AVR. */
+	rc = avr_led_set_button_ctrl_reg(state, AVR_BUTTON_CONTROL_ENABLE0);
 	if (rc) {
 		pr_err("Failed to set button control register (rc = %d)", rc);
 		goto error;
@@ -1025,7 +1018,6 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		pr_err("Failed to switch to host control mode (rc = %d)", rc);
 		goto error;
 	}
-#endif
 
 	pr_info("Steelhead AVR Driver loaded.  FW = %d.%d",
 		state->firmware_rev >> 8,
