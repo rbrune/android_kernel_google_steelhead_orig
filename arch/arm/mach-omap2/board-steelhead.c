@@ -280,10 +280,12 @@ err_clk_get:
 
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type		= MUSB_INTERFACE_UTMI,
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
+#if defined(CONFIG_USB_MUSB_PERIPHERAL)
 	.mode			= MUSB_PERIPHERAL,
-#else
+#elif defined(CONFIG_USB_MUSB_OTG)
 	.mode			= MUSB_OTG,
+#elif defined(CONFIG_USB_MUSB_HOST)
+	.mode			= MUSB_HOST,
 #endif
 	.power			= 100,
 };
