@@ -11,7 +11,7 @@
  * GNU General Public License for more details.
  */
 #include <linux/kernel.h>
-#include <linux/init.h>
+#include <linux/if.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
@@ -170,30 +170,38 @@ static int steelhead_wifi_reset(int on)
 	return 0;
 }
 
-#if 0
 static unsigned char steelhead_mac_addr[IFHWADDRLEN] = { 0,0x90,0x4c,0,0,0 };
 
-static int __init parse_tag_wlan_mac(const struct tag *tag)
+static int __init steelhead_mac_addr_setup(char *str)
 {
-	unsigned char *dptr = (unsigned char *)(&tag->u);
-	unsigned size;
-#ifdef ATAG_STEELHEAD_MAC_DEBUG
-	unsigned i;
-#endif
+	char macstr[IFHWADDRLEN*3];
+	char *macptr = macstr;
+	char *token;
+	int i = 0;
 
-	size = min((tag->hdr.size - 2) * sizeof(__u32), (unsigned)IFHWADDRLEN);
-#ifdef ATAG_STEELHEAD_MAC_DEBUG
-	printk("WiFi MAC Addr [%d] = 0x%x\n", tag->hdr.size, tag->hdr.tag);
-	for(i=0;(i < size);i++) {
-		printk(" %02x", dptr[i]);
+	if (!str)
+		return 0;
+	pr_debug("wlan MAC = %s\n", str);
+	if (strlen(str) >= sizeof(macstr))
+		return 0;
+	strcpy(macstr, str);
+
+	while ((token = strsep(&macptr, ":")) != NULL) {
+		unsigned long val;
+		int res;
+
+		if (i >= IFHWADDRLEN)
+			break;
+		res = strict_strtoul(token, 0x10, &val);
+		if (res < 0)
+			return 0;
+		steelhead_mac_addr[i++] = (u8)val;
 	}
-	printk("\n");
-#endif
-	memcpy(steelhead_mac_addr, dptr, size);
-	return 0;
+
+	return 1;
 }
 
-__tagtable(ATAG_STEELHEAD_MAC, parse_tag_wlan_mac);
+__setup("androidboot.macaddr=", steelhead_mac_addr_setup);
 
 static int steelhead_wifi_get_mac_addr(unsigned char *buf)
 {
@@ -223,17 +231,48 @@ typedef struct cntry_locales_custom {
 
 static cntry_locales_custom_t steelhead_wifi_translate_custom_table[] = {
 /* Table should be filled out based on custom platform regulatory requirement */
+	{"",   "XY", 4},  /* universal */
 	{"US", "US", 69}, /* input ISO "US" to : US regrev 69 */
 	{"CA", "US", 69}, /* input ISO "CA" to : US regrev 69 */
-	{"EU", "EU",  5}, /* input ISO "EU" to : EU regrev 05 */
-	{"FR", "EU",  5},
-	{"DE", "EU",  5},
-	{"GB", "EU",  5}, /* input ISO "UK" to : EU regrev 05 */
-	{"KR", "XY",  3},
-	{"AU", "XY",  3},
-	{"CN", "XY",  3}, /* input ISO "CN" to : XY regrev 03 */
-	{"TW", "XY",  3},
-	{"AR", "XY",  3},
+	{"EU", "EU", 5},  /* European union countries */
+	{"AT", "EU", 5},
+	{"BE", "EU", 5},
+	{"BG", "EU", 5},
+	{"CY", "EU", 5},
+	{"CZ", "EU", 5},
+	{"DK", "EU", 5},
+	{"EE", "EU", 5},
+	{"FI", "EU", 5},
+	{"FR", "EU", 5},
+	{"DE", "EU", 5},
+	{"GR", "EU", 5},
+	{"HU", "EU", 5},
+	{"IE", "EU", 5},
+	{"IT", "EU", 5},
+	{"LV", "EU", 5},
+	{"LI", "EU", 5},
+	{"LT", "EU", 5},
+	{"LU", "EU", 5},
+	{"MT", "EU", 5},
+	{"NL", "EU", 5},
+	{"PL", "EU", 5},
+	{"PT", "EU", 5},
+	{"RO", "EU", 5},
+	{"SK", "EU", 5},
+	{"SI", "EU", 5},
+	{"ES", "EU", 5},
+	{"SE", "EU", 5},
+	{"GB", "EU", 5},  /* input ISO "GB" to : EU regrev 05 */
+	{"IL", "IL", 0},
+	{"CH", "CH", 0},
+	{"TR", "TR", 0},
+	{"NO", "NO", 0},
+	{"KR", "XY", 3},
+	{"AU", "XY", 3},
+	{"CN", "XY", 3},  /* input ISO "CN" to : XY regrev 03 */
+	{"TW", "XY", 3},
+	{"AR", "XY", 3},
+	{"MX", "XY", 3}
 };
 
 static void *steelhead_wifi_get_country_code(char *ccode)
@@ -247,17 +286,16 @@ static void *steelhead_wifi_get_country_code(char *ccode)
 	for (i = 0; i < size; i++)
 		if (strcmp(ccode, steelhead_wifi_translate_custom_table[i].iso_abbrev) == 0)
 			return &steelhead_wifi_translate_custom_table[i];
-	return NULL;
+	return &steelhead_wifi_translate_custom_table[0];
 }
-#endif
 
 static struct wifi_platform_data steelhead_wifi_control = {
 	.set_power      = steelhead_wifi_power,
 	.set_reset      = steelhead_wifi_reset,
 	.set_carddetect = steelhead_wifi_set_carddetect,
 	.mem_prealloc	= steelhead_wifi_mem_prealloc,
-	.get_mac_addr	= NULL, /* steelhead_wifi_get_mac_addr, */
-	.get_country_code = NULL, /* steelhead_wifi_get_country_code, */
+	.get_mac_addr	= steelhead_wifi_get_mac_addr,
+	.get_country_code = steelhead_wifi_get_country_code,
 };
 
 static struct platform_device steelhead_wifi_device = {
