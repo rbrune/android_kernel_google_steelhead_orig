@@ -170,7 +170,8 @@ static int steelhead_wifi_reset(int on)
 	return 0;
 }
 
-static unsigned char steelhead_mac_addr[IFHWADDRLEN] = { 0,0x90,0x4c,0,0,0 };
+static int steelhead_mac_addr_initialized;
+static unsigned char steelhead_mac_addr[IFHWADDRLEN];
 
 static int __init steelhead_mac_addr_setup(char *str)
 {
@@ -181,27 +182,43 @@ static int __init steelhead_mac_addr_setup(char *str)
 
 	if (!str)
 		return 0;
-	pr_debug("wlan MAC = %s\n", str);
+	pr_info("wlan MAC = %s\n", str);
 	if (strlen(str) >= sizeof(macstr))
 		return 0;
 	strcpy(macstr, str);
 
+	/* on any errors, we just break and always return 1 to tell
+	 * kernel param parsing that we handled the string so it
+	 * doesn't waste time looking for another handler.
+	 * When we validate the values when try to use them in
+	 * steelhead_wifi_get_mac_addr().
+	 */
 	while ((token = strsep(&macptr, ":")) != NULL) {
 		unsigned long val;
 		int res;
 
-		if (i >= IFHWADDRLEN)
-			break;
+		if (i >= IFHWADDRLEN) {
+			pr_err("%s: mac address too long\n", __func__);
+			goto err;
+		}
 		res = strict_strtoul(token, 0x10, &val);
-		if (res < 0)
-			return 0;
+		if (res < 0) {
+			pr_err("%s: strtoul() error %d\n", __func__, res);
+			goto err;
+		}
 		steelhead_mac_addr[i++] = (u8)val;
 	}
 
+	if (i != IFHWADDRLEN) {
+		pr_err("%s: mac address too short\n", __func__);
+		goto err;
+	}
+	steelhead_mac_addr_initialized = 1;
+err:
 	return 1;
 }
 
-__setup("androidboot.macaddr=", steelhead_mac_addr_setup);
+__setup("androidboot.wifi_macaddr=", steelhead_mac_addr_setup);
 
 static int steelhead_wifi_get_mac_addr(unsigned char *buf)
 {
@@ -210,14 +227,23 @@ static int steelhead_wifi_get_mac_addr(unsigned char *buf)
 	if (!buf)
 		return -EINVAL;
 
-	if ((steelhead_mac_addr[4] == 0) && (steelhead_mac_addr[5] == 0)) {
+	if (!steelhead_mac_addr_initialized) {
 		srandom32((uint)jiffies);
 		rand_mac = random32();
+		/* first 3 nibbles are for Google mac addresses */
+		steelhead_mac_addr[0] = 0x00;
+		steelhead_mac_addr[1] = 0x1A;
+		steelhead_mac_addr[2] = 0x11;
 		steelhead_mac_addr[3] = (unsigned char)rand_mac;
 		steelhead_mac_addr[4] = (unsigned char)(rand_mac >> 8);
 		steelhead_mac_addr[5] = (unsigned char)(rand_mac >> 16);
+		steelhead_mac_addr_initialized = 1;
 	}
 	memcpy(buf, steelhead_mac_addr, IFHWADDRLEN);
+
+	pr_info("steelhead_mac_addr = %x:%x:%x:%x:%x:%x\n",
+		buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]);
+
 	return 0;
 }
 
