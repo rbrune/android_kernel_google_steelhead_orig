@@ -31,10 +31,6 @@
 #include <linux/slab.h>
 #include "smsc95xx.h"
 
-#ifdef CONFIG_MACH_STEELHEAD
-#include "mach/id.h"
-#endif
-
 #define SMSC_CHIPNAME			"smsc95xx"
 #define SMSC_DRIVER_VERSION		"1.0.4"
 #define HS_USB_PKT_SIZE			(512)
@@ -66,6 +62,9 @@ struct usb_context {
 static int turbo_mode = true;
 module_param(turbo_mode, bool, 0644);
 MODULE_PARM_DESC(turbo_mode, "Enable multiple frames per Rx transaction");
+
+static char *mac_addr;
+module_param(mac_addr, charp, S_IRUGO);
 
 static int smsc95xx_read_reg(struct usbnet *dev, u32 index, u32 *data)
 {
@@ -604,6 +603,27 @@ static int smsc95xx_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	return generic_mii_ioctl(&dev->mii, if_mii(rq), cmd, NULL);
 }
 
+static int ethernet_get_mac_addr(u8 *buf)
+{
+	int addr[ETH_ALEN];
+	int i;
+
+	if (!buf || !mac_addr)
+		return -EINVAL;
+
+	pr_info("%s: raw mac_addr %s\n", __func__, mac_addr);
+	if (sscanf(mac_addr, "%x:%x:%x:%x:%x:%x", &addr[0], &addr[1],
+		   &addr[2], &addr[3], &addr[4], &addr[5]) == 6) {
+		for (i = 0; i < ETH_ALEN; i++) {
+			if (addr[i] > 0xff)
+				break;
+			buf[i] = addr[i];
+		}
+		return 0;
+	}
+	return -EINVAL;
+}
+
 static void smsc95xx_init_mac_address(struct usbnet *dev)
 {
 	/* try reading mac address from EEPROM */
@@ -616,39 +636,14 @@ static void smsc95xx_init_mac_address(struct usbnet *dev)
 		}
 	}
 
-#ifdef CONFIG_MACH_STEELHEAD
-	/* Generate a MAC address using the Google OUI and bits from the OMAP
-	 * die ID
+	/* use mac address configured by module_param, or else
+	 * generate a random one.
 	 */
-	{
-		struct omap_die_id odi;
-		omap_get_die_id(&odi);
-
-		dev->net->dev_addr[0] = 0x00;
-		dev->net->dev_addr[1] = 0x1A;
-		dev->net->dev_addr[2] = 0x11;
-		dev->net->dev_addr[3] =
-			((odi.id_0 >> 24) ^ (odi.id_0 >> 16)) & 0xFF;
-		dev->net->dev_addr[4] =
-			((odi.id_0 >> 24) ^ (odi.id_0 >> 8)) & 0xFF;
-		dev->net->dev_addr[5] =
-			((odi.id_0 >> 24) ^ (odi.id_0 )) & 0xFF;
-
-		printk(KERN_INFO SMSC_CHIPNAME
-				" Tungsten MAC Address is "
-				"%02x:%02x:%02x:%02x:%02x:%02x",
-				dev->net->dev_addr[0],
-				dev->net->dev_addr[1],
-				dev->net->dev_addr[2],
-				dev->net->dev_addr[3],
-				dev->net->dev_addr[4],
-				dev->net->dev_addr[5]);
+	if (ethernet_get_mac_addr(dev->net->dev_addr)) {
+		random_ether_addr(dev->net->dev_addr);
+		netif_dbg(dev, ifup, dev->net,
+			  "MAC address set to random_ether_addr\n");
 	}
-#else
-	/* no eeprom, or eeprom values are invalid. generate random MAC */
-	random_ether_addr(dev->net->dev_addr);
-#endif
-	netif_dbg(dev, ifup, dev->net, "MAC address set to random_ether_addr\n");
 }
 
 static int smsc95xx_set_mac_address(struct usbnet *dev)
