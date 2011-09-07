@@ -1580,9 +1580,9 @@ static int __init _register(struct omap_hwmod *oh)
 	 * XXX Rather than doing a strcmp(), this should test a flag
 	 * set in the hwmod data, inserted by the autogenerator code.
 	 */
-	if (!strcmp(oh->name, MPU_INITIATOR_NAME)) {
+	if (!strcmp(oh->name, MPU_INITIATOR_NAME))
 		mpu_oh = oh;
-	} else if (cpu_is_omap44xx()) {
+	else if (cpu_is_omap44xx()) {
 		if (!strcmp(oh->name, "emif1"))
 			emif_clear_irq(0);
 		else if (!strcmp(oh->name, "emif2"))

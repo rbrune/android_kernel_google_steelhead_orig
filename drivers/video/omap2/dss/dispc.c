@@ -35,11 +35,12 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/ratelimit.h>
 
 #include <plat/sram.h>
 #include <plat/clock.h>
 #include <mach/tiler.h>
-
+#include <plat/omap-pm.h>
 #include <video/omapdss.h>
 
 #include "dss.h"
@@ -303,6 +304,7 @@ static void dispc_save_context(void)
 
 static void dispc_restore_context(void)
 {
+	struct device *dev = &dispc.pdev->dev;
 	int i, o, ctx;
 
 	DSSDBG("dispc_restore_context\n");
@@ -312,7 +314,7 @@ static void dispc_restore_context(void)
 
 	ctx = dispc_get_ctx_loss_count();
 
-	if (ctx >= 0 && ctx == dispc.ctx_loss_cnt)
+	if (!omap_pm_was_context_lost(dev))
 		return;
 
 	DSSDBG("ctx_loss_count: saved %d, current %d\n",
@@ -1976,9 +1978,10 @@ int dispc_scaling_decision(u16 width, u16 height,
 loop:
 		/* err if exhausted search region */
 		if (x == max_x_decim && y == max_y_decim) {
-			DSSERR("failed to set up scaling, "
+			DSSERR("failed to set up scaling %u*%u to %u*%u, "
 					"required fclk rate = %lu Hz, "
-					"current fclk rate = %lu Hz\n",
+					"current = %lu Hz\n",
+					width, height, out_width, out_height,
 					fclk, fclk_max);
 			return -EINVAL;
 		}
@@ -3515,7 +3518,7 @@ static void dispc_error_worker(struct work_struct *work)
 		struct omap_overlay_manager *manager = NULL;
 		bool enable = false;
 
-		DSSERR("SYNC_LOST_DIGIT, disabling TV\n");
+		pr_err_ratelimited("SYNC_LOST_DIGIT, disabling TV\n");
 
 		for (i = 0; i < omap_dss_get_num_overlay_managers(); ++i) {
 			struct omap_overlay_manager *mgr;

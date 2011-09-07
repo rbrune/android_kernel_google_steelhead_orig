@@ -28,6 +28,7 @@
 
 /*-------------------------------------------------------------------------*/
 #include <linux/usb/otg.h>
+#include <linux/gpio.h>
 
 #define	PORT_WAKE_BITS	(PORT_WKOC_E|PORT_WKDISC_E|PORT_WKCONN_E)
 
@@ -734,7 +735,52 @@ ehci_hub_descriptor (
 	desc->wHubCharacteristics = cpu_to_le16(temp);
 }
 
+#define OMAP_UHH_SYSCONFIG 0x4a064010
+#define OMAP_UHH_HOSTCONFIG 0x4a064040
+
 /*-------------------------------------------------------------------------*/
+void uhh_omap_reset(struct ehci_hcd *ehci)
+{
+	u32 usbcmd_backup;
+	u32 usbintr_backup;
+	u32 asynclistaddr_backup, periodiclistbase_backup;
+	u32 portsc0_backup;
+	u32 uhh_sysconfig_backup, uhh_hostconfig_backup;
+
+	/* RESETB line to PHY: in-active */
+	gpio_set_value(159, 0);
+
+	/* Backup current registers of EHCI */
+	usbcmd_backup = ehci_readl(ehci, &ehci->regs->command);
+	ehci_writel( ehci, usbcmd_backup & ~(CMD_IAAD | CMD_ASE | CMD_PSE), &ehci->regs->command);
+	mdelay(3);
+	asynclistaddr_backup = ehci_readl(ehci, &ehci->regs->async_next);
+	periodiclistbase_backup = ehci_readl(ehci, &ehci->regs->frame_list);
+	portsc0_backup = ehci_readl(ehci, &ehci->regs->port_status[0]);
+	usbintr_backup = ehci_readl(ehci, &ehci->regs->intr_enable);
+	uhh_sysconfig_backup = omap_readl(OMAP_UHH_SYSCONFIG);
+	uhh_hostconfig_backup = omap_readl(OMAP_UHH_HOSTCONFIG);
+
+	/* Soft reset EHCI controller */
+	omap_writel(omap_readl(OMAP_UHH_SYSCONFIG) | (1<<0),
+				OMAP_UHH_SYSCONFIG);
+	mdelay(2);
+
+	/* Restore registers after reset */
+	omap_writel(uhh_sysconfig_backup, OMAP_UHH_SYSCONFIG);
+	omap_writel(uhh_hostconfig_backup, OMAP_UHH_HOSTCONFIG);
+	ehci_writel(ehci, periodiclistbase_backup, &ehci->regs->frame_list);
+	ehci_writel(ehci, asynclistaddr_backup, &ehci->regs->async_next);
+	ehci_writel(ehci, FLAG_CF, &ehci->regs->configured_flag); /* CONFIGFLAG, CONFIGURED */
+	ehci_writel(ehci, usbintr_backup, &ehci->regs->intr_enable);
+	//ehci_writel(ehci, (1<<16) | (2<<2) | CMD_RUN, &ehci->regs->command);
+	ehci_writel(ehci, usbcmd_backup, &ehci->regs->command);
+	mdelay(2);
+	ehci_writel(ehci, PORT_POWER, &ehci->regs->port_status[0]); /* PP, Clear PortOwner */
+
+	/* RESETB line to PHY: active */
+	gpio_set_value(159, 1);
+}
 
 static int ehci_hub_control (
 	struct usb_hcd	*hcd,
@@ -930,6 +976,9 @@ static int ehci_hub_control (
 					ehci_err(ehci,
 						"port %d resume error %d\n",
 						wIndex + 1, retval);
+
+					uhh_omap_reset(ehci);
+
 					goto error;
 				}
 				temp &= ~(PORT_SUSPEND|PORT_RESUME|(3<<10));
@@ -1063,6 +1112,32 @@ static int ehci_hub_control (
 			temp &= ~PORT_WKCONN_E;
 			temp |= PORT_WKDISC_E | PORT_WKOC_E;
 			ehci_writel(ehci, temp | PORT_SUSPEND, status_reg);
+
+			/*
+			 * Special workaround sequence:
+			 * - Set suspend bit
+			 * - Wait 4ms for suspend to take effect
+			 *   - alternatively read the line state
+			 *     in PORTSC
+			 * - switch to internal 60 MHz clock
+			 * - wait 1ms
+			 * - switch back to external clock
+			 */
+			{
+				u32 temp_reg;
+				mdelay(4);
+#define	L3INIT_HSUSBHOST_CLKCTRL			0x4A009358
+				temp_reg = omap_readl(L3INIT_HSUSBHOST_CLKCTRL);
+				temp_reg |= 1 << 8;
+				temp_reg &= ~(1 << 24);
+				omap_writel(temp_reg, L3INIT_HSUSBHOST_CLKCTRL);
+
+				mdelay(1);
+				temp_reg &= ~(1 << 8);
+				temp_reg |= 1 << 24;
+				omap_writel(temp_reg, L3INIT_HSUSBHOST_CLKCTRL);
+			}
+
 			if (hostpc_reg) {
 				spin_unlock_irqrestore(&ehci->lock, flags);
 				msleep(5);/* 5ms for HCD enter low pwr mode */

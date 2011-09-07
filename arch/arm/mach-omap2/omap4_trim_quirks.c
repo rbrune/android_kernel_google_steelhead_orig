@@ -14,6 +14,7 @@
 #include <linux/cpu.h>
 
 #include "control.h"
+#include "pm.h"
 
 /**
  * omap4_ldo_trim_configure() - Handle device trim variance
@@ -22,7 +23,7 @@
  * efused in. These need some software support to allow the device to
  * function normally. Handle these silicon quirks here.
  */
-static int __init omap4_ldo_trim_configure(void)
+int omap4_ldo_trim_configure(void)
 {
 	u32 is_trimmed = 0;
 	u32 val;
@@ -73,6 +74,10 @@ static int __init omap4_ldo_trim_configure(void)
 	 */
 	val = OMAP4_LPDDR2_PTV_P5_MASK | OMAP4_LPDDR2_PTV_N5_MASK;
 	omap_ctrl_writel(val, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_EFUSE_2);
+
+	/* Required for DPLL_MPU to lock at 2.4 GHz */
+	if (cpu_is_omap446x())
+		omap_ctrl_writel(0x29, OMAP4_CTRL_MODULE_CORE_DPLL_NWELL_TRIM_0);
 
 	return 0;
 }
