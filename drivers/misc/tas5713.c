@@ -54,6 +54,50 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define LOG_PREFIX KERN_INFO "TAS5713 : "
 #define ERR_LOG_PREFIX KERN_ERR "TAS5713 : "
 
+/* This #def controls a workaround to an issue in HW caused by the 1.8V <-> 3.3v
+ * level translator between the OMAP 44xx chip and the TAS5713 chip.  Basically,
+ * when android is done sending audio, it sends 3 seconds worth of silence
+ * before finally letting the low level underflow.  When the McBSP feeding the
+ * TAS underflows, we need to disable the transmit serializer, both to suppress
+ * the underflow interrupt as well as to keep the serializer form clocking out
+ * data as the pipeline buffers up but before it starts (we need to control the
+ * start time very exactly to get our time sync correct).
+ *
+ * When the serializer is disabled (by setting the XDISABLE bit to 1 in the XCCR
+ * register), the OMAP appears to tristate its output instead of just leaving it
+ * driven to what it was before.  It does this in sync with the start of the
+ * next frame of audio (a very good thing).  Unfortunately, there are pull-ups
+ * on both sides of the bi-directional level translator which sits between the
+ * TAS and the OMAP.  The line starts to float up for about 1 bit time.
+ * Eventually, it crosses the level translator threshold and pops into the high
+ * state.  After this, it stays high until the next time the TX serializer
+ * starts up.  This means that all 0s are being clocked out just before the
+ * underflow, and all 1s just after.  The TAS is seeing 0 for each channel, and
+ * then -1 after the underflow.  Right at the underflow, however, the MSB of the
+ * left hand channel gets latched as a 0.  By the time the next bit is latched,
+ * the line has been pulled up by the level translator and is now stuck high.
+ * This means the L, R sequence in the transition from silence to underflow
+ * looks like
+ *
+ * (0, 0), (0, 0), (0, 0), (0x7FFF, -1), (-1, -1), (-1, -1)...
+ *
+ * which causes a pop in the left hand channel output.
+ *
+ * For now, we implement the following workaround.  When disabling the
+ * serializer, we use the legacy GPIO mode of the McBSP to force the data line
+ * to 0, and to disable the frame sync clock.  Holding the data line low keeps
+ * "silence" being clocked out, and disableing the frame sync clock should cause
+ * the TAS's soft stop logic to engage and do a smooth rampdown.  When enabling
+ * the serializer, we first do the enable, then take the pins out of GPIO mode.
+ * The TAS sees a garbage initial frame (from an LR clock perspective), but soon
+ * will see a good LR clock and perform a soft startup.  In either case, this
+ * makes the pops go away.
+ *
+ * TODO : remove this workaround when rev3 digital boards come back with a
+ * pulldown on the 44xx side of the McBSP DX line.
+ */
+#define LEVEL_TRANSLATOR_POP_WORKAROUND
+
 struct i2s_omap_dma_request {
 	struct list_head node;
 	struct tas5713_driver_state *state;
@@ -150,10 +194,30 @@ static int i2s_fifo_enable(struct tas5713_driver_state *state, int on)
 	int was_enabled;
 	u32 val = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_XCCR);
 
+#ifdef LEVEL_TRANSLATOR_POP_WORKAROUND
+	if (!on) {
+		u32 tmp = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_PCR0);
+		tmp &= ~(1 << 5);
+		tmp |=  (1 << 13);
+		omap_mcbsp_write_reg(id, OMAP_MCBSP_REG_PCR0, tmp);
+	}
+#endif
+
 	was_enabled = !(val & XDISABLE);
 	val &= ~XDISABLE;
 	val |= on ? 0 : XDISABLE;
 	omap_mcbsp_write_reg(id, OMAP_MCBSP_REG_XCCR, val);
+
+#ifdef LEVEL_TRANSLATOR_POP_WORKAROUND
+	if (on) {
+		// Delay for at least one 48kHz audio sample worth of output
+		// before taking the lines out of GPIO hack mode.
+		udelay(25);
+		u32 tmp = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_PCR0);
+		tmp &= ~(1 << 13);
+		omap_mcbsp_write_reg(id, OMAP_MCBSP_REG_PCR0, tmp);
+	}
+#endif
 
 	return was_enabled;
 }
