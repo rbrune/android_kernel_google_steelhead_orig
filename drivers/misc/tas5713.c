@@ -1201,6 +1201,39 @@ static int tas5713_probe(struct i2c_client *client,
 	state->i2c_client = client;
 	state->pdata = client->dev.platform_data;
 
+	if (state->pdata == NULL) {
+		rc = -ENODEV;
+		pr_err("%s: missing platform data\n", __func__);
+		goto err_missing_platform_data;
+	}
+	rc = gpio_request_one(state->pdata->interface_en_gpio,
+			      GPIOF_OUT_INIT_LOW,
+			      "tas5713_interface_en");
+	if (rc) {
+		pr_err("%s: gpio_request_one(interface_en_gpio = %d) failed"
+		       " with error %d\n", __func__,
+		       state->pdata->interface_en_gpio, rc);
+		goto err_request_interface_en_gpio;
+	}
+	rc = gpio_request_one(state->pdata->reset_gpio,
+			      GPIOF_OUT_INIT_LOW,
+			      "tas5713_reset");
+	if (rc) {
+		pr_err("%s: gpio_request_one(reset_gpio = %d) failed"
+		       " with error %d\n", __func__,
+		       state->pdata->reset_gpio, rc);
+		goto err_request_reset_gpio;
+	}
+	rc = gpio_request_one(state->pdata->pdn_gpio,
+			      GPIOF_OUT_INIT_LOW,
+			      "tas5713_pdn");
+	if (rc) {
+		pr_err("%s: gpio_request_one(pdn_gpio = %d) failed"
+		       " with error %d\n", __func__,
+		       state->pdata->pdn_gpio, rc);
+		goto err_request_pdn_gpio;
+	}
+
 	rc = setup_misc_device(&state->misc_out,
 			       &tas5713_out_fops,
 			       "audio%d_out",
@@ -1257,9 +1290,15 @@ err_misc_out_ctl:
 	kfree(state->misc_out.name);
 
 err_misc_out:
+	gpio_free(state->pdata->pdn_gpio);
+err_request_pdn_gpio:
+	gpio_free(state->pdata->reset_gpio);
+err_request_reset_gpio:
+	gpio_free(state->pdata->interface_en_gpio);
+err_request_interface_en_gpio:
+err_missing_platform_data:
 	i2c_set_clientdata(client, NULL);
 	kfree(state);
-
 err_state_alloc:
 	return rc;
 }
@@ -1288,6 +1327,11 @@ static int __devexit tas5713_remove(struct i2c_client *client)
 
 		omap_mcbsp_free(id);
 		free_irq(omap_mcbsp_get_tx_irq(id), state);
+
+		gpio_free(state->pdata->pdn_gpio);
+		gpio_free(state->pdata->reset_gpio);
+		gpio_free(state->pdata->interface_en_gpio);
+
 		kfree(state);
 	}
 
