@@ -41,6 +41,8 @@
 
 #define IOCTL_MODEM_NET_SUSPEND	_IO('o', 0x30)
 #define IOCTL_MODEM_NET_RESUME	_IO('o', 0x31)
+#define IOCTL_MODEM_DUMP_START	_IO('o', 0x32)
+#define IOCTL_MODEM_DUMP_UPDATE	_IO('o', 0x33)
 #define IOCTL_MODEM_FORCE_CRASH_EXIT _IO('o', 0x34)
 
 /* modem status */
@@ -154,7 +156,6 @@ struct link_device {
 	struct work_struct tx_work;
 	struct delayed_work tx_delayed_work;
 
-	int irq; /* for dpram int */
 	unsigned com_state;
 
 	/* called during init to associate an io device with this link */
@@ -173,7 +174,13 @@ struct link_device {
 				struct sk_buff *skb);
 
 	int (*gota_start)(struct link_device *ld, struct io_device *iod);
+	int (*dump_start)(struct link_device *ld, struct io_device *iod);
+
 	int (*modem_update)(
+		struct link_device *ld,
+		struct io_device *iod,
+		unsigned long arg);
+	int (*dump_update)(
 		struct link_device *ld,
 		struct io_device *iod,
 		unsigned long arg);

@@ -654,6 +654,8 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 		return r;
 	if (r == 0) {
 		dev_err(dev->dev, "controller timed out\n");
+		pr_info("addr: 0x%04x, len: %d, flags: 0x%x, stop: %d\n",
+			msg->addr, msg->len, msg->flags, stop);
 		omap_i2c_dump(dev);
 		omap_i2c_init(dev);
 		return -ETIMEDOUT;
@@ -1169,6 +1171,8 @@ omap_i2c_probe(struct platform_device *pdev)
 		dev_err(dev->dev, "failure adding adapter\n");
 		goto err_free_irq;
 	}
+
+	i2c_detect_ext_master(adap);
 
 	return 0;
 

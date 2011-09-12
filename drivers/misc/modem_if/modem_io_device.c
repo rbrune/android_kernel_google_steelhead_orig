@@ -38,9 +38,6 @@
 static const char hdlc_start[1] = { HDLC_START };
 static const char hdlc_end[1] = { HDLC_END };
 
-#define HDLC_HEADER_SIZE	(sizeof(hdlc_start) + sizeof(struct raw_hdr))
-#define HDLC_TAIL_SIZE		(sizeof(hdlc_end))
-
 struct fmt_hdr {
 	u16 len;
 	u8 control;
@@ -652,6 +649,14 @@ static long misc_ioctl(struct file *filp, unsigned int cmd, unsigned long _arg)
 		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_STATUS\n");
 		return iod->mc->phone_state;
 
+	case IOCTL_MODEM_DUMP_START:
+		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_DUMP_START\n");
+		return iod->link->dump_start(iod->link, iod);
+
+	case IOCTL_MODEM_DUMP_UPDATE:
+		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_DUMP_UPDATE\n");
+		return iod->link->dump_update(iod->link, iod, _arg);
+
 	case IOCTL_MODEM_GOTA_START:
 		pr_debug("[GOTA] misc_ioctl : IOCTL_MODEM_GOTA_START\n");
 		return iod->link->gota_start(iod->link, iod);
@@ -790,27 +795,27 @@ static int vnet_xmit(struct sk_buff *skb, struct net_device *ndev)
 	hd.control = 0;
 	hd.channel = iod->id & 0x1F;
 
-	if (skb_headroom(skb) < HDLC_HEADER_SIZE ||
-            skb_tailroom(skb) < HDLC_TAIL_SIZE) {
-		skb_new = skb_copy_expand(skb, HDLC_HEADER_SIZE,
-					       HDLC_TAIL_SIZE, GFP_ATOMIC);
+	skb_new = skb_copy_expand(skb, sizeof(hd) + sizeof(hdlc_start),
+				sizeof(hdlc_end), GFP_ATOMIC);
+	if (!skb_new) {
 		dev_kfree_skb_any(skb);
-		if (!skb_new)
-			return -ENOMEM;
-		skb = skb_new;
+		return -ENOMEM;
 	}
 
-	memcpy(skb_push(skb, sizeof(hd)), &hd, sizeof(hd));
-	memcpy(skb_push(skb, sizeof(hdlc_start)), hdlc_start,
+	memcpy(skb_push(skb_new, sizeof(hd)), &hd, sizeof(hd));
+	memcpy(skb_push(skb_new, sizeof(hdlc_start)), hdlc_start,
 				sizeof(hdlc_start));
-	memcpy(skb_put(skb, sizeof(hdlc_end)), hdlc_end, sizeof(hdlc_end));
+	memcpy(skb_put(skb_new, sizeof(hdlc_end)), hdlc_end, sizeof(hdlc_end));
 
-	ret = iod->link->send(iod->link, iod, skb);
-	if (ret < 0)
+	ret = iod->link->send(iod->link, iod, skb_new);
+	if (ret < 0) {
+		dev_kfree_skb_any(skb);
 		return NETDEV_TX_BUSY;
+	}
 
 	ndev->stats.tx_packets++;
 	ndev->stats.tx_bytes += skb->len;
+	dev_kfree_skb_any(skb);
 
 	return NETDEV_TX_OK;
 }
@@ -821,32 +826,29 @@ static struct net_device_ops vnet_ops = {
 	.ndo_start_xmit = vnet_xmit,
 };
 
-static void vnet_setup_common(struct net_device *ndev)
+static void vnet_setup(struct net_device *ndev)
 {
 	ndev->netdev_ops = &vnet_ops;
+	ndev->type = ARPHRD_PPP;
+	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
+	ndev->addr_len = 0;
 	ndev->hard_header_len = 0;
 	ndev->tx_queue_len = 1000;
 	ndev->mtu = ETH_DATA_LEN;
 	ndev->watchdog_timeo = 5 * HZ;
-	ndev->needed_headroom = HDLC_HEADER_SIZE;
-	ndev->needed_tailroom = HDLC_TAIL_SIZE;
-}
-
-static void vnet_setup(struct net_device *ndev)
-{
-	vnet_setup_common(ndev);
-	ndev->type = ARPHRD_PPP;
-	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
-	ndev->addr_len = 0;
 }
 
 static void vnet_setup_ether(struct net_device *ndev)
 {
-	vnet_setup_common(ndev);
+	ndev->netdev_ops = &vnet_ops;
 	ndev->type = ARPHRD_ETHER;
 	ndev->flags = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST | IFF_SLAVE;
 	ndev->addr_len = ETH_ALEN;
 	random_ether_addr(ndev->dev_addr);
+	ndev->hard_header_len = 0;
+	ndev->tx_queue_len = 1000;
+	ndev->mtu = ETH_DATA_LEN;
+	ndev->watchdog_timeo = 5 * HZ;
 }
 
 int init_io_device(struct io_device *iod)

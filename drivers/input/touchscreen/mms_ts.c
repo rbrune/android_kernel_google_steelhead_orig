@@ -53,8 +53,6 @@
 #define MMS_COMPAT_GROUP	0xF2
 #define MMS_FW_VERSION		0xF3
 
-#define REQUIRED_FW_VERSION	0x24
-
 enum {
 	ISP_MODE_FLASH_ERASE	= 0x59F3,
 	ISP_MODE_FLASH_WRITE	= 0x62CD,
@@ -95,6 +93,14 @@ struct mms_ts_info {
 	struct mutex			lock;
 	bool				enabled;
 };
+
+struct mms_fw_image {
+    __le32 hdr_len;
+    __le32 data_len;
+    __le32 fw_ver;
+    __le32 hdr_ver;
+    u8 data[0];
+} __attribute__ ((packed));
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void mms_ts_early_suspend(struct early_suspend *h);
@@ -298,7 +304,9 @@ static u32 isp_recv_bits(struct mms_ts_info *info, int cnt)
 static void isp_enter_mode(struct mms_ts_info *info, u32 mode)
 {
 	int cnt;
+	unsigned long flags;
 
+	local_irq_save(flags);
 	gpio_direction_output(info->pdata->gpio_resetb, 0);
 	gpio_direction_output(info->pdata->gpio_scl, 0);
 	gpio_direction_output(info->pdata->gpio_sda, 1);
@@ -311,17 +319,21 @@ static void isp_enter_mode(struct mms_ts_info *info, u32 mode)
 	}
 
 	gpio_set_value(info->pdata->gpio_resetb, 0);
+	local_irq_restore(flags);
 }
 
 static void isp_exit_mode(struct mms_ts_info *info)
 {
 	int i;
+	unsigned long flags;
 
+	local_irq_save(flags);
 	gpio_direction_output(info->pdata->gpio_resetb, 0);
 	udelay(3);
 
 	for (i = 0; i < 10; i++)
 		isp_toggle_clk(info, 1, 0, 3);
+	local_irq_restore(flags);
 }
 
 static void flash_set_address(struct mms_ts_info *info, u16 addr)
@@ -345,7 +357,7 @@ static void flash_erase(struct mms_ts_info *info)
 	isp_toggle_clk(info, 1, 0, 3);
 	udelay(7);
 	isp_toggle_clk(info, 1, 0, 3);
-	msleep(25);
+	usleep_range(25000, 35000);
 	isp_toggle_clk(info, 1, 0, 3);
 	usleep_range(150, 200);
 	isp_toggle_clk(info, 1, 0, 3);
@@ -359,7 +371,9 @@ static u32 flash_readl(struct mms_ts_info *info, u16 addr)
 {
 	int i;
 	u32 val;
+	unsigned long flags;
 
+	local_irq_save(flags);
 	isp_enter_mode(info, ISP_MODE_FLASH_READ);
 	flash_set_address(info, addr);
 
@@ -373,12 +387,16 @@ static u32 flash_readl(struct mms_ts_info *info, u16 addr)
 
 	val = isp_recv_bits(info, 32);
 	isp_exit_mode(info);
+	local_irq_restore(flags);
 
 	return val;
 }
 
 static void flash_writel(struct mms_ts_info *info, u16 addr, u32 val)
 {
+	unsigned long flags;
+
+	local_irq_save(flags);
 	isp_enter_mode(info, ISP_MODE_FLASH_WRITE);
 	flash_set_address(info, addr);
 	isp_send_bits(info, val, 32);
@@ -386,18 +404,18 @@ static void flash_writel(struct mms_ts_info *info, u16 addr, u32 val)
 	gpio_direction_output(info->pdata->gpio_sda, 1);
 	/* 6 clock cycles with different timings for the data to get written
 	 * into flash */
-	udelay(40);
-	isp_toggle_clk(info, 1, 0, 10);
-	isp_toggle_clk(info, 1, 0, 10);
-	udelay(20);
-	isp_toggle_clk(info, 1, 0, 10);
-	udelay(40);
-	isp_toggle_clk(info, 1, 0, 10);
-	isp_toggle_clk(info, 1, 0, 10);
-	isp_toggle_clk(info, 1, 0, 10);
+	isp_toggle_clk(info, 0, 1, 3);
+	isp_toggle_clk(info, 0, 1, 3);
+	isp_toggle_clk(info, 0, 1, 6);
+	isp_toggle_clk(info, 0, 1, 12);
+	isp_toggle_clk(info, 0, 1, 3);
+	isp_toggle_clk(info, 0, 1, 3);
+
+	isp_toggle_clk(info, 1, 0, 1);
 
 	gpio_direction_output(info->pdata->gpio_sda, 0);
 	isp_exit_mode(info);
+	local_irq_restore(flags);
 	usleep_range(300, 400);
 }
 
@@ -421,35 +439,31 @@ static bool flash_is_erased(struct mms_ts_info *info)
 	return true;
 }
 
-static void fw_write_image(struct mms_ts_info *info, const u8 *data, size_t len)
+static int fw_write_image(struct mms_ts_info *info, const u8 *data, size_t len)
 {
+	struct i2c_client *client = info->client;
 	u16 addr = 0;
 
 	for (addr = 0; addr < (len / 4); addr++, data += 4) {
-		udelay(40);
-		flash_writel(info, addr, get_unaligned_le32(data));
-	}
-}
+		u32 val = get_unaligned_le32(data);
+		u32 verify_val;
+		int retries = 3;
 
-static bool fw_verify_image(struct mms_ts_info *info, const u8 *data,
-			    size_t len)
-{
-	struct i2c_client *client = info->client;
-	u16 addr;
-	u32 val;
-	u32 correct_val;
-
-	for (addr = 0; addr < (len / 4); addr++, data += 4) {
-		udelay(40);
-		val = flash_readl(info, addr);
-		correct_val = get_unaligned_le32(data);
-		if (val == correct_val)
+		while (retries--) {
+			flash_writel(info, addr, val);
+			verify_val = flash_readl(info, addr);
+			if (val == verify_val)
+				break;
+			dev_err(&client->dev,
+				"mismatch @ addr 0x%x: 0x%x != 0x%x\n",
+				addr, verify_val, val);
 			continue;
-		dev_err(&client->dev, "mismatch @ addr 0x%x: 0x%x != 0x%x\n",
-			addr, val, correct_val);
-		return false;
+		}
+		if (retries < 0)
+			return -ENXIO;
 	}
-	return true;
+
+	return 0;
 }
 
 static int fw_download(struct mms_ts_info *info, const u8 *data, size_t len)
@@ -492,14 +506,10 @@ static int fw_download(struct mms_ts_info *info, const u8 *data, size_t len)
 	/* XXX: what does this do?! */
 	flash_writel(info, ISP_IC_INFO_ADDR, 0xffffff00 | (val & 0xff));
 	usleep_range(1000, 1500);
-	fw_write_image(info, data, len);
-	usleep_range(1000, 1500);
-
-	dev_info(&client->dev, "fw verify...\n");
-	if (!fw_verify_image(info, data, len)) {
-		ret = -ENXIO;
+	ret = fw_write_image(info, data, len);
+	if (ret)
 		goto err;
-	}
+	usleep_range(1000, 1500);
 
 	hw_reboot_normal(info);
 	usleep_range(1000, 1500);
@@ -558,10 +568,13 @@ static int mms_ts_input_open(struct input_dev *dev)
 	int ret;
 
 	ret = wait_for_completion_interruptible_timeout(&info->init_done,
-			msecs_to_jiffies(20 * MSEC_PER_SEC));
+			msecs_to_jiffies(90 * MSEC_PER_SEC));
 
 	if (ret > 0) {
-		ret = mms_ts_enable(info);
+		if (info->irq != -1)
+			ret = mms_ts_enable(info);
+		else
+			ret = -ENXIO;
 	} else if (ret < 0) {
 		dev_err(&dev->dev,
 			"error while waiting for device to init (%d)\n", ret);
@@ -615,38 +628,84 @@ static void mms_ts_fw_load(const struct firmware *fw, void *context)
 	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
 	int ret = 0;
 	int ver;
-
-	if (!fw) {
-		dev_err(&client->dev, "could not find firmware file '%s'\n",
-			info->fw_name);
-		goto out;
-	}
-
-	i2c_lock_adapter(adapter);
-	info->pdata->mux_fw_flash(true);
-
-	ret = fw_download(info, fw->data, fw->size);
-
-	info->pdata->mux_fw_flash(false);
-	i2c_unlock_adapter(adapter);
-
-	if (ret < 0) {
-		dev_err(&client->dev,
-			"error updating firmware to version 0x%02x\n",
-			REQUIRED_FW_VERSION);
-		goto out;
-	}
+	int retries = 3;
+	struct mms_fw_image *fw_img;
 
 	ver = get_fw_version(info);
-	if (ver == REQUIRED_FW_VERSION)
-		dev_info(&client->dev, "fw update done. ver = 0x%02x\n", ver);
-	else
+	if (ver < 0) {
+		ver = 0;
 		dev_err(&client->dev,
-			"ERROR: fw update succeeded, but fw version is still wrong (%d != %d)\n",
-			ver, REQUIRED_FW_VERSION);
+			"can't read version, controller dead? forcing reflash");
+	}
 
+	if (!fw) {
+		dev_info(&client->dev, "could not find firmware file '%s'\n",
+			info->fw_name);
+		goto done;
+	}
+
+	fw_img = (struct mms_fw_image *)fw->data;
+	if (fw_img->hdr_len != sizeof(struct mms_fw_image) ||
+		   fw_img->data_len + fw_img->hdr_len != fw->size ||
+		   fw_img->hdr_ver != 0x1) {
+		dev_err(&client->dev,
+			"firmware image '%s' invalid, may continue\n",
+			info->fw_name);
+		goto err;
+	}
+
+	if (ver == fw_img->fw_ver && !mms_force_reflash) {
+		dev_info(&client->dev,
+			 "fw version 0x%02x already present\n", ver);
+		goto done;
+	}
+
+	dev_info(&client->dev, "need fw update (0x%02x != 0x%02x)\n",
+		 ver, fw_img->fw_ver);
+
+	if (!info->pdata || !info->pdata->mux_fw_flash) {
+		dev_err(&client->dev,
+			"fw cannot be updated, missing platform data\n");
+		goto err;
+	}
+
+	while (retries--) {
+		i2c_lock_adapter(adapter);
+		info->pdata->mux_fw_flash(true);
+
+		ret = fw_download(info, fw_img->data, fw_img->data_len);
+
+		info->pdata->mux_fw_flash(false);
+		i2c_unlock_adapter(adapter);
+
+		if (ret < 0) {
+			dev_err(&client->dev,
+				"error updating firmware to version 0x%02x\n",
+				fw_img->fw_ver);
+			dev_err(&client->dev, "retrying flashing\n");
+			continue;
+		}
+
+		ver = get_fw_version(info);
+		if (ver == fw_img->fw_ver) {
+			dev_info(&client->dev,
+				 "fw update done. ver = 0x%02x\n", ver);
+			goto done;
+		} else {
+			dev_err(&client->dev,
+				"ERROR: fw update succeeded, but fw version is still wrong (0x%x != 0x%x)\n",
+				ver, fw_img->fw_ver);
+		}
+		dev_err(&client->dev, "retrying flashing\n");
+	}
+
+err:
+	/* complete anyway, so open() doesn't get blocked */
+	complete_all(&info->init_done);
+	goto out;
+
+done:
 	mms_ts_finish_config(info);
-
 out:
 	release_firmware(fw);
 }
@@ -655,31 +714,8 @@ static int __devinit mms_ts_config(struct mms_ts_info *info, bool nowait)
 {
 	struct i2c_client *client = info->client;
 	int ret = 0;
-	int ver;
 
 	mms_pwr_on_reset(info);
-
-	ver = get_fw_version(info);
-	if (ver < 0) {
-		ver = 0;
-		dev_err(&client->dev,
-			 "can't read version, controller dead?! forcing reflash");
-	} else if (ver == REQUIRED_FW_VERSION && !mms_force_reflash) {
-		dev_info(&client->dev,
-			 "fw version 0x%02x already present\n", ver);
-		ret = mms_ts_finish_config(info);
-		goto out;
-	}
-
-	dev_info(&client->dev, "need fw update (0x%02x != 0x%02x)\n",
-		 ver, REQUIRED_FW_VERSION);
-
-	if (!info->pdata || !info->pdata->mux_fw_flash) {
-		dev_err(&client->dev,
-			"fw cannot be updated, missing platform data\n");
-		ret = -EINVAL;
-		goto out;
-	}
 
 	if (nowait) {
 		const struct firmware *fw;
@@ -692,8 +728,7 @@ static int __devinit mms_ts_config(struct mms_ts_info *info, bool nowait)
 		}
 		mms_ts_fw_load(fw, info);
 	} else {
-		info->fw_name = kasprintf(GFP_KERNEL, "mms144_v%02x.fw",
-					  REQUIRED_FW_VERSION);
+		info->fw_name = kstrdup("mms144_ts.fw", GFP_KERNEL);
 		ret = request_firmware_nowait(THIS_MODULE, true, info->fw_name,
 					      &client->dev, GFP_KERNEL,
 					      info, mms_ts_fw_load);

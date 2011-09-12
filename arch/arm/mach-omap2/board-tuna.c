@@ -261,8 +261,8 @@ static struct platform_device tuna_gpio_i2c5_device = {
 	}
 };
 
-#define OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 30)
-#define OMAP_TUNA_ION_HEAP_TILER_SIZE		SZ_128M
+#define OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
+#define OMAP_TUNA_ION_HEAP_TILER_SIZE		SZ_128M - SZ_32M
 #define OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
@@ -746,6 +746,14 @@ static struct i2c_board_info __initdata tuna_i2c1_boardinfo[] = {
 	},
 };
 
+static struct i2c_board_info __initdata tuna_i2c2_boardinfo[] = {
+	{
+		I2C_BOARD_INFO("ducati", 0x20),
+		.irq = OMAP44XX_IRQ_I2C2,
+		.ext_master = true,
+	},
+};
+
 static struct i2c_board_info __initdata tuna_i2c4_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("an30259a", 0x30),
@@ -754,7 +762,8 @@ static struct i2c_board_info __initdata tuna_i2c4_boardinfo[] = {
 
 static int __init tuna_i2c_init(void)
 {
-	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP);
+	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP |
+						OMAP_WAKEUP_EN);
 	omap_mux_init_signal("i2c1_scl.i2c1_scl", OMAP_PIN_INPUT_PULLUP);
 	omap_mux_init_signal("i2c1_sda.i2c1_sda", OMAP_PIN_INPUT_PULLUP);
 
@@ -770,7 +779,8 @@ static int __init tuna_i2c_init(void)
 	 */
 	omap_register_i2c_bus(1, 400, tuna_i2c1_boardinfo,
 			      ARRAY_SIZE(tuna_i2c1_boardinfo));
-	omap_register_i2c_bus(2, 400, NULL, 0);
+	omap_register_i2c_bus(2, 400, tuna_i2c2_boardinfo,
+                              ARRAY_SIZE(tuna_i2c2_boardinfo));
 	omap_register_i2c_bus(3, 400, NULL, 0);
 	omap_register_i2c_bus(4, 400, NULL, 0);
 
@@ -813,7 +823,9 @@ static struct omap_board_mux board_wkup_mux[] __initdata = {
 static struct omap_device_pad tuna_uart1_pads[] __initdata = {
 	{
 		.name	= "mcspi1_cs3.uart1_rts",
+		.flags  = OMAP_DEVICE_PAD_REMUX,
 		.enable	= OMAP_PIN_OUTPUT | OMAP_MUX_MODE1,
+		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE7,
 	},
 	{
 		.name	= "mcspi1_cs2.uart1_cts",
