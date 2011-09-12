@@ -153,7 +153,7 @@ static void __init omap4_steelhead_init_hw_rev(void)
 
 	/* mux init */
 	ret = steelhead_reserve_gpios(hwrev_gpios, ARRAY_SIZE(hwrev_gpios),
-				      "hw_rev");
+				      "hw_rev", true);
 
 	if (ret) {
 		pr_err("unable to reserve gpios for hw rev\n");
@@ -537,7 +537,8 @@ static inline void __init board_serial_init(void)
 
 int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 				   int count,
-				   const char *log_tag)
+				   const char *log_tag,
+				   int do_gpio_request)
 {
 	int i;
 	for (i = 0; i < count; ++i) {
@@ -552,6 +553,9 @@ int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 					g->pin_mode, status);
 			return status;
 		}
+
+		if (!do_gpio_request)
+			continue;
 
 		status = gpio_request_one(
 				g->gpio_id, g->init_state, g->gpio_name);
@@ -634,7 +638,7 @@ static void steelhead_platform_init_tas5713_audio(void)
 		},
 	};
 	if (steelhead_reserve_gpios(tas5713_gpios, ARRAY_SIZE(tas5713_gpios),
-				"tas5713"))
+				    "tas5713", false))
 		return;
 
 	/* Make sure that McBSP2's internal clock selection is set to the output
@@ -776,19 +780,15 @@ static void steelhead_platform_init_mcasp_audio(void)
  *                                                                            *
  ******************************************************************************/
 
+#define AVR_RESET_GPIO_ID 48
 #define AVR_INT_GPIO_ID 49
 
 static struct steelhead_avr_platform_data steelhead_avr_pdata = {
-	/* Reset and Power Down GPIO configuration */
 	.interrupt_gpio = AVR_INT_GPIO_ID,
 };
 
 static void steelhead_platform_init_avr(void)
 {
-	/* Grab a hold of the GPIO used to control the AVR interrupt
-	 * request line.  Configure it to be an input and reserve it in
-	 * the GPIO framwork.
-	 */
 	static struct steelhead_gpio_reservation avr_gpios[] = {
 		{
 			.gpio_id = AVR_INT_GPIO_ID,
@@ -796,13 +796,13 @@ static void steelhead_platform_init_avr(void)
 			.mux_name = "gpmc_a25.gpio_49",
 			.pin_mode = OMAP_PIN_INPUT_PULLUP,
 			.init_state = GPIOF_IN,
+
 		},
 	};
 
 	if (steelhead_reserve_gpios(avr_gpios, ARRAY_SIZE(avr_gpios),
-				"steelhead-avr"))
+				    "steelhead-avr", false))
 		return;
-
 }
 
 /******************************************************************************

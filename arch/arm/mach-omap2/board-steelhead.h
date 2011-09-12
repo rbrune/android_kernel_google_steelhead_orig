@@ -25,7 +25,8 @@ struct steelhead_gpio_reservation {
 extern int __init steelhead_reserve_gpios(
 				struct steelhead_gpio_reservation *data,
 				int count,
-				const char *log_tag);
+				const char *log_tag,
+				int do_gpio_request);
 
 extern void __init steelhead_platform_init_counter(void);
 extern int __init steelhead_init_wlan(void);

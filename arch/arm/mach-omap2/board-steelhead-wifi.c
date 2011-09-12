@@ -355,8 +355,8 @@ int __init steelhead_init_wlan(void)
 
 	/* Set up all of the GPIOs used to control the BCM4330 */
 	status = steelhead_reserve_gpios(wlan_gpios,
-			ARRAY_SIZE(wlan_gpios),
-			"steelhead_wlan");
+					 ARRAY_SIZE(wlan_gpios),
+					 "steelhead_wlan", true);
 	if (status)
 		return status;
 
