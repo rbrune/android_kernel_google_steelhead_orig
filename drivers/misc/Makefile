@@ -62,5 +62,6 @@ obj-$(CONFIG_LEDS_AN30259A)	+= leds-an30259a.o
 obj-$(CONFIG_STEELHEAD_AVR)	+= steelhead_avr.o
 obj-$(CONFIG_TAS5713)		+= tas5713.o
 obj-$(CONFIG_AAH_LOCALTIME)	+= aah_localtime_driver.o
+obj-$(CONFIG_PN544)		+= pn544.o
 
 aah_localtime_driver-objs := aah_localtime.o

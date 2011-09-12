@@ -605,6 +605,12 @@ config AAH_TIMESYNC_DEBUG
 	 general, you do not want to turn on this feature unless you know
 	 exactly what you are doing.
 
+config PN544
+	bool "NXP PN544 NFC Controller Driver"
+	default n
+	help
+	  NXP PN544 Near Field Communication controller support.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
