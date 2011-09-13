@@ -501,4 +501,11 @@ config OPTICAL_GP2A
 	help
 	  This option enables proximity & light sensors using gp2a driver.
 
+config INPUT_VCNL4000
+	depends on I2C
+	tristate "VCNL4000 ambient light and proximity input device"
+	default n
+	help
+	  This option enables VCNL4000 driver.
+
 endif
