@@ -242,19 +242,21 @@ static int pn544_probe(struct i2c_client *client,
 		return  -ENODEV;
 	}
 
-	ret = gpio_request(platform_data->irq_gpio, "nfc_int");
+	ret = gpio_request_one(platform_data->irq_gpio, GPIOF_IN, "nfc_int");
 	if (ret) {
 		pr_err("%s : gpio_request(nfc_int) failed, error %d\n",
 		       __func__, ret);
 		return  -ENODEV;
 	}
-	ret = gpio_request(platform_data->ven_gpio, "nfc_ven");
+	ret = gpio_request_one(platform_data->ven_gpio, GPIOF_OUT_INIT_LOW,
+			       "nfc_ven");
 	if (ret) {
 		pr_err("%s : gpio_request(nfc_ven) failed, error %d\n",
 		       __func__, ret);
 		goto err_ven;
 	}
-	ret = gpio_request(platform_data->firm_gpio, "nfc_firm");
+	ret = gpio_request_one(platform_data->firm_gpio, GPIOF_OUT_INIT_LOW,
+			       "nfc_firm");
 	if (ret) {
 		pr_err("%s : gpio_request(nfc_firm) failed, error %d\n",
 		       __func__, ret);
