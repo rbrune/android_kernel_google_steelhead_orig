@@ -66,16 +66,12 @@
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
 #include <linux/aah_localtime.h>
+#include <linux/pn544.h>
 #include <sound/pcm.h>
+#include <linux/vcnl4000.h>
 
 #define GPIO_HUB_POWER		1
 #define GPIO_HUB_NRESET		62
-
-#if 0 /* TBD */
-#define GPIO_NFC_IRQ 17
-#define GPIO_NFC_FIRMWARE 172
-#define GPIO_NFC_EN 173
-#endif
 
 #define STEELHEAD_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
 #define STEELHEAD_RAMCONSOLE_SIZE	SZ_2M
@@ -781,7 +777,7 @@ static void steelhead_platform_init_mcasp_audio(void)
  ******************************************************************************/
 
 #define AVR_RESET_GPIO_ID 48
-#define AVR_INT_GPIO_ID 49
+#define AVR_INT_GPIO_ID   49
 
 static struct steelhead_avr_platform_data steelhead_avr_pdata = {
 	.interrupt_gpio = AVR_INT_GPIO_ID,
@@ -789,12 +785,20 @@ static struct steelhead_avr_platform_data steelhead_avr_pdata = {
 
 static void steelhead_platform_init_avr(void)
 {
+	/* reset should already have been released by bootloader */
 	static struct steelhead_gpio_reservation avr_gpios[] = {
+		{
+			.gpio_id = AVR_RESET_GPIO_ID,
+			.gpio_name = "avr_reset",
+			.mux_name = "gpmc_a24.gpio_48",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_HIGH
+		},
 		{
 			.gpio_id = AVR_INT_GPIO_ID,
 			.gpio_name = "avr_int",
 			.mux_name = "gpmc_a25.gpio_49",
-			.pin_mode = OMAP_PIN_INPUT_PULLUP,
+			.pin_mode = OMAP_PIN_INPUT_PULLUP | OMAP_WAKEUP_EN,
 			.init_state = GPIOF_IN,
 
 		},
@@ -807,6 +811,70 @@ static void steelhead_platform_init_avr(void)
 
 /******************************************************************************
  *                                                                            *
+ *           PN544 NFC                                                        *
+ *                                                                            *
+ ******************************************************************************/
+#define GPIO_NFC_FW  162
+#define GPIO_NFC_EN  163
+#define GPIO_NFC_IRQ 164
+
+static struct pn544_i2c_platform_data pn544_pdata = {
+	.irq_gpio = GPIO_NFC_IRQ,
+	.ven_gpio = GPIO_NFC_EN,
+	.firm_gpio = GPIO_NFC_FW,
+};
+
+void __init omap4_steelhead_nfc_init(void)
+{
+	static struct steelhead_gpio_reservation nfc_gpios[] = {
+		{
+			.gpio_id = GPIO_NFC_FW,
+			.gpio_name = "nfc_fw",
+			.mux_name = "usbb2_ulpitll_dat1.gpio_162",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
+		{
+			.gpio_id = GPIO_NFC_EN,
+			.gpio_name = "nfc_en",
+			.mux_name = "usbb2_ulpitll_dat2.gpio_163",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
+		{
+			.gpio_id = GPIO_NFC_IRQ,
+			.gpio_name = "nfc_irq",
+			.mux_name = "usbb2_ulpitll_dat3.gpio_164",
+			.pin_mode = OMAP_PIN_INPUT_PULLUP,
+			.init_state = GPIOF_IN,
+		},
+	};
+
+	if (steelhead_reserve_gpios(nfc_gpios, ARRAY_SIZE(nfc_gpios),
+				    "steelhead-nfc", false))
+		return;
+
+}
+
+/******************************************************************************
+ *                                                                            *
+ *           VCNL4000 proximity detector                                      *
+ *                                                                            *
+ ******************************************************************************/
+
+/* A power level of 20mA gives a baseline proximity reading of about 4600
+ * but needs more tuning
+ */
+struct vcnl4000_platform_data vcnl4000_pdata = {
+	.poll_interval = 250, /* poll every 250 ms */
+	.ir_led_current = 20, /* 20mA current */
+	.detect_threshold = 4600,
+	.code = KEY_MUTE,     /* input key code when in proximity */
+};
+
+
+/******************************************************************************
+ *                                                                            *
  *                            I2C Bus setup                                   *
  *                                                                            *
  ******************************************************************************/
@@ -815,6 +883,18 @@ static struct i2c_board_info __initdata steelhead_i2c_bus2[] = {
 	{
 		I2C_BOARD_INFO("steelhead-avr", (0x20)),
 		.platform_data = &steelhead_avr_pdata,
+	},
+	{
+		I2C_BOARD_INFO("vcnl4000", (0x13)),
+		.platform_data = &vcnl4000_pdata,
+	},
+};
+
+static struct i2c_board_info __initdata steelhead_i2c_bus3[] = {
+	{
+		I2C_BOARD_INFO("pn544", (0x28)),
+		.irq = OMAP_GPIO_IRQ(GPIO_NFC_IRQ),
+		.platform_data = &pn544_pdata,
 	},
 };
 
@@ -848,8 +928,9 @@ static int __init steelhead_i2c_init(void)
 	/* i2c2 - AVR */
 	omap_register_i2c_bus(2, 400, steelhead_i2c_bus2,
 			      ARRAY_SIZE(steelhead_i2c_bus2));
-	/* i2c3 - NFC TBD */
-	omap_register_i2c_bus(3, 400, NULL, 0);
+	/* i2c3 - NFC */
+	omap_register_i2c_bus(3, 400, steelhead_i2c_bus3,
+			      ARRAY_SIZE(steelhead_i2c_bus3));
 	/* i2c4 - TAS5713 */
 	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
 			      ARRAY_SIZE(steelhead_i2c_bus4));
@@ -1016,23 +1097,6 @@ static struct notifier_block steelhead_reboot_notifier = {
 	.notifier_call = steelhead_reboot_notifier_handler,
 };
 
-#if 0 /* TBD */
-static void __init steelhead_nfc_init(void)
-{
-	gpio_request(GPIO_NFC_FIRMWARE, "nfc_firmware");
-	gpio_direction_output(GPIO_NFC_FIRMWARE, 0);
-	omap_mux_init_gpio(GPIO_NFC_FIRMWARE, OMAP_PIN_OUTPUT);
-
-	gpio_request(GPIO_NFC_EN, "nfc_enable");
-	gpio_direction_output(GPIO_NFC_EN, 1);
-	omap_mux_init_gpio(GPIO_NFC_EN, OMAP_PIN_OUTPUT);
-
-	gpio_request(GPIO_NFC_IRQ, "nfc_irq");
-	gpio_direction_input(GPIO_NFC_IRQ);
-	omap_mux_init_gpio(GPIO_NFC_IRQ, OMAP_PIN_INPUT_PULLUP);
-}
-#endif
-
 static ssize_t steelhead_soc_family_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
@@ -1182,6 +1246,7 @@ static void __init steelhead_init(void)
 	omap4_steelhead_create_board_props();
 	omap_dmm_init();
 	omap4_steelhead_display_init();
+	omap4_steelhead_nfc_init();
 	if (enable_sr)
 		omap_enable_smartreflex_on_init();
 	steelhead_init_wlan();
