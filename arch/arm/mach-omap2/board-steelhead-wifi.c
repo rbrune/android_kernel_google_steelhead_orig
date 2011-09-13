@@ -40,7 +40,7 @@ static struct steelhead_gpio_reservation wlan_gpios[] = {
 		.gpio_name = "wlan_irq",
 		.gpio_id = GPIO_WLAN_IRQ,
 		.mux_name = GPIO_WLAN_IRQ_MUX_NAME,
-		.pin_mode = OMAP_PIN_INPUT,
+		.pin_mode = OMAP_PIN_INPUT | OMAP_WAKEUP_EN,
 		.init_state = GPIOF_IN,
 	},
 };

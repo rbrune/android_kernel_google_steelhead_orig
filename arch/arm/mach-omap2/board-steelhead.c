@@ -907,7 +907,8 @@ static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
 
 static int __init steelhead_i2c_init(void)
 {
-	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT);
+	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP |
+			     OMAP_WAKEUP_EN);
 	omap_mux_init_signal("i2c1_scl.i2c1_scl", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c1_sda.i2c1_sda", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c2_scl.i2c2_scl", OMAP_PIN_INPUT);
