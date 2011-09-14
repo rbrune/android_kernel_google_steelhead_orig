@@ -972,7 +972,7 @@ static const struct tas5713_init_command tas5713_init_sequence[] = {
 	{ .size = 2, .data = "\x0A\x30" },
 
 	/* Volume configuration: slew == 1024 steps (non-default) */
-	{ .size = 2, .data = "\x0E\xF1" },
+	{ .size = 2, .data = "\x0E\x91" },
 
 	/* Clock Control Register: 44.1/48KHz sample clock,
 	 * MCLK = 256xFs (defaults)
