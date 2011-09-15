@@ -61,6 +61,8 @@ struct omap_abe_data {
 	int suspended_dais;
 };
 
+static int dl1_gain;	/* dynamically set by machine drivers */
+
 /*
  * Stream DMA parameters
  */
@@ -162,6 +164,31 @@ static int modem_get_dai(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+int omap_abe_set_dl1_output(int output)
+{
+	/*
+	 * the output itself is not important, but the DL1 gain
+	 * to use when each output is active
+	 */
+	switch (output) {
+	case OMAP_ABE_DL1_HEADSET_LP:
+		dl1_gain = GAIN_M8dB;
+		break;
+	case OMAP_ABE_DL1_HEADSET_HP:
+	case OMAP_ABE_DL1_EARPIECE:
+		dl1_gain = GAIN_M1dB;
+		break;
+	case OMAP_ABE_DL1_NO_PDM:
+		dl1_gain = GAIN_0dB;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(omap_abe_set_dl1_output);
+
 static void mute_be(struct snd_soc_pcm_runtime *be,
 		struct snd_soc_dai *dai, int stream)
 {
@@ -212,9 +239,9 @@ static void unmute_be(struct snd_soc_pcm_runtime *be,
 	if (stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		switch (be->dai_link->be_id) {
 		case OMAP_ABE_DAI_PDM_DL1:
-			abe_write_gain(GAINS_DL1, GAIN_M7dB, RAMP_5MS,
+			abe_write_gain(GAINS_DL1, dl1_gain, RAMP_5MS,
 				GAIN_LEFT_OFFSET);
-			abe_write_gain(GAINS_DL1, GAIN_M7dB, RAMP_5MS,
+			abe_write_gain(GAINS_DL1, dl1_gain, RAMP_5MS,
 				GAIN_RIGHT_OFFSET);
 			break;
 		case OMAP_ABE_DAI_PDM_DL2:
@@ -693,6 +720,7 @@ static void playback_trigger(struct snd_pcm_substream *substream,
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
+	case SNDRV_PCM_TRIGGER_RESUME:
 
 		/* mute and enable ports */
 		list_for_each_entry(dsp_params, &fe->dsp[stream].be_clients, list_be) {
@@ -746,24 +774,24 @@ static void playback_trigger(struct snd_pcm_substream *substream,
 		unmute_fe_port(substream, dai, stream);
 		break;
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		/* mute FE port */
+		mute_fe_port(substream, dai, stream);
+
 		/* disable Frontend sDMA  */
 		disable_fe_port(substream, dai, stream);
 		snd_soc_dsp_platform_trigger(substream, cmd, fe->platform);
-
-		/* mute FE port */
-		mute_fe_port(substream, dai, stream);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
+	case SNDRV_PCM_TRIGGER_SUSPEND:
 
 		/* does this trigger() apply to the FE ? */
 		if (snd_soc_dsp_is_trigger_for_fe(fe, stream)) {
+			/* mute FE port */
+			mute_fe_port(substream, dai, stream);
 
 			/* disable the transfer */
 			disable_fe_port(substream, dai, stream);
 			snd_soc_dsp_platform_trigger(substream, cmd, fe->platform);
-
-			/* mute FE port */
-			mute_fe_port(substream, dai, stream);
 		}
 
 		/* disable BE ports */
@@ -1207,6 +1235,9 @@ static int omap_abe_dai_probe(struct snd_soc_dai *dai)
 	}
 
 	snd_soc_dai_set_drvdata(dai, abe_priv);
+
+	dl1_gain = GAIN_0dB;
+
 	return 0;
 
 err_port:

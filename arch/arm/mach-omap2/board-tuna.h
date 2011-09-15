@@ -16,10 +16,13 @@
 
 #define TUNA_REV_MASK		0xf
 #define TUNA_REV_03		0x3
+#define TUNA_REV_SAMPLE_4	0x3
 
 #define TUNA_TYPE_TORO		0x10
 #define TUNA_TYPE_MAGURO	0x00
 #define TUNA_TYPE_MASK		0x10
+
+#define TUNA_GPIO_HDMI_HPD	63
 
 int omap4_tuna_get_revision(void);
 int omap4_tuna_get_type(void);

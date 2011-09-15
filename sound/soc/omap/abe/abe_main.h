@@ -297,8 +297,10 @@
 #define GAIN_6dB 600L
 /* default gain = 1 */
 #define GAIN_0dB  0L
+#define GAIN_M1dB -100L
 #define GAIN_M6dB -600L
 #define GAIN_M7dB -700L
+#define GAIN_M8dB -800L
 #define GAIN_M12dB -1200L
 #define GAIN_M18dB -1800L
 #define GAIN_M24dB -2400L
@@ -656,6 +658,7 @@ u32 abe_connect_serial_port(u32 id, abe_data_format_t *f,
 u32 abe_read_port_address(u32 port, abe_dma_t *dma2);
 void abe_add_subroutine(u32 *id, abe_subroutine2 f, u32 nparam, u32 *params);
 u32 abe_read_next_ping_pong_buffer(u32 port, u32 *p, u32 *n);
+void abe_write_pdmdl_offset(u32 path, u32 offset_left, u32 offset_right);
 u32 abe_reset_vx_ul_src_filters(void);
 u32 abe_reset_mic_ul_src_filters(void);
 u32 abe_reset_vx_dl_src_filters(void);
