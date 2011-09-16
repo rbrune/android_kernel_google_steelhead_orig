@@ -53,6 +53,10 @@ static struct platform_device bcm4330_bluetooth_device = {
 	.id = -1,
 };
 
+static char *btaddr;
+module_param(btaddr, charp, S_IRUGO);
+MODULE_PARM_DESC(btaddr, "bluetooth address");
+
 int __init steelhead_init_bluetooth(void)
 {
 	/* Setup the GPIOs we use to control the regulator enable, reset, and
