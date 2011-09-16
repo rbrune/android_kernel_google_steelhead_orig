@@ -19,26 +19,32 @@
 #include "board-steelhead.h"
 #include "mux.h"
 
+static struct omap_uart_port_info steelhead_uart2_info __initdata = {
+	.use_dma	= 0,
+	.dma_rx_buf_size = DEFAULT_RXDMA_BUFSIZE,
+	.dma_rx_poll_rate = DEFAULT_RXDMA_POLLRATE,
+	.dma_rx_timeout = DEFAULT_RXDMA_TIMEOUT,
+	.auto_sus_timeout = DEFAULT_AUTOSUSPEND_DELAY,
+	.wake_peer	= bcm_bt_lpm_exit_lpm_locked,
+	.rts_mux_driver_control = 1,
+};
+
 static struct omap_device_pad steelhead_bt_serial_pads[] __initdata = {
 	{
 		.name   = "uart2_cts.uart2_cts",
-		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
 		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
-		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
 	},
 	{
 		.name   = "uart2_rts.uart2_rts",
 		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
 	},
 	{
-		.name   = "uart2_rx.uart2_rx",
-		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
-		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
-		.idle   = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
-	},
-	{
 		.name   = "uart2_tx.uart2_tx",
 		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart2_rx.uart2_rx",
+		.enable = OMAP_PIN_INPUT_PULLUP | OMAP_MUX_MODE0,
 	},
 };
 
@@ -61,7 +67,7 @@ int __init steelhead_init_bluetooth(void)
 	omap_serial_init_port_pads(1,
 				   steelhead_bt_serial_pads,
 				   ARRAY_SIZE(steelhead_bt_serial_pads),
-				   NULL);
+				   &steelhead_uart2_info);
 
 	/* Add the platform device used for BT power management */
 	platform_device_register(&bcm4330_bluetooth_device);
