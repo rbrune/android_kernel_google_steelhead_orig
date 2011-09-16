@@ -1034,8 +1034,10 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 		.hdmi	= {
 			.regn	= 15,
 			.regm2	= 1,
+			.max_pixclk_khz = 75000,
 		},
 	},
+	.hpd_gpio = GPIO_HDMI_HPD,
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
 
