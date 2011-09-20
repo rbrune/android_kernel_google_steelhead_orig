@@ -2429,7 +2429,8 @@ static int finish_port_resume(struct usb_device *udev)
 			status = (status > 0 ? 0 : -ENODEV);
 
 		/* If a normal resume failed, try doing a reset-resume */
-		if (status && !udev->reset_resume && udev->persist_enabled) {
+		if (status && !udev->reset_resume && udev->persist_enabled &&
+				!(udev->quirks & USB_QUIRK_NO_RESET_RESUME)) {
 			dev_dbg(&udev->dev, "retry with reset-resume\n");
 			udev->reset_resume = 1;
 			goto retry_reset_resume;
@@ -4043,3 +4044,18 @@ void usb_queue_reset_device(struct usb_interface *iface)
 	schedule_work(&iface->reset_ws);
 }
 EXPORT_SYMBOL_GPL(usb_queue_reset_device);
+
+void usb_force_reenumeration(struct usb_device *udev)
+{
+	struct usb_hub			*parent_hub;
+	int				port1 = udev->portnum;
+
+	if (!udev->parent)
+		return;
+
+	parent_hub = hdev_to_hub(udev->parent);
+	if (!parent_hub)
+		return;
+
+	hub_port_logical_disconnect(parent_hub, port1);
+}
