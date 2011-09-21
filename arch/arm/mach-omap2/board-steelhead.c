@@ -70,6 +70,8 @@
 #include <sound/pcm.h>
 #include <linux/vcnl4000.h>
 
+#define TPS62361_GPIO		7
+
 #define GPIO_HUB_POWER		1
 #define GPIO_HUB_NRESET		62
 
@@ -473,7 +475,6 @@ static struct regulator_init_data steelhead_clk32kg = {
 static struct regulator_init_data steelhead_vdd3 = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
-		.always_on              = true,
 	},
 };
 
@@ -484,7 +485,6 @@ static struct regulator_init_data steelhead_vdd3 = {
 static struct regulator_init_data steelhead_vmem = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
-		.always_on              = true,
 	},
 };
 
@@ -1250,6 +1250,22 @@ static void __init steelhead_init(void)
 	omap_dmm_init();
 	omap4_steelhead_display_init();
 	omap4_steelhead_nfc_init();
+
+	if (cpu_is_omap446x()) {
+		int status;
+
+		/* Vsel0 = gpio, vsel1 = gnd */
+		status = omap_tps6236x_board_setup(true, TPS62361_GPIO, -1,
+						   OMAP_PIN_OFF_OUTPUT_HIGH,
+						   -1);
+		if (status)
+			pr_err("TPS62361 initialization failed: %d\n", status);
+
+	} else {
+		steelhead_vmem.constraints.always_on = true;
+		steelhead_vdd3.constraints.always_on = true;
+
+	}
 	if (enable_sr)
 		omap_enable_smartreflex_on_init();
 	steelhead_init_wlan();
