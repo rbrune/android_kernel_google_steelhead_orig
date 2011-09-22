@@ -73,43 +73,8 @@ static void tuna_oled_set_power(bool enable)
 
 static const struct s6e8aa0_acl_parameters tuna_oled_acl[] = {
 	{
-		.cd = 180,
-		.acl_val = 45,
-		.regs = {
-			0xC1, /* ACL Control2 Register */
-			0x47,
-			0x53,
-			0x13,
-			0x53,
-			0x00,
-			0x00,
-			0x02,
-			0xCF,
-			0x00,
-			0x00,
-			0x04,
-			0xFF,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x01,
-			0x07,
-			0x0C,
-			0x12,
-			0x17,
-			0x1D,
-			0x23,
-			0x28,
-			0x2E,
-			0x33,
-			0x39,
-		},
-	},
-	{
-		.cd = 190,
-		.acl_val = 48,
+		.cd = 40,
+		.acl_val = 43,
 		.regs = {
 			0xC1, /* ACL Control2 Register */
 			0x47,
@@ -143,8 +108,8 @@ static const struct s6e8aa0_acl_parameters tuna_oled_acl[] = {
 		},
 	},
 	{
-		.cd = 200,
-		.acl_val = 50,
+		.cd = 300,
+		.acl_val = 45,
 		.regs = {
 			0xC1, /* ACL Control2 Register */
 			0x47,
@@ -165,121 +130,16 @@ static const struct s6e8aa0_acl_parameters tuna_oled_acl[] = {
 			0x00,
 			0x00,
 			0x01,
-			0x08,
+			0x07,
 			0x0E,
-			0x15,
+			0x14,
 			0x1B,
-			0x22,
-			0x29,
-			0x2F,
-			0x36,
-			0x3C,
-			0x43,
-		},
-	},
-	{
-		.cd = 210,
-		.acl_val = 52,
-		.regs = {
-			0xC1, /* ACL Control2 Register */
-			0x47,
-			0x53,
-			0x13,
-			0x53,
-			0x00,
-			0x00,
-			0x02,
-			0xCF,
-			0x00,
-			0x00,
-			0x04,
-			0xFF,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x01,
-			0x08,
-			0x0F,
-			0x16,
-			0x1D,
-			0x24,
-			0x2B,
-			0x32,
-			0x39,
-			0x40,
-			0x47,
-		},
-	},
-	{
-		.cd = 220,
-		.acl_val = 53,
-		.regs = {
-			0xC1, /* ACL Control2 Register */
-			0x47,
-			0x53,
-			0x13,
-			0x53,
-			0x00,
-			0x00,
-			0x02,
-			0xCF,
-			0x00,
-			0x00,
-			0x04,
-			0xFF,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x01,
-			0x08,
-			0x10,
-			0x17,
-			0x1E,
-			0x26,
-			0x2D,
+			0x21,
+			0x27,
+			0x2E,
 			0x34,
 			0x3B,
-			0x43,
-			0x4A,
-		},
-	},
-	{
-		.cd = 300,
-		.acl_val = 55,
-		.regs = {
-			0xC1, /* ACL Control2 Register */
-			0x47,
-			0x53,
-			0x13,
-			0x53,
-			0x00,
-			0x00,
-			0x02,
-			0xCF,
-			0x00,
-			0x00,
-			0x04,
-			0xFF,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x00,
-			0x01,
-			0x09,
-			0x11,
-			0x19,
-			0x21,
-			0x29,
-			0x31,
-			0x39,
 			0x41,
-			0x49,
-			0x51,
 		},
 	},
 };
@@ -567,11 +427,14 @@ static struct s6e8aa0_factory_calibration_info tuna_oled_factory_info_8500k = {
 		 * Rx 0.66950, Ry 0.33100
 		 * Gx 0.18800, Gy 0.74350
 		 * Bx 0.14142, By 0.04258
+		 *
+		 * These values are adjusted down by x 0.9333 to bring
+		 * maximum brightness down from 300 cd/m2 to 280.
 		 */
 		.mult = {
-			2318372099U,
-			2117262806U,
-			1729744557U,
+			2163736680U,
+			1976041377U,
+			1614370595U,
 		},
 		.rshift = 31,
 	},
@@ -589,7 +452,6 @@ static struct panel_s6e8aa0_data tuna_oled_data = {
 	.factory_info = &tuna_oled_factory_info_8500k,
 	.acl_table = tuna_oled_acl,
 	.acl_table_size = ARRAY_SIZE(tuna_oled_acl),
-	.bl_acl_off = 30,
 };
 
 /* width: 58mm */
@@ -635,6 +497,11 @@ static struct omap_dss_device tuna_oled_device = {
 	},
 
 	.channel		= OMAP_DSS_CHANNEL_LCD,
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+	.skip_init              = true,
+#else
+	.skip_init              = false,
+#endif
 };
 
 static void tuna_hdmi_mux_init(void)

@@ -817,6 +817,7 @@ static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 	unsigned int max_cd = 0;
 	const struct s6e8aa0_acl_parameters *acl;
 
+	/* Quietly return if you don't have a table */
 	if (!pdata->acl_table_size)
 		return 0;
 
@@ -838,16 +839,15 @@ static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 		if (s6->acl_cur != acl->acl_val) {
 			s6e8aa0_write_block_nosync(dssdev, acl->regs,
 				sizeof(acl->regs));
+			s6e8aa0_write_reg(dssdev, 0xC0, 0x01); /* ACL ON */
+
 			s6->acl_cur = acl->acl_val;
 		}
-
-		if (s6->bl < pdata->bl_acl_off)
-			s6e8aa0_write_reg(dssdev, 0xC0, 0x00); /* ACL OFF */
-		else
-			s6e8aa0_write_reg(dssdev, 0xC0, 0x01); /* ACL ON */
 	} else {
-		s6->acl_cur = 0;
-		s6e8aa0_write_reg(dssdev, 0xC0, 0x00);
+		if (s6->acl_cur != 0) {
+			s6->acl_cur = 0;
+			s6e8aa0_write_reg(dssdev, 0xC0, 0x00); /* ACL OFF */
+		}
 	}
 	pr_debug("%s : cur_acl=%d, %d\n", __func__, s6->acl_cur,
 		s6->acl_enable);
@@ -1411,7 +1411,8 @@ static ssize_t acl_enable_store(struct device *dev,
 	return size;
 }
 
-static DEVICE_ATTR(acl_set, 0664, acl_enable_show, acl_enable_store);
+static DEVICE_ATTR(acl_set, S_IRUGO|S_IWUSR,
+		acl_enable_show, acl_enable_store);
 
 static const struct file_operations s6e8aa0_current_gamma_fops = {
 	.open = s6e8aa0_current_gamma_open,
@@ -1460,7 +1461,7 @@ static int s6e8aa0_probe(struct omap_dss_device *dssdev)
 	s6->bl = props.brightness;
 
 	if (!s6->pdata->seq_display_set || !s6->pdata->seq_etc_set
-		|| !s6->pdata->gamma_table || !s6->pdata->acl_table) {
+		|| !s6->pdata->gamma_table) {
 		dev_err(&dssdev->dev, "Invalid platform data\n");
 		ret = -EINVAL;
 		goto err;
@@ -1552,6 +1553,7 @@ static void s6e8aa0_config(struct omap_dss_device *dssdev)
 	s6e8aa0_write_sequence(dssdev, pdata->seq_display_set,
 			       pdata->seq_display_set_size);
 
+	s6->acl_cur = 0; /* make sure acl table gets written */
 	s6e8aa0_update_brightness(dssdev);
 
 	s6e8aa0_write_sequence(dssdev, pdata->seq_etc_set,
@@ -1562,6 +1564,9 @@ static int s6e8aa0_power_on(struct omap_dss_device *dssdev)
 {
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
 	int ret = 0;
+
+	/* At power on the first vsync has not been received yet*/
+	dssdev->first_vsync = false;
 
 	if (s6->enabled != 1) {
 		if (s6->pdata->set_power)
@@ -1574,16 +1579,21 @@ static int s6e8aa0_power_on(struct omap_dss_device *dssdev)
 		}
 
 		/* reset s6e8aa0 bridge */
-		s6e8aa0_hw_reset(dssdev);
+		if(!dssdev->skip_init){
+			s6e8aa0_hw_reset(dssdev);
 
-		/* XXX */
-		msleep(100);
-		s6e8aa0_config(dssdev);
+			/* XXX */
+			msleep(100);
+			s6e8aa0_config(dssdev);
 
-		dsi_video_mode_enable(dssdev, 0x3E); /* DSI_DT_PXLSTREAM_24BPP_PACKED; */
+			dsi_video_mode_enable(dssdev, 0x3E); /* DSI_DT_PXLSTREAM_24BPP_PACKED; */
+		}
 
 		s6->enabled = 1;
 	}
+
+	if(dssdev->skip_init)
+		dssdev->skip_init = false;
 
 err:
 	return ret;

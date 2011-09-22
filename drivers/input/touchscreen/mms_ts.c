@@ -66,7 +66,7 @@ enum {
 static bool mms_force_reflash = false;
 module_param_named(force_reflash, mms_force_reflash, bool, S_IWUSR | S_IRUGO);
 
-static bool mms_flash_from_probe = true;
+static bool mms_flash_from_probe;
 module_param_named(flash_from_probe, mms_flash_from_probe, bool,
 		   S_IWUSR | S_IRUGO);
 
@@ -154,7 +154,7 @@ static irqreturn_t mms_ts_interrupt(int irq, void *dev_id)
 #endif
 	for (i = 0; i < sz; i += FINGER_EVENT_SZ) {
 		u8 *tmp = &buf[i];
-		int id = tmp[0] & 0xf;
+		int id = (tmp[0] & 0xf) - 1;
 		int x = tmp[2] | ((tmp[1] & 0xf) << 8);
 		int y = tmp[3] | (((tmp[1] >> 4) & 0xf) << 8);
 
@@ -714,12 +714,13 @@ static int __devinit mms_ts_config(struct mms_ts_info *info, bool nowait)
 {
 	struct i2c_client *client = info->client;
 	int ret = 0;
+	const char *filename = info->pdata->fw_name ?: "mms144_ts.fw";
 
 	mms_pwr_on_reset(info);
 
 	if (nowait) {
 		const struct firmware *fw;
-		info->fw_name = kstrdup("melfas/mms144_ts.fw", GFP_KERNEL);
+		info->fw_name = kasprintf(GFP_KERNEL, "melfas/%s", filename);
 		ret = request_firmware(&fw, info->fw_name, &client->dev);
 		if (ret) {
 			dev_err(&client->dev,
@@ -728,7 +729,7 @@ static int __devinit mms_ts_config(struct mms_ts_info *info, bool nowait)
 		}
 		mms_ts_fw_load(fw, info);
 	} else {
-		info->fw_name = kstrdup("mms144_ts.fw", GFP_KERNEL);
+		info->fw_name = kstrdup(filename, GFP_KERNEL);
 		ret = request_firmware_nowait(THIS_MODULE, true, info->fw_name,
 					      &client->dev, GFP_KERNEL,
 					      info, mms_ts_fw_load);

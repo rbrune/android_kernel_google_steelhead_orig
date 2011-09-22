@@ -155,10 +155,7 @@ int abe_load_fw_param(u32 *ABE_FW)
 			       smem_size);
 		omap_abe_mem_write(abe, OMAP_ABE_DMEM, 0, dmem_ptr,
 			       dmem_size);
-		omap_abe_mem_write(abe, OMAP_ABE_DMEM,
-				OMAP_ABE_D_FASTCOUNTER_ADDR,
-				&data,
-				OMAP_ABE_D_FASTCOUNTER_SIZE);
+
 		/* Restore the event Generator status */
 		omap_abe_start_event_generator(abe);
 	} else {
@@ -170,11 +167,22 @@ int abe_load_fw_param(u32 *ABE_FW)
 			       smem_size);
 		omap_abe_mem_write(abe, OMAP_ABE_DMEM, 0, dmem_ptr,
 			       dmem_size);
-		omap_abe_mem_write(abe, OMAP_ABE_DMEM,
-			       OMAP_ABE_D_FASTCOUNTER_ADDR,
-			       &data,
-			       OMAP_ABE_D_FASTCOUNTER_SIZE);
 	}
+	omap_abe_mem_write(abe, OMAP_ABE_DMEM,
+		       OMAP_ABE_D_FASTCOUNTER_ADDR,
+		       &data,
+		       OMAP_ABE_D_FASTCOUNTER_SIZE);
+
+	/* Update Saturation threshold */
+	data = 0x00700000;
+	omap_abe_mem_write(abe, OMAP_ABE_SMEM,
+		       OMAP_ABE_S_SATURATION_EQ_ADDR,
+		       &data, 4);
+	data = 0x00900000;
+	omap_abe_mem_write(abe, OMAP_ABE_SMEM,
+		       OMAP_ABE_S_SATURATION_EQ_ADDR + 4,
+		       &data, 4);
+
 	abe->warm_boot = 1;
 	return 0;
 }
@@ -252,7 +260,7 @@ void omap_abe_build_scheduler_table(struct omap_abe *abe)
 	     i < sizeof(abe->MultiFrame); i++)
 		*ptr++ = 0;
 
-	abe->MultiFrame[0][2] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_VX_DL)*/;
+	abe->MultiFrame[0][2] = ABE_TASK_ID(C_ABE_FW_TASK_IO_VX_DL);
 	abe->MultiFrame[0][3] = ABE_TASK_ID(C_ABE_FW_TASK_ASRC_VX_DL_8);
 
 	abe->MultiFrame[1][3] = ABE_TASK_ID(C_ABE_FW_TASK_VX_DL_8_48_FIR);
@@ -286,16 +294,11 @@ void omap_abe_build_scheduler_table(struct omap_abe *abe)
 	abe->MultiFrame[7][3] = ABE_TASK_ID(C_ABE_FW_TASK_DBG_SYNC);
 	abe->MultiFrame[7][5] = ABE_TASK_ID(C_ABE_FW_TASK_ECHO_REF_SPLIT);
 
-	abe->MultiFrame[8][2] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC1_96_48_LP);
-	abe->MultiFrame[8][4] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC1_SPLIT);
+	abe->MultiFrame[9][2] = ABE_TASK_ID(C_ABE_FW_TASK_CHECK_IIR_RIGHT);
 
-	abe->MultiFrame[9][2] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC2_96_48_LP);
-	abe->MultiFrame[9][4] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC2_SPLIT);
 	abe->MultiFrame[9][6] = 0;
 	abe->MultiFrame[9][7] = ABE_TASK_ID(C_ABE_FW_TASK_IHF_48_96_LP);
 
-	abe->MultiFrame[10][2] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC3_96_48_LP);
-	abe->MultiFrame[10][4] = ABE_TASK_ID(C_ABE_FW_TASK_DMIC3_SPLIT);
 	abe->MultiFrame[10][7] = ABE_TASK_ID(C_ABE_FW_TASK_IHF_48_96_LP);
 
 	abe->MultiFrame[11][2] = ABE_TASK_ID(C_ABE_FW_TASK_AMIC_96_48_LP);
@@ -311,14 +314,14 @@ void omap_abe_build_scheduler_table(struct omap_abe *abe)
 	abe->MultiFrame[13][5] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_BT_VX_DL)*/;
 
 	abe->MultiFrame[14][3] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_DMIC)*/;
-	abe->MultiFrame[14][4] = ABE_TASK_ID(C_ABE_FW_TASK_BT_DL_48_8);
+	abe->MultiFrame[14][4] = ABE_TASK_ID(C_ABE_FW_TASK_BT_DL_48_8_FIR);
 
 	abe->MultiFrame[15][0] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_MM_EXT_OUT)*/;
 	abe->MultiFrame[15][3] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_BT_VX_UL)*/;
 	abe->MultiFrame[15][6] = ABE_TASK_ID(C_ABE_FW_TASK_ASRC_BT_UL_8);
 
 	abe->MultiFrame[16][2] = ABE_TASK_ID(C_ABE_FW_TASK_ASRC_VX_UL_8);
-	abe->MultiFrame[16][3] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_VX_UL)*/;
+	abe->MultiFrame[16][3] = ABE_TASK_ID(C_ABE_FW_TASK_IO_VX_UL);
 
 	abe->MultiFrame[17][2] = ABE_TASK_ID(C_ABE_FW_TASK_BT_UL_8_48);
 	abe->MultiFrame[17][3] = 0/*ABE_TASK_ID(C_ABE_FW_TASK_IO_MM_UL2)*/;
@@ -345,7 +348,7 @@ void omap_abe_build_scheduler_table(struct omap_abe *abe)
 	abe->MultiFrame[22][4] = ABE_TASK_ID(C_ABE_FW_TASK_MM_EXT_IN_SPLIT);
 
 	abe->MultiFrame[23][0] = ABE_TASK_ID(C_ABE_FW_TASK_GAIN_UPDATE);
-	abe->MultiFrame[23][2] = ABE_TASK_ID(C_ABE_FW_TASK_CHECK_IIR);
+	abe->MultiFrame[23][2] = ABE_TASK_ID(C_ABE_FW_TASK_CHECK_IIR_LEFT);
 
 	omap_abe_mem_write(abe, OMAP_ABE_DMEM, OMAP_ABE_D_MULTIFRAME_ADDR,
 		       (u32 *) abe->MultiFrame, sizeof(abe->MultiFrame));
