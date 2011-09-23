@@ -373,13 +373,6 @@ config OMAP_ALLOW_OSWR
 	  Which means the Logic of power domains can be lost now
 	  unlike the CSWR wherein the logic is retained
 
-config OMAP4_DISABLE_L3_SCALING
-	bool  "Disable L3 scaling"
-	depends on ARCH_OMAP4
-	default n
-	help
-	  Select this option to disable L3 clock scaling on OMAP4.
-
 endmenu
 
 endif

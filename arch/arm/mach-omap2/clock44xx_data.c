@@ -3526,8 +3526,25 @@ static struct omap_clk omap44xx_clks[] = {
 #define DPLL_CORE_M6_OPP100_RATE	266600000
 #define DPLL_CORE_M7_OPP50_RATE		133333333
 #define DPLL_CORE_M7_OPP100_RATE	266666666
+
+#ifndef CONFIG_MACH_STEELHEAD
 #define DPLL_PER_M3_OPP50_RATE		192000000
 #define DPLL_PER_M3_OPP100_RATE		256000000
+#else
+/*
+ * Steelhead devices need to generate a external reference frequency for their
+ * TAS5713 audio amp which stays stable all of the time.  Because of how the
+ * virt_l3_ck works, the standard Linux clock framework cannot prevent the power
+ * management code from changing the frequency of the M3 output of DPLL_PER
+ * which the external reference depends on to operate properly.  For now, we
+ * just make certain that the 2 OPPs defined for l3_main_1 end up picking the
+ * same frequency for PER_M3 which we fix at the frequency we need to produce
+ * 48KHz audio.
+ */
+#define DPLL_PER_M3_OPP50_RATE		61440000
+#define DPLL_PER_M3_OPP100_RATE		61440000
+#endif
+
 #define DPLL_PER_M6_OPP50_RATE		192000000
 #define DPLL_PER_M6_OPP100_RATE		384000000
 
