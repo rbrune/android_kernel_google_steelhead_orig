@@ -34,6 +34,7 @@ extern void __init steelhead_platform_init_counter(void);
 extern int __init steelhead_init_wlan(void);
 extern int __init steelhead_init_bluetooth(void);
 extern void __init omap4_steelhead_emif_init(void);
+extern void __init omap4_steelhead_ehci_init(void);
 
 /* in board-tuna-bluetooth.c, which we share */
 extern void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);

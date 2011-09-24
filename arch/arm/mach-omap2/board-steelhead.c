@@ -72,9 +72,6 @@
 
 #define TPS62361_GPIO		7
 
-#define GPIO_HUB_POWER		1
-#define GPIO_HUB_NRESET		62
-
 #define STEELHEAD_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
 #define STEELHEAD_RAMCONSOLE_SIZE	SZ_2M
 
@@ -220,60 +217,6 @@ static void __init steelhead_init_early(void)
 {
 	omap2_init_common_infrastructure();
 	omap2_init_common_devices(NULL, NULL);
-}
-
-static const struct usbhs_omap_board_data usbhs_bdata __initconst = {
-	.port_mode[0] = OMAP_EHCI_PORT_MODE_PHY,
-	.port_mode[1] = OMAP_USBHS_PORT_MODE_UNUSED,
-	.port_mode[2] = OMAP_USBHS_PORT_MODE_UNUSED,
-	.phy_reset  = false,
-	.reset_gpio_port[0]  = -EINVAL,
-	.reset_gpio_port[1]  = -EINVAL,
-	.reset_gpio_port[2]  = -EINVAL
-};
-
-static struct gpio steelhead_ehci_gpios[] __initdata = {
-	{ GPIO_HUB_POWER,	GPIOF_OUT_INIT_LOW,  "hub_power"  },
-	{ GPIO_HUB_NRESET,	GPIOF_OUT_INIT_LOW,  "hub_nreset" },
-};
-
-static void __init omap4_ehci_init(void)
-{
-	int ret;
-	struct clk *phy_ref_clk;
-
-	/* FREF_CLK3 provides the 38.4 MHz reference clock to the PHY */
-	phy_ref_clk = clk_get(NULL, "auxclk3_ck");
-	if (IS_ERR(phy_ref_clk)) {
-		pr_err("Cannot request auxclk3\n");
-		goto err_clk_get;
-	}
-	clk_set_rate(phy_ref_clk, 38400000);
-	clk_enable(phy_ref_clk);
-
-	/* disable the power to the usb hub prior to init and reset phy+hub */
-	ret = gpio_request_array(steelhead_ehci_gpios,
-				 ARRAY_SIZE(steelhead_ehci_gpios));
-	if (ret) {
-		pr_err("Unable to initialize EHCI power/reset\n");
-		goto err_gpio_request_array;
-	}
-	gpio_export(GPIO_HUB_POWER, 0);
-	gpio_export(GPIO_HUB_NRESET, 0);
-	gpio_set_value(GPIO_HUB_NRESET, 1);
-
-	usbhs_init(&usbhs_bdata);
-
-	/* enable power to hub */
-	gpio_set_value(GPIO_HUB_POWER, 1);
-	return;
-
-err_gpio_request_array:
-	clk_put(phy_ref_clk);
-err_clk_get:
-	pr_err("Unable to initialize EHCI power/reset\n");
-	return;
-
 }
 
 static struct omap_musb_board_data musb_board_data = {
@@ -1244,7 +1187,7 @@ static void __init steelhead_init(void)
 	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
 	board_serial_init();
 	omap4_twl6030_hsmmc_init(mmc);
-	omap4_ehci_init();
+	omap4_steelhead_ehci_init();
 	usb_musb_init(&musb_board_data);
 	omap4_steelhead_create_board_props();
 	omap_dmm_init();
