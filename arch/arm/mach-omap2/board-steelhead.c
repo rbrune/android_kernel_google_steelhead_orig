@@ -282,6 +282,12 @@ static int __init omap4_twl6030_hsmmc_init(struct omap2_hsmmc_info *controllers)
 	return 0;
 }
 
+static struct regulator_init_data steelhead_vaux1 = {
+	.constraints = {
+		.valid_ops_mask	 = REGULATOR_CHANGE_STATUS,
+	},
+};
+
 static struct regulator_init_data steelhead_vaux2 = {
 	.constraints = {
 		.min_uV			= 1200000,
@@ -337,6 +343,12 @@ static struct regulator_init_data steelhead_vpp = {
 	},
 };
 
+static struct regulator_init_data steelhead_vusim = {
+	.constraints = {
+		.valid_ops_mask	= REGULATOR_CHANGE_STATUS,
+	},
+};
+
 static struct regulator_init_data steelhead_vana = {
 	.constraints = {
 		.min_uV			= 2100000,
@@ -345,6 +357,7 @@ static struct regulator_init_data steelhead_vana = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.always_on	= true,
 	},
 };
 
@@ -431,6 +444,19 @@ static struct regulator_init_data steelhead_vmem = {
 	},
 };
 
+static struct regulator_init_data steelhead_v2v1 = {
+	.constraints = {
+		.min_uV			= 2100000,
+		.max_uV			= 2100000,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask		= REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on		= true,
+	},
+};
+
+
 static struct twl4030_platform_data steelhead_twldata = {
 	.irq_base	= TWL6030_IRQ_BASE,
 	.irq_end	= TWL6030_IRQ_END,
@@ -438,10 +464,12 @@ static struct twl4030_platform_data steelhead_twldata = {
 	/* Regulators */
 	.vmmc		= &steelhead_vmmc,
 	.vpp		= &steelhead_vpp,
+	.vusim		= &steelhead_vusim,
 	.vana		= &steelhead_vana,
 	.vcxio		= &steelhead_vcxio,
 	.vdac		= &steelhead_vdac,
 	.vusb		= &steelhead_vusb,
+	.vaux1		= &steelhead_vaux1,
 	.vaux2		= &steelhead_vaux2,
 	.vaux3		= &steelhead_vaux3,
 	.clk32kg	= &steelhead_clk32kg,
@@ -450,6 +478,7 @@ static struct twl4030_platform_data steelhead_twldata = {
 	/* SMPS */
 	.vdd3		= &steelhead_vdd3,
 	.vmem		= &steelhead_vmem,
+	.v2v1		= &steelhead_v2v1,
 };
 
 static struct omap_device_pad serial3_pads[] __initdata = {
