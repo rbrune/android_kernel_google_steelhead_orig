@@ -104,27 +104,28 @@ static struct steelhead_gpio_reservation hwrev_gpios[] = {
 		.gpio_id = HW_REV_0_GPIO_ID,
 		.gpio_name = "board_id_0",
 		.mux_name = "fref_clk2_out.gpio_182",
-		.pin_mode = OMAP_PIN_INPUT,
+		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
 		.init_state = GPIOF_IN,
 	},
 	{
 		.gpio_id = HW_REV_1_GPIO_ID,
 		.gpio_name = "board_id_1",
 		.mux_name = "gpmc_ncs4.gpio_101",
-		.pin_mode = OMAP_PIN_INPUT,
+		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
 		.init_state = GPIOF_IN,
 	},
 	{
 		.gpio_id = HW_REV_2_GPIO_ID,
 		.gpio_name = "board_id_2",
 		.mux_name = "kpd_col3.gpio_171",
-		.pin_mode = OMAP_PIN_INPUT,
+		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
 		.init_state = GPIOF_IN,
 	},
 };
 
 static const char const *omap4_steelhead_hw_name[] = {
-	[STEELHEAD_REV_PRE_EVT] = "Steelhead pre-EVT",
+	[STEELHEAD_REV_ALPHA] = "Steelhead ALPHA",
+	[STEELHEAD_REV_EVT]   = "Steelhead EVT",
 };
 
 static const char *omap4_steelhead_hw_rev_name(void)
@@ -154,6 +155,7 @@ static void __init omap4_steelhead_init_hw_rev(void)
 		pr_err("unable to reserve gpios for hw rev\n");
 		return;
 	}
+	steelhead_hw_rev = 0;
 
 	for (i = 0; i < ARRAY_SIZE(hwrev_gpios); i++)
 		steelhead_hw_rev |= gpio_get_value(hwrev_gpios[i].gpio_id) << i;
@@ -496,11 +498,13 @@ static struct omap_device_pad serial3_pads[] __initdata = {
 
 static inline void __init board_serial_init(void)
 {
+	/* uart1 is unused */
 	omap_serial_init_port_pads(0, NULL, 0, NULL);
-	/* port1 for bluetooth is done in board-steelhead-bluetooth.c */
+	/* uart2 for bluetooth is done in board-steelhead-bluetooth.c */
+
+	/* uart3 is for kernel console */
 	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
-			NULL);
-	omap_serial_init_port_pads(3, NULL, 0, NULL);
+				   NULL);
 }
 
 int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
@@ -1223,7 +1227,10 @@ static void __init steelhead_init(void)
 	omap4_steelhead_display_init();
 	omap4_steelhead_nfc_init();
 
-	if (cpu_is_omap446x()) {
+	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA) {
+		steelhead_vmem.constraints.always_on = true;
+		steelhead_vdd3.constraints.always_on = true;
+	} else {
 		int status;
 
 		/* Vsel0 = gpio, vsel1 = gnd */
@@ -1232,11 +1239,6 @@ static void __init steelhead_init(void)
 						   -1);
 		if (status)
 			pr_err("TPS62361 initialization failed: %d\n", status);
-
-	} else {
-		steelhead_vmem.constraints.always_on = true;
-		steelhead_vdd3.constraints.always_on = true;
-
 	}
 	if (enable_sr)
 		omap_enable_smartreflex_on_init();

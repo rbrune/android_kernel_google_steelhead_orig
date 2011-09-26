@@ -43,7 +43,8 @@ extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
 extern void steelhead_set_counter_slew_rate(s32 correction);
 
-#define STEELHEAD_REV_PRE_EVT 0x3
+#define STEELHEAD_REV_ALPHA   0x0
+#define STEELHEAD_REV_EVT     0x1
 extern int steelhead_hw_rev;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG

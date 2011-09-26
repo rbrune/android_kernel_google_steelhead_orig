@@ -79,9 +79,8 @@ void __init omap4_steelhead_ehci_init(void)
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
 
 	/* Older boards used active high for enable */
-	if (cpu_is_omap443x()) {
+	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA)
 		steelhead_ethernet_gpios[0].flags = GPIOF_OUT_INIT_LOW;
-	}
 
 	ret = gpio_request_array(steelhead_ethernet_gpios,
 				 ARRAY_SIZE(steelhead_ethernet_gpios));
@@ -112,7 +111,7 @@ void __init omap4_steelhead_ehci_init(void)
 	udelay(100);
 
 	/* enable 3.3V power */
-	if (cpu_is_omap443x()) {
+	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA) {
 		/* Older boards used active high for enable */
 		gpio_set_value(GPIO_ETHERNET_NENABLE, 1);
 	} else {

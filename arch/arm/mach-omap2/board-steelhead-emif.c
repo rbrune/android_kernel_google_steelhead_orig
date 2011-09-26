@@ -55,7 +55,7 @@ static __initdata struct emif_device_details emif_devices = {
  *
  * Same devices installed on EMIF1 and EMIF2
  */
-static __initdata struct emif_device_details pre_evt_emif_devices = {
+static __initdata struct emif_device_details alpha_emif_devices = {
 	.cs0_device = &lpddr2_elpida_2G_S4_dev,
 	.cs1_device = &lpddr2_elpida_2G_S4_dev
 };
@@ -63,9 +63,9 @@ static __initdata struct emif_device_details pre_evt_emif_devices = {
 
 void __init omap4_steelhead_emif_init(void)
 {
-	if (steelhead_hw_rev == STEELHEAD_REV_PRE_EVT)
-		omap_emif_setup_device_details(&pre_evt_emif_devices,
-					       &pre_evt_emif_devices);
+	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA)
+		omap_emif_setup_device_details(&alpha_emif_devices,
+					       &alpha_emif_devices);
 	else
 		omap_emif_setup_device_details(&emif_devices, &emif_devices);
 }
