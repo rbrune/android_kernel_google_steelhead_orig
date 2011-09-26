@@ -496,6 +496,19 @@ static struct omap_device_pad serial3_pads[] __initdata = {
 	},
 };
 
+static struct omap_device_pad serial4_pads[] __initdata = {
+	{
+		.name   = "uart4_rx.uart4_rx",
+		.flags  = OMAP_DEVICE_PAD_REMUX | OMAP_DEVICE_PAD_WAKEUP,
+		.enable = OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+		.idle   = OMAP_PIN_INPUT | OMAP_MUX_MODE0,
+	},
+	{
+		.name   = "uart4_tx.uart4_tx",
+		.enable = OMAP_PIN_OUTPUT | OMAP_MUX_MODE0,
+	},
+};
+
 static inline void __init board_serial_init(void)
 {
 	/* uart1 is unused */
@@ -504,6 +517,9 @@ static inline void __init board_serial_init(void)
 
 	/* uart3 is for kernel console */
 	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
+				   NULL);
+	/* uart4 is used for AVR programming */
+	omap_serial_init_port_pads(3, serial4_pads, ARRAY_SIZE(serial4_pads),
 				   NULL);
 }
 
