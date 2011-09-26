@@ -63,19 +63,19 @@ void __init omap4_steelhead_ehci_init(void)
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
 	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat0",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat1",
+	omap_mux_init_signal("usbb1_ulpitll_dat1.usbb1_ulpiphy_dat1",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat2",
+	omap_mux_init_signal("usbb1_ulpitll_dat2.usbb1_ulpiphy_dat2",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat3",
+	omap_mux_init_signal("usbb1_ulpitll_dat3.usbb1_ulpiphy_dat3",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat4",
+	omap_mux_init_signal("usbb1_ulpitll_dat4.usbb1_ulpiphy_dat4",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat5",
+	omap_mux_init_signal("usbb1_ulpitll_dat5.usbb1_ulpiphy_dat5",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat6",
+	omap_mux_init_signal("usbb1_ulpitll_dat6.usbb1_ulpiphy_dat6",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
-	omap_mux_init_signal("usbb1_ulpitll_dat0.usbb1_ulpiphy_dat7",
+	omap_mux_init_signal("usbb1_ulpitll_dat7.usbb1_ulpiphy_dat7",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
 
 	/* Older boards used active high for enable */
