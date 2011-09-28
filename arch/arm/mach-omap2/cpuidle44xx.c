@@ -18,6 +18,7 @@
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <linux/delay.h>
+#include <linux/cpu_pm.h>
 
 #include <asm/cacheflush.h>
 #include <asm/proc-fns.h>
@@ -137,6 +138,13 @@ static void omap4_update_actual_state(struct cpuidle_device *dev,
 	}
 }
 
+static bool omap4_gic_interrupt_pending(void)
+{
+	void __iomem *gic_cpu = omap4_get_gic_cpu_base();
+
+	return (__raw_readl(gic_cpu + GIC_CPU_HIGHPRI) != 0x3FF);
+}
+
 /**
  * omap4_wfi_until_interrupt
  *
@@ -149,12 +157,10 @@ static void omap4_update_actual_state(struct cpuidle_device *dev,
  */
 static void omap4_wfi_until_interrupt(void)
 {
-	void __iomem *gic_cpu = omap4_get_gic_cpu_base();
-
 retry:
 	omap_do_wfi();
 
-	if (__raw_readl(gic_cpu + GIC_CPU_HIGHPRI) == 0x3FF)
+	if (!omap4_gic_interrupt_pending())
 		goto retry;
 }
 
@@ -295,6 +301,8 @@ static void omap4_enter_idle_primary(struct omap4_processor_cx *cx)
 
 	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
 
+	cpu_pm_enter();
+
 	if (!keep_mpu_on) {
 		pwrdm_set_logic_retst(mpu_pd, cx->mpu_logic_state);
 		omap_set_pwrdm_state(mpu_pd, cx->mpu_state);
@@ -355,6 +363,8 @@ wake_cpu1:
 	}
 
 out:
+	cpu_pm_exit();
+
 	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
 }
 
@@ -367,6 +377,8 @@ out:
 static void omap4_enter_idle_secondary(int cpu)
 {
 	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
+
+	cpu_pm_enter();
 
 	pr_debug("%s: cpu1 down\n", __func__);
 	flush_cache_all();
@@ -383,6 +395,8 @@ static void omap4_enter_idle_secondary(int cpu)
 	gic_cpu_enable();
 
 	pr_debug("%s: cpu1 up\n", __func__);
+
+	cpu_pm_exit();
 
 	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
 }
@@ -455,6 +469,19 @@ static int omap4_enter_idle(struct cpuidle_device *dev,
 		idle = false;
 
 	if (!idle) {
+		omap4_cpu_update_state(cpu, NULL);
+		spin_unlock(&omap4_idle_lock);
+		goto out;
+	}
+
+	/*
+	 * If we go to sleep with an IPI pending, we will lose it.  Once we
+	 * reach this point, the other cpu is either already idle or will
+	 * shortly abort idle.  If it is already idle it can't send us an IPI,
+	 * so it is safe to check for pending IPIs here.  If it aborts idle
+	 * we will abort as well, and any future IPIs will be processed.
+	 */
+	if (omap4_gic_interrupt_pending()) {
 		omap4_cpu_update_state(cpu, NULL);
 		spin_unlock(&omap4_idle_lock);
 		goto out;

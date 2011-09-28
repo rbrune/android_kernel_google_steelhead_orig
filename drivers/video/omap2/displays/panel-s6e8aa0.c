@@ -167,6 +167,9 @@ struct s6e8aa0_data {
 
 	unsigned int acl_cur;
 	bool acl_enable;
+	u8 acl_average;
+	unsigned int elvss_cur_i;
+	u8 panel_id[3];
 };
 
 const u8 s6e8aa0_mtp_unlock[] = {
@@ -808,7 +811,7 @@ static void s6e8aa0_setup_gamma_regs(struct s6e8aa0_data *s6, u8 gamma_regs[],
 	}
 }
 
-static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
+static void s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 {
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
 	struct panel_s6e8aa0_data *pdata = s6->pdata;
@@ -819,7 +822,7 @@ static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 
 	/* Quietly return if you don't have a table */
 	if (!pdata->acl_table_size)
-		return 0;
+		return;
 
 	max_cd = pdata->acl_table[pdata->acl_table_size - 1].cd;
 
@@ -839,7 +842,8 @@ static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 		if (s6->acl_cur != acl->acl_val) {
 			s6e8aa0_write_block_nosync(dssdev, acl->regs,
 				sizeof(acl->regs));
-			s6e8aa0_write_reg(dssdev, 0xC0, 0x01); /* ACL ON */
+			s6e8aa0_write_reg(dssdev, 0xC0,
+				0x01 | (s6->acl_average << 4)); /* ACL ON */
 
 			s6->acl_cur = acl->acl_val;
 		}
@@ -851,13 +855,54 @@ static int s6e8aa0_update_acl_set(struct omap_dss_device *dssdev)
 	}
 	pr_debug("%s : cur_acl=%d, %d\n", __func__, s6->acl_cur,
 		s6->acl_enable);
-	return 0;
+	return;
+}
+
+static void s6e8aa0_update_elvss(struct omap_dss_device *dssdev)
+{
+	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
+	struct panel_s6e8aa0_data *pdata = s6->pdata;
+	u8 elvss_cmd[3];
+	u8 elvss;
+	u8 limit = 0x9F;
+	unsigned int i;
+	unsigned int cd;
+	unsigned int max_cd = 0;
+
+	if (!pdata->elvss_table_size)
+		return;
+
+	elvss_cmd[0] = 0xB1;
+	elvss_cmd[1] = 0x04;
+
+	max_cd = pdata->elvss_table[pdata->elvss_table_size - 1].cd;
+	cd = s6->bl * max_cd / 255;
+
+	for (i = 0; i < pdata->elvss_table_size - 1; i++)
+		if (cd <= pdata->elvss_table[i].cd)
+			break;
+
+	if (i == s6->elvss_cur_i)
+		return;
+
+	s6->elvss_cur_i = i;
+
+	elvss = s6->panel_id[2] + pdata->elvss_table[i].elvss_val;
+
+	if (elvss > limit)
+		elvss = limit;
+
+	elvss_cmd[2] = elvss;
+
+	s6e8aa0_write_block(dssdev, elvss_cmd, sizeof(elvss_cmd));
+	pr_debug("%s - brightness : %d, cd : %d, elvss : %02x\n",
+					__func__, s6->bl, cd, elvss);
+	return;
 }
 
 static int s6e8aa0_update_brightness(struct omap_dss_device *dssdev)
 {
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
-	int ret = 0;
 	u8 gamma_regs[NUM_GAMMA_REGS + 2];
 	u8 dy_regs[3][NUM_DY_REGS + 1];
 
@@ -874,12 +919,9 @@ static int s6e8aa0_update_brightness(struct omap_dss_device *dssdev)
 	s6e8aa0_write_block_nosync(dssdev, dy_regs[2], sizeof(dy_regs[2]));
 	s6e8aa0_write_reg(dssdev, 0xF7, 0x01);
 
-	ret = s6e8aa0_update_acl_set(dssdev);
-	if (ret != 0) {
-		pr_err("%s - s6e8aa0_update_acl_set() failed\n", __func__);
-		return -1;
-	}
-	return ret;
+	s6e8aa0_update_acl_set(dssdev);
+	s6e8aa0_update_elvss(dssdev);
+	return 0;
 }
 
 static u64 s6e8aa0_voltage_lookup(struct s6e8aa0_data *s6, int c, u32 v)
@@ -1085,6 +1127,22 @@ static s16 s9_to_s16(s16 v)
 static int mtp_reg_index(int c, int i)
 {
 	return c * (V_COUNT + 1) + i;
+}
+
+static void s6e8aa0_read_id_info(struct s6e8aa0_data *s6)
+{
+	struct omap_dss_device *dssdev = s6->dssdev;
+	int ret;
+	u8 cmd = 0xD1;
+
+	dsi_vc_set_max_rx_packet_size(dssdev, 1, 3);
+	ret = s6e8aa0_read_block(dssdev, cmd, s6->panel_id,
+					ARRAY_SIZE(s6->panel_id));
+	dsi_vc_set_max_rx_packet_size(dssdev, 1, 1);
+	if (ret < 0) {
+		pr_err("%s: Failed to read id data\n", __func__);
+		return;
+	}
 }
 
 static void s6e8aa0_read_mtp_info(struct s6e8aa0_data *s6, int b)
@@ -1374,7 +1432,7 @@ err:
 static ssize_t acl_enable_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct omap_dss_device *dssdev = to_dss_device(dev);
+	struct omap_dss_device *dssdev = dev_get_drvdata(dev);
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
 
 	snprintf(buf, PAGE_SIZE, "%d\n", s6->acl_enable);
@@ -1385,7 +1443,7 @@ static ssize_t acl_enable_show(struct device *dev,
 static ssize_t acl_enable_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
 {
-	struct omap_dss_device *dssdev = to_dss_device(dev);
+	struct omap_dss_device *dssdev = dev_get_drvdata(dev);
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
 	long value;
 	bool enable;
@@ -1413,6 +1471,61 @@ static ssize_t acl_enable_store(struct device *dev,
 
 static DEVICE_ATTR(acl_set, S_IRUGO|S_IWUSR,
 		acl_enable_show, acl_enable_store);
+
+
+static ssize_t acl_average_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct omap_dss_device *dssdev = dev_get_drvdata(dev);
+	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
+
+	snprintf(buf, PAGE_SIZE, "%d\n", s6->acl_average);
+
+	return strlen(buf);
+}
+
+static ssize_t acl_average_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct omap_dss_device *dssdev = dev_get_drvdata(dev);
+	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
+	long value;
+	int rc;
+
+	rc = strict_strtol(buf, 0, &value);
+
+	if (rc < 0)
+		return rc;
+
+	if (value < 0 || value > 7)
+		return -EINVAL;
+
+	mutex_lock(&s6->lock);
+	if (s6->acl_average != value) {
+		dsi_bus_lock(dssdev);
+
+		s6->acl_average = value;
+		s6->acl_cur = 0;
+		s6e8aa0_update_acl_set(dssdev);
+
+		dsi_bus_unlock(dssdev);
+	}
+	mutex_unlock(&s6->lock);
+	return size;
+}
+
+static DEVICE_ATTR(acl_average, S_IRUGO|S_IWUSR,
+		acl_average_show, acl_average_store);
+
+static struct attribute *s6e8aa0_bl_attributes[] = {
+	&dev_attr_acl_set.attr,
+	&dev_attr_acl_average.attr,
+	NULL
+};
+
+static const struct attribute_group s6e8aa0_bl_attr_group = {
+	.attrs = s6e8aa0_bl_attributes,
+};
 
 static const struct file_operations s6e8aa0_current_gamma_fops = {
 	.open = s6e8aa0_current_gamma_open,
@@ -1503,10 +1616,12 @@ static int s6e8aa0_probe(struct omap_dss_device *dssdev)
 
 	s6->acl_enable = true;
 	s6->acl_cur = 0;
+	s6->acl_average = s6->pdata->acl_average;
+	s6->elvss_cur_i = ~0;
 
-	ret = device_create_file(&dssdev->dev, &dev_attr_acl_set);
+	ret = sysfs_create_group(&s6->bldev->dev.kobj, &s6e8aa0_bl_attr_group);
 	if (ret < 0) {
-		dev_err(&dssdev->dev, "failed to add 'acl_set' sysfs entry\n");
+		dev_err(&dssdev->dev, "failed to add sysfs entries\n");
 		goto err_backlight_device_register;
 	}
 
@@ -1528,6 +1643,7 @@ err:
 static void s6e8aa0_remove(struct omap_dss_device *dssdev)
 {
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
+	sysfs_remove_group(&s6->bldev->dev.kobj, &s6e8aa0_bl_attr_group);
 	debugfs_remove_recursive(s6->debug_dir);
 	backlight_device_unregister(s6->bldev);
 	mutex_destroy(&s6->lock);
@@ -1545,6 +1661,7 @@ static void s6e8aa0_config(struct omap_dss_device *dssdev)
 	struct s6e8aa0_data *s6 = dev_get_drvdata(&dssdev->dev);
 	struct panel_s6e8aa0_data *pdata = s6->pdata;
 	if (!s6->brightness_table) {
+		s6e8aa0_read_id_info(s6);
 		s6e8aa0_read_mtp_info(s6, 0);
 		s6e8aa0_read_mtp_info(s6, 1);
 		s6e8aa0_adjust_brightness_from_mtp(s6);
@@ -1553,7 +1670,8 @@ static void s6e8aa0_config(struct omap_dss_device *dssdev)
 	s6e8aa0_write_sequence(dssdev, pdata->seq_display_set,
 			       pdata->seq_display_set_size);
 
-	s6->acl_cur = 0; /* make sure acl table gets written */
+	s6->acl_cur = 0; /* make sure acl table and elvss value gets written */
+	s6->elvss_cur_i = ~0;
 	s6e8aa0_update_brightness(dssdev);
 
 	s6e8aa0_write_sequence(dssdev, pdata->seq_etc_set,
