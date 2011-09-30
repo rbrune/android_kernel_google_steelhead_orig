@@ -629,6 +629,14 @@ static void steelhead_platform_init_tas5713_audio(void)
 				    "tas5713", false))
 		return;
 
+	/* Turn on the pins for McBSP2.  We will be using it to deliver I2S to
+	 * the TAS5713
+	 */
+	omap_mux_init_signal("abe_mcbsp2_clkx.abe_mcbsp2_clkx",
+			OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("abe_mcbsp2_dx.abe_mcbsp2_dx", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("abe_mcbsp2_fsx.abe_mcbsp2_fsx", OMAP_PIN_OUTPUT);
+
 	/* Make sure that McBSP2's internal clock selection is set to the output
 	 * of the ABE DPLL and not the PER DPLL.
 	 */
