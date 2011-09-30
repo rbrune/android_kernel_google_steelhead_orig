@@ -188,21 +188,6 @@ static int rx_hdlc_head_check(struct io_device *iod, char *buf, unsigned rest)
 		hdr->start = HDLC_START;
 		hdr->len = 0;
 
-		/* debug print */
-		switch (iod->format) {
-		case IPC_FMT:
-		case IPC_RAW:
-		case IPC_MULTI_RAW:
-		case IPC_RFS:
-			/* TODO: print buf...  */
-			break;
-
-		case IPC_CMD:
-		case IPC_BOOT:
-		case IPC_RAMDUMP:
-		default:
-			break;
-		}
 		buf += len;
 		done_len += len;
 		rest -= len; /* rest, call by value */
@@ -327,11 +312,8 @@ static int rx_iodev_skb_raw(struct io_device *iod)
 		else
 			skb->protocol = htons(ETH_P_IP);
 
-		if (iod->net_typ == UMTS_NETWORK)
-			err = netif_rx(skb);
-		else {
-			skb_push(skb, sizeof(struct ethhdr));
-			ehdr = (void *)skb->data;
+		if (iod->net_typ != UMTS_NETWORK) {
+			ehdr = (void *)skb_push(skb, sizeof(struct ethhdr));
 			memcpy(ehdr->h_dest, ndev->dev_addr, ETH_ALEN);
 			memcpy(ehdr->h_source, source, ETH_ALEN);
 			ehdr->h_proto = skb->protocol;
@@ -339,9 +321,9 @@ static int rx_iodev_skb_raw(struct io_device *iod)
 			skb_reset_mac_header(skb);
 
 			skb_pull(skb, sizeof(struct ethhdr));
-			err = netif_rx_ni(skb);
 		}
 
+		err = netif_rx_ni(skb);
 		if (err != NET_RX_SUCCESS)
 			dev_err(&ndev->dev, "rx error: %d\n", err);
 		return err;
@@ -490,10 +472,10 @@ data_check:
 
 exit:
 	/* free buffers. mipi-hsi re-use recv buf */
-
-	if (rest < 0) {
+	if (rest < 0)
 		err = -ERANGE;
 
+	if (err < 0) {
 		/* clear headers */
 		memset(&iod->h_data, 0x00, sizeof(struct header_data));
 
