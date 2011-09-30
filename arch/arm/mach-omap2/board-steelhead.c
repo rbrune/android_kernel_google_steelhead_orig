@@ -997,20 +997,26 @@ static void omap4_steelhead_hdmi_mux_init(void)
 		pr_err("gpio_request_one() of hdmi_ct_cp_hpd returned %d\n",
 		       err);
 
+	/* enable the HDMI level shifer output enable pin, but leave the level
+	 * shifter shut off until someone calls enable_hdmi_lc.
+	 */
+	err = omap_mux_init_gpio(HDMI_GPIO_LS_OE, OMAP_PIN_OUTPUT);
+	if (err)
+		pr_err("omap_mux_init_gpio() of HDMI_LS_OE returned %d\n", err);
+
+	err = gpio_request_one(HDMI_GPIO_LS_OE, GPIOF_OUT_INIT_LOW,
+				  "hdmi_gpio_ls_oe");
+	if (err)
+		pr_err("gpio_request_one() of hdmi_gpio_ls_oe returned %d\n",
+		       err);
 }
 
 /* enable level converter */
 static int omap4_steelhead_enable_hdmi_lc(struct omap_dss_device *dssdev)
 {
-	int status;
-
 	pr_info("%s:\n", __func__);
-	status = gpio_request_one(HDMI_GPIO_LS_OE, GPIOF_OUT_INIT_HIGH,
-				  "hdmi_gpio_ls_oe");
-	if (status)
-		pr_err("Cannot request HDMI GPIOs\n");
-
-	return status;
+	gpio_set_value(HDMI_GPIO_LS_OE, 1);
+	return 0;
 }
 
 /* disable level converter */
@@ -1018,7 +1024,6 @@ static void omap4_steelhead_disable_hdmi_lc(struct omap_dss_device *dssdev)
 {
 	pr_info("%s:\n", __func__);
 	gpio_set_value(HDMI_GPIO_LS_OE, 0);
-	gpio_free(HDMI_GPIO_LS_OE);
 }
 
 static struct omap_dss_device  omap4_steelhead_hdmi_device = {
