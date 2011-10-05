@@ -206,7 +206,7 @@ static void umts_modem_cfg_gpio(void)
 
 	if (gpio_flm_uart_sel) {
 		gpio_request(gpio_flm_uart_sel, "GPS_UART_SEL");
-		gpio_direction_output(gpio_reset_req_n, 1);
+		gpio_direction_output(gpio_flm_uart_sel, 1);
 	}
 
 	if (gpio_phone_active)
@@ -306,6 +306,13 @@ static struct modem_io_t cdma_io_devices[] = {
 		.name = "cdma_ramdump0",
 		.id = 0x1,
 		.format = IPC_RAMDUMP,
+		.io_type = IODEV_MISC,
+		.link = LINKDEV_DPRAM,
+	},
+	[10] = {
+		.name = "cdma_rmnet6", /* AT CMD io-device */
+		.id = 0x31,
+		.format = IPC_RAW,
 		.io_type = IODEV_MISC,
 		.link = LINKDEV_DPRAM,
 	},

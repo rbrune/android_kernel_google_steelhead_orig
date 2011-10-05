@@ -24,6 +24,7 @@
 #include <linux/ip.h>
 #include <linux/if_ether.h>
 #include <linux/etherdevice.h>
+#include <linux/ratelimit.h>
 
 #include <linux/platform_data/modem.h>
 #include "modem_prj.h"
@@ -57,8 +58,7 @@ struct rfs_hdr {
 
 static const char const *modem_state_name[] = {
 	[STATE_OFFLINE]     = "OFFLINE",
-	[STATE_CRASH_RESET] = "CRASH_RESET (silent)",
-	[STATE_CRASH_EXIT]  = "CRASH_EXIT (ramdump)",
+	[STATE_CRASH_EXIT]  = "CRASH_EXIT",
 	[STATE_BOOTING]     = "BOOTING",
 	[STATE_ONLINE]      = "ONLINE",
 };
@@ -177,7 +177,8 @@ static int rx_hdlc_head_check(struct io_device *iod, char *buf, unsigned rest)
 	if (!hdr->start) {
 		len = rx_hdlc_head_start_check(buf);
 		if (len < 0) {
-			pr_err("[MODEM_IF] Wrong HDLC start: 0x%x\n", *buf);
+			pr_err("[MODEM_IF] Wrong HDLC start: 0x%x(%s)\n",
+						*buf, iod->name);
 			return len; /*Wrong hdlc start*/
 		}
 
@@ -448,7 +449,8 @@ data_check:
 
 	err = len = rx_hdlc_tail_check(buf);
 	if (err < 0) {
-		pr_err("[MODEM_IF] Wrong HDLC end: 0x%x\n", *buf);
+		pr_err("[MODEM_IF] Wrong HDLC end: 0x%x(%s)\n",
+					*buf, iod->name);
 		goto exit;
 	}
 	pr_debug("[MODEM_IF] check len : %d, rest : %d (%d)\n", len, rest,
@@ -541,7 +543,7 @@ static void io_dev_modem_state_changed(struct io_device *iod,
 	iod->mc->phone_state = state;
 	pr_info("[MODEM_IF] %s state changed: %s\n", iod->name, modem_state_name[state]);
 
-	if ((state == STATE_CRASH_RESET) || (state == STATE_CRASH_EXIT))
+	if (state == STATE_CRASH_EXIT)
 		wake_up(&iod->wq);
 }
 
@@ -577,8 +579,7 @@ static unsigned int misc_poll(struct file *filp, struct poll_table_struct *wait)
 	if ((!skb_queue_empty(&iod->sk_rx_q))
 				&& (iod->mc->phone_state != STATE_OFFLINE))
 		return POLLIN | POLLRDNORM;
-	else if ((iod->mc->phone_state == STATE_CRASH_RESET) ||
-			(iod->mc->phone_state == STATE_CRASH_EXIT))
+	else if (iod->mc->phone_state == STATE_CRASH_EXIT)
 		return POLLHUP;
 	else
 		return 0;
@@ -606,6 +607,10 @@ static long misc_ioctl(struct file *filp, unsigned int cmd, unsigned long _arg)
 	case IOCTL_MODEM_FORCE_CRASH_EXIT:
 		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_FORCE_CRASH_EXIT\n");
 		return iod->mc->ops.modem_force_crash_exit(iod->mc);
+
+	case IOCTL_MODEM_DUMP_RESET:
+		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_FORCE_CRASH_EXIT\n");
+		return iod->mc->ops.modem_dump_reset(iod->mc);
 
 	case IOCTL_MODEM_BOOT_ON:
 		pr_debug("[MODEM_IF] misc_ioctl : IOCTL_MODEM_BOOT_ON\n");
@@ -655,8 +660,12 @@ static ssize_t misc_write(struct file *filp, const char __user * buf,
 
 	/* TODO - check here flow control for only raw data */
 
-	frame_len = count + SIZE_OF_HDLC_START + get_header_size(iod)
-				+ SIZE_OF_HDLC_END;
+	if (iod->format == IPC_BOOT || iod->format == IPC_RAMDUMP)
+		frame_len = count + get_header_size(iod);
+	else
+		frame_len = count + SIZE_OF_HDLC_START + get_header_size(iod)
+					+ SIZE_OF_HDLC_END;
+
 	skb = alloc_skb(frame_len, GFP_KERNEL);
 	if (!skb) {
 		pr_err("[MODEM_IF] fail alloc skb (%d)\n", __LINE__);
@@ -713,7 +722,9 @@ static ssize_t misc_read(struct file *filp, char *buf, size_t count,
 
 	skb = skb_dequeue(&iod->sk_rx_q);
 	if (!skb) {
-		pr_err("[MODEM_IF] no data from sk_rx_q\n");
+		printk_ratelimited(KERN_ERR "[MODEM_IF] no data from sk_rx_q, "
+			"modem_state : %s(%s)\n",
+			modem_state_name[iod->mc->phone_state], iod->name);
 		return 0;
 	}
 
@@ -721,13 +732,13 @@ static ssize_t misc_read(struct file *filp, char *buf, size_t count,
 		pr_err("[MODEM_IF] skb len is too big = %d,%d!(%d)\n",
 				count, skb->len, __LINE__);
 		dev_kfree_skb_any(skb);
-		return -EFAULT;
+		return -EIO;
 	}
 	pr_debug("[MODEM_IF] skb len : %d\n", skb->len);
 
 	pktsize = skb->len;
 	if (copy_to_user(buf, skb->data, pktsize) != 0)
-		return -EFAULT;
+		return -EIO;
 	dev_kfree_skb_any(skb);
 
 	pr_debug("[MODEM_IF] copy to user : %d\n", pktsize);

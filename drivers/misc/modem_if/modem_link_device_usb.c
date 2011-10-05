@@ -117,6 +117,7 @@ static void usb_rx_complete(struct urb *urb)
 
 	switch (urb->status) {
 	case 0:
+	case -ENOENT:
 		if (!urb->actual_length)
 			goto re_submit;
 		/* call iod recv */
@@ -158,10 +159,11 @@ static void usb_rx_complete(struct urb *urb)
 			}
 		}
 re_submit:
+		if (urb->status)
+			break;
 		usb_rx_submit(pipe_data, urb, GFP_ATOMIC);
 		return;
 	case -ESHUTDOWN:
-	case -ENOENT:
 	case -EPROTO:
 		break;
 	case -EOVERFLOW:
@@ -254,7 +256,7 @@ static int usb_tx_urb_with_skb(struct usb_link_device *usb_ld,
 				pr_err("host wakeup timeout !!\n");
 				SET_SLAVE_WAKEUP(usb_ld->pdata, 0);
 				pm_runtime_put_autosuspend(&usbdev->dev);
-				usb_change_modem_state(usb_ld, STATE_CRASH_RESET);
+				usb_change_modem_state(usb_ld, STATE_CRASH_EXIT);
 				return -1;
 			}
 			pr_err("host wakeup timeout ! retry..\n");
@@ -563,15 +565,13 @@ static int __devinit if_usb_probe(struct usb_interface *intf,
 				data_desc->endpoint[0].desc.bEndpointAddress);
 			pipe->tx_pipe = usb_sndbulkpipe(usbdev,
 				data_desc->endpoint[1].desc.bEndpointAddress);
-			pipe->rx_buf_size = le16_to_cpu(
-				data_desc->endpoint[0].desc.wMaxPacketSize);
+			pipe->rx_buf_size = 1024*4;
 		} else {
 			pipe->rx_pipe = usb_rcvbulkpipe(usbdev,
 				data_desc->endpoint[1].desc.bEndpointAddress);
 			pipe->tx_pipe = usb_sndbulkpipe(usbdev,
 				data_desc->endpoint[0].desc.bEndpointAddress);
-			pipe->rx_buf_size = le16_to_cpu(
-				data_desc->endpoint[1].desc.wMaxPacketSize);
+			pipe->rx_buf_size = 1024*4;
 		}
 
 		if (i == 0) {
@@ -692,6 +692,7 @@ static irqreturn_t usb_resume_irq(int irq, void *data)
 		if (usb_ld->resume_status == AP_INITIATED_RESUME)
 			wake_up(&usb_ld->l2_wait);
 		usb_ld->resume_status = CP_INITIATED_RESUME;
+		pm_runtime_mark_last_busy(&usb_ld->usbdev->dev);
 		pm_runtime_put_autosuspend(&usb_ld->usbdev->dev);
 	}
 
