@@ -611,6 +611,12 @@ config PN544
 	help
 	  NXP PN544 Near Field Communication controller support.
 
+config TMP101
+	bool "TI TMP101 Temperature Driver"
+	default n
+	help
+	  TI TMP101 digital temperature driver support.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
