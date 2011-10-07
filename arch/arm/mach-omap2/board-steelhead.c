@@ -888,6 +888,9 @@ static struct i2c_board_info __initdata steelhead_i2c_bus2[] = {
 		I2C_BOARD_INFO("vcnl4000", (0x13)),
 		.platform_data = &vcnl4000_pdata,
 	},
+	{
+		I2C_BOARD_INFO("tmp101", (0x48)),
+	},
 };
 
 static struct i2c_board_info __initdata steelhead_i2c_bus3[] = {
