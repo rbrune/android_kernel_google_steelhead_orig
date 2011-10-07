@@ -1138,6 +1138,12 @@ static ssize_t steelhead_soc_prod_id_show(struct kobject *kobj,
 	return sprintf(buf, "%08X-%08X\n", oid.id_1, oid.id_0);
 }
 
+static ssize_t steelhead_soc_msv_show(struct kobject *kobj,
+				      struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%08X\n", omap_ctrl_readl(0x013c));
+}
+
 static const char * const omap_types[] = {
 	[OMAP2_DEVICE_TYPE_TEST]	= "TST",
 	[OMAP2_DEVICE_TYPE_EMU]		= "EMU",
@@ -1161,6 +1167,7 @@ static STEELHEAD_ATTR_RO(soc, revision, steelhead_soc_revision_show);
 static STEELHEAD_ATTR_RO(soc, type, steelhead_soc_type_show);
 static STEELHEAD_ATTR_RO(soc, die_id, steelhead_soc_die_id_show);
 static STEELHEAD_ATTR_RO(soc, production_id, steelhead_soc_prod_id_show);
+static STEELHEAD_ATTR_RO(soc, msv, steelhead_soc_msv_show);
 
 static struct attribute *steelhead_soc_prop_attrs[] = {
 	&steelhead_soc_prop_attr_family.attr,
@@ -1168,6 +1175,7 @@ static struct attribute *steelhead_soc_prop_attrs[] = {
 	&steelhead_soc_prop_attr_type.attr,
 	&steelhead_soc_prop_attr_die_id.attr,
 	&steelhead_soc_prop_attr_production_id.attr,
+	&steelhead_soc_prop_attr_msv.attr,
 	NULL,
 };
 
