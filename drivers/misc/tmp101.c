@@ -47,7 +47,7 @@ struct tmp101_data {
 #define TMP101_CONFIG_RESOLUTION_1_BIT    (1 << 6)
 #define TMP101_CONFIG_OS_ALERT_BIT        (1 << 7)
 
-static int tmp101_read_temp(struct i2c_client *client)
+static int tmp101_read_temp(struct i2c_client *client, int* milli_celcius)
 {
 	int rc;
 	u8 temp[2];
@@ -73,9 +73,6 @@ static int tmp101_read_temp(struct i2c_client *client)
 	 * is the whole number, from -128 to 127.  The upper four
 	 * bits of the second byte holds the fractional component, from
 	 * 0 to .9375, in multiples of .0625.
-	 *
-	 * since we don't really need that much accuracy, for now we
-	 * just toss the fraction
 	 */
 	rc = i2c_smbus_read_i2c_block_data(client, TMP101_TEMPERATURE_REG_ADDR,
 					   sizeof(temp), temp);
@@ -84,35 +81,67 @@ static int tmp101_read_temp(struct i2c_client *client)
 		       __func__, rc);
 		return -ENODEV;
 	}
-	pr_info("%s: temp is %d degrees celsius, raw = [%x,%x]\n",
+	pr_debug("%s: temp is %d degrees celsius, raw = [%x,%x]\n",
 		__func__, temp[0], temp[0], temp[1]);
+
+	*milli_celcius = ((((((int)((s8)temp[0])) << 4) |
+					(temp[1] >> 4)) * 125) >> 1);
 
 	return 0;
 }
 
+static ssize_t tmp101_temperature_show(
+		struct device *d,
+		struct device_attribute *attr,
+		char *buf)
+{
+	struct i2c_client* client;
+	int milli_celcius;
+	client = container_of(d, struct i2c_client, dev);
+
+	if (tmp101_read_temp(client, &milli_celcius))
+		return snprintf(buf, PAGE_SIZE, "%s\n", "<read error>");
+	else
+		return snprintf(buf, PAGE_SIZE, "%d\n", milli_celcius);
+}
+
+static DEVICE_ATTR(temperature, S_IRUGO, tmp101_temperature_show, NULL);
 
 static int tmp101_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
-	struct tmp101_data *tmp101;
-	int rc;
+	struct tmp101_data *tmp101 = NULL;
+	int rc, milli_celcius;
 
 	pr_info("%s:\n", __func__);
 
-	rc = tmp101_read_temp(client);
+	rc = tmp101_read_temp(client, &milli_celcius);
 	if (rc)
-		return rc;
+		goto bailout;
 
 	tmp101 = kzalloc(sizeof(struct tmp101_data), GFP_KERNEL);
 	if (!tmp101) {
 		pr_err("%s: kzalloc failed for tmp101_data\n", __func__);
-		return -ENOMEM;
+		rc = -ENOMEM;
+		goto bailout;
+	}
+
+	/* sysfs entry to provide user space control to set deepcolor mode */
+	rc = device_create_file(&client->dev, &dev_attr_temperature);
+	if (rc) {
+		pr_err("%s: device_create_file failed for tmp101 (rc %d)\n",
+				__func__, rc);
+		goto bailout;
 	}
 
 	i2c_set_clientdata(client, tmp101);
 	tmp101->i2c_client = client;
 
 	return 0;
+
+bailout:
+	kfree(tmp101);
+	return rc;
 }
 
 
