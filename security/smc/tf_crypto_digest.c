@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2006-2010 Trusted Logic S.A.
+/**
+ * Copyright (c) 2011 Trusted Logic S.A.
  * All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -17,11 +17,11 @@
  * MA 02111-1307 USA
  */
 
-#include "scxlnx_defs.h"
-#include "scxlnx_util.h"
-#include "scx_public_crypto.h"
-#include "scx_public_dma.h"
-#include "scxlnx_mshield.h"
+#include "tf_defs.h"
+#include "tf_util.h"
+#include "tf_crypto.h"
+#include "tf_dma.h"
+#include "tf_zebra.h"
 
 #include <linux/io.h>
 #include <mach/io.h>
@@ -65,7 +65,7 @@
 /**
  * This structure contains the registers of the SHA1/MD5 HW accelerator.
  */
-struct Sha1Md5Reg_t {
+struct sha1_md5_reg {
 	u32 ODIGEST_A;		/* 0x00 Outer Digest A      */
 	u32 ODIGEST_B;		/* 0x04 Outer Digest B      */
 	u32 ODIGEST_C;		/* 0x08 Outer Digest C      */
@@ -117,7 +117,7 @@ struct Sha1Md5Reg_t {
 	u32 IRQENABLE;		/* 0x11C IRQ Enable         */
 };
 
-static struct Sha1Md5Reg_t *pSha1Md5Reg_t;
+static struct sha1_md5_reg *sha1_md5_reg;
 
 static const u8 md5OverEmptyString[] = {
 	0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
@@ -148,111 +148,112 @@ static const u8 sha256OverEmptyString[] = {
  *Forward declarations
  *------------------------------------------------------------------------- */
 
-static void static_Hash_HwPerform64bDigest(u32 *pData,
-				u32 nAlgo, u32 nBytesProcessed);
-static void static_Hash_HwPerformDmaDigest(u8 *pData, u32 nDataLength,
-				u32 nAlgo, u32 nBytesProcessed);
+static void tf_digest_hw_perform_64b(u32 *data,
+				u32 algo, u32 bytes_processed);
+static bool tf_digest_hw_perform_dma(u8 *data, u32 nDataLength,
+				u32 algo, u32 bytes_processed);
 
-static void PDrvCryptoUpdateHashWithDMA(
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
-	u8 *pData, u32 dataLength);
+static bool tf_digest_update_dma(
+	struct tf_crypto_sha_operation_state *sha_state,
+	u8 *data, u32 data_length);
 
 
 /*-------------------------------------------------------------------------
  *Save HWA registers into the specified operation state structure
  *------------------------------------------------------------------------*/
-static void PDrvCryptoSaveHashRegisters(
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState)
+static void tf_digest_save_registers(
+	struct tf_crypto_sha_operation_state *sha_state)
 {
-	dprintk(KERN_INFO "PDrvCryptoSaveHashRegisters: State=%p\n",
-		pSHAState);
+	dprintk(KERN_INFO "tf_digest_save_registers: State=%p\n",
+		sha_state);
 
-	pSHAState->SHA_DIGEST_A = INREG32(&pSha1Md5Reg_t->IDIGEST_A);
-	pSHAState->SHA_DIGEST_B = INREG32(&pSha1Md5Reg_t->IDIGEST_B);
-	pSHAState->SHA_DIGEST_C = INREG32(&pSha1Md5Reg_t->IDIGEST_C);
-	pSHAState->SHA_DIGEST_D = INREG32(&pSha1Md5Reg_t->IDIGEST_D);
-	pSHAState->SHA_DIGEST_E = INREG32(&pSha1Md5Reg_t->IDIGEST_E);
-	pSHAState->SHA_DIGEST_F = INREG32(&pSha1Md5Reg_t->IDIGEST_F);
-	pSHAState->SHA_DIGEST_G = INREG32(&pSha1Md5Reg_t->IDIGEST_G);
-	pSHAState->SHA_DIGEST_H = INREG32(&pSha1Md5Reg_t->IDIGEST_H);
+	sha_state->SHA_DIGEST_A = INREG32(&sha1_md5_reg->IDIGEST_A);
+	sha_state->SHA_DIGEST_B = INREG32(&sha1_md5_reg->IDIGEST_B);
+	sha_state->SHA_DIGEST_C = INREG32(&sha1_md5_reg->IDIGEST_C);
+	sha_state->SHA_DIGEST_D = INREG32(&sha1_md5_reg->IDIGEST_D);
+	sha_state->SHA_DIGEST_E = INREG32(&sha1_md5_reg->IDIGEST_E);
+	sha_state->SHA_DIGEST_F = INREG32(&sha1_md5_reg->IDIGEST_F);
+	sha_state->SHA_DIGEST_G = INREG32(&sha1_md5_reg->IDIGEST_G);
+	sha_state->SHA_DIGEST_H = INREG32(&sha1_md5_reg->IDIGEST_H);
 }
 
 /*-------------------------------------------------------------------------
  *Restore the HWA registers from the operation state structure
  *-------------------------------------------------------------------------*/
-static void PDrvCryptoRestoreHashRegisters(
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState)
+static void tf_digest_restore_registers(
+	struct tf_crypto_sha_operation_state *sha_state)
 {
-	dprintk(KERN_INFO "PDrvCryptoRestoreHashRegisters: State=%p\n",
-		pSHAState);
+	dprintk(KERN_INFO "tf_digest_restore_registers: State=%p\n",
+		sha_state);
 
-	if (pSHAState->nBytesProcessed != 0) {
+	if (sha_state->bytes_processed != 0) {
 		/*
 		 * Some bytes were already processed. Initialize
 		 * previous digest
 		 */
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_A, pSHAState->SHA_DIGEST_A);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_B, pSHAState->SHA_DIGEST_B);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_C, pSHAState->SHA_DIGEST_C);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_D, pSHAState->SHA_DIGEST_D);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_E, pSHAState->SHA_DIGEST_E);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_F, pSHAState->SHA_DIGEST_F);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_G, pSHAState->SHA_DIGEST_G);
-		OUTREG32(&pSha1Md5Reg_t->IDIGEST_H, pSHAState->SHA_DIGEST_H);
+		OUTREG32(&sha1_md5_reg->IDIGEST_A, sha_state->SHA_DIGEST_A);
+		OUTREG32(&sha1_md5_reg->IDIGEST_B, sha_state->SHA_DIGEST_B);
+		OUTREG32(&sha1_md5_reg->IDIGEST_C, sha_state->SHA_DIGEST_C);
+		OUTREG32(&sha1_md5_reg->IDIGEST_D, sha_state->SHA_DIGEST_D);
+		OUTREG32(&sha1_md5_reg->IDIGEST_E, sha_state->SHA_DIGEST_E);
+		OUTREG32(&sha1_md5_reg->IDIGEST_F, sha_state->SHA_DIGEST_F);
+		OUTREG32(&sha1_md5_reg->IDIGEST_G, sha_state->SHA_DIGEST_G);
+		OUTREG32(&sha1_md5_reg->IDIGEST_H, sha_state->SHA_DIGEST_H);
 	}
 
-	OUTREG32(&pSha1Md5Reg_t->SYSCONFIG, 0);
+	OUTREG32(&sha1_md5_reg->SYSCONFIG, 0);
 }
 
 /*------------------------------------------------------------------------- */
 
-void PDrvCryptoDigestInit(void)
+void tf_digest_init(void)
 {
-	pSha1Md5Reg_t = omap_ioremap(DIGEST1_REGS_HW_ADDR, SZ_1M, MT_DEVICE);
-	if (pSha1Md5Reg_t == NULL)
+	sha1_md5_reg = omap_ioremap(DIGEST1_REGS_HW_ADDR, SZ_1M, MT_DEVICE);
+	if (sha1_md5_reg == NULL)
 		panic("Unable to remap SHA2/MD5 module");
 }
 
-void PDrvCryptoDigestExit(void)
+void tf_digest_exit(void)
 {
-	omap_iounmap(pSha1Md5Reg_t);
+	omap_iounmap(sha1_md5_reg);
 }
 
-void PDrvCryptoUpdateHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
-	u8 *pData, u32 dataLength)
+bool tf_digest_update(struct tf_crypto_sha_operation_state *sha_state,
+	u8 *data, u32 data_length)
 {
-	u32 dmaUse = PUBLIC_CRYPTO_DMA_USE_NONE;
+	u32 dma_use = PUBLIC_CRYPTO_DMA_USE_NONE;
 
 	/*
 	 *Choice of the processing type
 	 */
-	if (dataLength >= DMA_TRIGGER_IRQ_DIGEST)
-		dmaUse = PUBLIC_CRYPTO_DMA_USE_IRQ;
+	if (data_length >= DMA_TRIGGER_IRQ_DIGEST)
+		dma_use = PUBLIC_CRYPTO_DMA_USE_IRQ;
 
-	dprintk(KERN_INFO "PDrvCryptoUpdateHash : "\
-		"Data=0x%08x/%u, Chunk=%u, Processed=%u, dmaUse=0x%08x\n",
-		(u32)pData, (u32)dataLength,
-		pSHAState->nChunkLength, pSHAState->nBytesProcessed,
-		dmaUse);
+	dprintk(KERN_INFO "tf_digest_update : "\
+		"Data=0x%08x/%u, Chunk=%u, Processed=%u, dma_use=0x%08x\n",
+		(u32)data, (u32)data_length,
+		sha_state->chunk_length, sha_state->bytes_processed,
+		dma_use);
 
-	if (dataLength == 0) {
-		dprintk(KERN_INFO "PDrvCryptoUpdateHash: "\
+	if (data_length == 0) {
+		dprintk(KERN_INFO "tf_digest_update: "\
 				"Nothing to process\n");
-		return;
+		return true;
 	}
 
-	if (dmaUse != PUBLIC_CRYPTO_DMA_USE_NONE) {
+	if (dma_use != PUBLIC_CRYPTO_DMA_USE_NONE) {
 		/*
 		 * Restore the registers of the accelerator from the operation
 		 * state
 		 */
-		PDrvCryptoRestoreHashRegisters(pSHAState);
+		tf_digest_restore_registers(sha_state);
 
 		/*perform the updates with DMA */
-		PDrvCryptoUpdateHashWithDMA(pSHAState, pData, dataLength);
+		if (!tf_digest_update_dma(sha_state, data, data_length))
+			return false;
 
 		/* Save the accelerator registers into the operation state */
-		PDrvCryptoSaveHashRegisters(pSHAState);
+		tf_digest_save_registers(sha_state);
 	} else {
 		/*Non-DMA transfer */
 
@@ -264,63 +265,66 @@ void PDrvCryptoUpdateHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
 
 		/*Is there any data in the chunk? If yes is it possible to
 		 *make a 64B buffer with the new data passed ? */
-		if ((pSHAState->nChunkLength != 0)
-			&& (pSHAState->nChunkLength + dataLength >=
+		if ((sha_state->chunk_length != 0)
+			&& (sha_state->chunk_length + data_length >=
 						HASH_BLOCK_BYTES_LENGTH)) {
 
 			u8 vLengthToComplete =
-			HASH_BLOCK_BYTES_LENGTH - pSHAState->nChunkLength;
+			HASH_BLOCK_BYTES_LENGTH - sha_state->chunk_length;
 
 			/*So we fill the chunk buffer with the new data to
 			 *complete to 64B */
-			memcpy(pSHAState->pChunkBuffer + pSHAState->
-				nChunkLength, pData, vLengthToComplete);
+			if (copy_from_user(
+				sha_state->chunk_buffer+sha_state->chunk_length,
+				data,
+				vLengthToComplete))
+				return false;
 
-			if (pSHAState->nChunkLength + dataLength ==
+			if (sha_state->chunk_length + data_length ==
 				HASH_BLOCK_BYTES_LENGTH) {
 				/*We'll keep some data for the final */
-				pSHAState->nChunkLength =
+				sha_state->chunk_length =
 					HASH_BLOCK_BYTES_LENGTH;
-				dprintk(KERN_INFO "PDrvCryptoUpdateHash: "\
+				dprintk(KERN_INFO "tf_digest_update: "\
 					"Done: Chunk=%u; Processed=%u\n",
-					pSHAState->nChunkLength,
-					pSHAState->nBytesProcessed);
-				return;
+					sha_state->chunk_length,
+					sha_state->bytes_processed);
+				return true;
 			}
 
 			/*
 			 * Restore the registers of the accelerator from the
 			 * operation state
 			 */
-			PDrvCryptoRestoreHashRegisters(pSHAState);
+			tf_digest_restore_registers(sha_state);
 
 			/*Then we send this buffer to the HWA */
-			static_Hash_HwPerform64bDigest(
-				(u32 *)pSHAState->pChunkBuffer, pSHAState->CTRL,
-				pSHAState->nBytesProcessed);
+			tf_digest_hw_perform_64b(
+				(u32 *)sha_state->chunk_buffer, sha_state->CTRL,
+				sha_state->bytes_processed);
 
 			/*
 			 * Save the accelerator registers into the operation
 			 * state
 			 */
-			PDrvCryptoSaveHashRegisters(pSHAState);
+			tf_digest_save_registers(sha_state);
 
-			pSHAState->nBytesProcessed =
-				INREG32(&pSha1Md5Reg_t->DIGEST_COUNT);
+			sha_state->bytes_processed =
+				INREG32(&sha1_md5_reg->DIGEST_COUNT);
 
 			/*We have flushed the chunk so it is empty now */
-			pSHAState->nChunkLength = 0;
+			sha_state->chunk_length = 0;
 
 			/*Then we have less data to process */
-			pData += vLengthToComplete;
-			dataLength -= vLengthToComplete;
+			data += vLengthToComplete;
+			data_length -= vLengthToComplete;
 		}
 
 		/*(2)We process all the 64B buffer that we can */
-		if (pSHAState->nChunkLength + dataLength >=
+		if (sha_state->chunk_length + data_length >=
 					HASH_BLOCK_BYTES_LENGTH) {
 
-			while (dataLength > HASH_BLOCK_BYTES_LENGTH) {
+			while (data_length > HASH_BLOCK_BYTES_LENGTH) {
 				u8 pTempAlignedBuffer[HASH_BLOCK_BYTES_LENGTH];
 
 				/*
@@ -328,71 +332,79 @@ void PDrvCryptoUpdateHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
 				 */
 				/*We copy the data to process to an aligned
 				 *buffer */
-				memcpy(pTempAlignedBuffer, pData,
-					HASH_BLOCK_BYTES_LENGTH);
+				if (copy_from_user(
+					pTempAlignedBuffer,
+					data,
+					HASH_BLOCK_BYTES_LENGTH))
+					return false;
 
 				/*Then we send this buffer to the hash
 				 *hardware */
-				PDrvCryptoRestoreHashRegisters(pSHAState);
-				static_Hash_HwPerform64bDigest(
+				tf_digest_restore_registers(sha_state);
+				tf_digest_hw_perform_64b(
 					(u32 *) pTempAlignedBuffer,
-					pSHAState->CTRL,
-					pSHAState->nBytesProcessed);
-				PDrvCryptoSaveHashRegisters(pSHAState);
+					sha_state->CTRL,
+					sha_state->bytes_processed);
+				tf_digest_save_registers(sha_state);
 
-				pSHAState->nBytesProcessed =
-					INREG32(&pSha1Md5Reg_t->DIGEST_COUNT);
+				sha_state->bytes_processed =
+					INREG32(&sha1_md5_reg->DIGEST_COUNT);
 
 				/*Then we decrease the remaining data of 64B */
-				pData += HASH_BLOCK_BYTES_LENGTH;
-				dataLength -= HASH_BLOCK_BYTES_LENGTH;
+				data += HASH_BLOCK_BYTES_LENGTH;
+				data_length -= HASH_BLOCK_BYTES_LENGTH;
 			}
 		}
 
 		/*(3)We look if we have some data that could not be processed
 		 *yet because it is not large enough to fill a buffer of 64B */
-		if (dataLength > 0) {
-			if (pSHAState->nChunkLength + dataLength >
+		if (data_length > 0) {
+			if (sha_state->chunk_length + data_length >
 					HASH_BLOCK_BYTES_LENGTH) {
 				/*Should never be in this case !!! */
-			panic("PDrvCryptoUpdateHash: nChunkLength + \
-				dataLength > HASH_BLOCK_BYTES_LENGTH\n");
+			panic("tf_digest_update: chunk_length data_length > "
+				"HASH_BLOCK_BYTES_LENGTH\n");
 			}
 
 			/*So we fill the chunk buffer with the new data to
 			 *complete to 64B */
-			memcpy(pSHAState->pChunkBuffer + pSHAState->
-				nChunkLength, pData, dataLength);
-			pSHAState->nChunkLength += dataLength;
+			if (copy_from_user(
+				sha_state->chunk_buffer+sha_state->chunk_length,
+				data,
+				data_length))
+				return false;
+			sha_state->chunk_length += data_length;
 		}
 	}
 
-	dprintk(KERN_INFO "PDrvCryptoUpdateHash: Done: "\
+	dprintk(KERN_INFO "tf_digest_update: Done: "\
 		"Chunk=%u; Processed=%u\n",
-		pSHAState->nChunkLength, pSHAState->nBytesProcessed);
+		sha_state->chunk_length, sha_state->bytes_processed);
+
+	return true;
 }
 
 /*------------------------------------------------------------------------- */
 
-static void static_Hash_HwPerform64bDigest(u32 *pData,
-					u32 nAlgo, u32 nBytesProcessed)
+static void tf_digest_hw_perform_64b(u32 *data,
+					u32 algo, u32 bytes_processed)
 {
-	u32 nAlgoConstant = 0;
+	u32 algo_constant = 0;
 
-	OUTREG32(&pSha1Md5Reg_t->DIGEST_COUNT, nBytesProcessed);
+	OUTREG32(&sha1_md5_reg->DIGEST_COUNT, bytes_processed);
 
-	if (nBytesProcessed == 0) {
+	if (bytes_processed == 0) {
 		/* No bytes processed so far. Will use the algo constant instead
 			of previous digest */
-		nAlgoConstant = 1 << 3;
+		algo_constant = 1 << 3;
 	}
 
-	OUTREG32(&pSha1Md5Reg_t->MODE,
-		nAlgoConstant | (nAlgo & 0x6));
-	OUTREG32(&pSha1Md5Reg_t->LENGTH, HASH_BLOCK_BYTES_LENGTH);
+	OUTREG32(&sha1_md5_reg->MODE,
+		algo_constant | (algo & 0x6));
+	OUTREG32(&sha1_md5_reg->LENGTH, HASH_BLOCK_BYTES_LENGTH);
 
-	if (SCXPublicCryptoWaitForReadyBit(
-		(u32 *)&pSha1Md5Reg_t->IRQSTATUS,
+	if (tf_crypto_wait_for_ready_bit(
+		(u32 *)&sha1_md5_reg->IRQSTATUS,
 		DIGEST_IRQSTATUS_INPUT_READY_BIT)
 			!= PUBLIC_CRYPTO_OPERATION_SUCCESS) {
 		/* Crash the system as this should never occur */
@@ -401,37 +413,37 @@ static void static_Hash_HwPerform64bDigest(u32 *pData,
 	}
 
 	/*
-	 *The pData buffer is a buffer of 64 bytes.
+	 *The data buffer is a buffer of 64 bytes.
 	 */
-	OUTREG32(&pSha1Md5Reg_t->DIN_0, pData[0]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_1, pData[1]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_2, pData[2]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_3, pData[3]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_4, pData[4]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_5, pData[5]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_6, pData[6]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_7, pData[7]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_8, pData[8]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_9, pData[9]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_10, pData[10]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_11, pData[11]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_12, pData[12]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_13, pData[13]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_14, pData[14]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_15, pData[15]);
+	OUTREG32(&sha1_md5_reg->DIN_0, data[0]);
+	OUTREG32(&sha1_md5_reg->DIN_1, data[1]);
+	OUTREG32(&sha1_md5_reg->DIN_2, data[2]);
+	OUTREG32(&sha1_md5_reg->DIN_3, data[3]);
+	OUTREG32(&sha1_md5_reg->DIN_4, data[4]);
+	OUTREG32(&sha1_md5_reg->DIN_5, data[5]);
+	OUTREG32(&sha1_md5_reg->DIN_6, data[6]);
+	OUTREG32(&sha1_md5_reg->DIN_7, data[7]);
+	OUTREG32(&sha1_md5_reg->DIN_8, data[8]);
+	OUTREG32(&sha1_md5_reg->DIN_9, data[9]);
+	OUTREG32(&sha1_md5_reg->DIN_10, data[10]);
+	OUTREG32(&sha1_md5_reg->DIN_11, data[11]);
+	OUTREG32(&sha1_md5_reg->DIN_12, data[12]);
+	OUTREG32(&sha1_md5_reg->DIN_13, data[13]);
+	OUTREG32(&sha1_md5_reg->DIN_14, data[14]);
+	OUTREG32(&sha1_md5_reg->DIN_15, data[15]);
 
 	/*
 	 *Wait until the hash operation is finished.
 	 */
-	SCXPublicCryptoWaitForReadyBitInfinitely(
-		(u32 *)&pSha1Md5Reg_t->IRQSTATUS,
+	tf_crypto_wait_for_ready_bit_infinitely(
+		(u32 *)&sha1_md5_reg->IRQSTATUS,
 		DIGEST_IRQSTATUS_OUTPUT_READY_BIT);
 }
 
 /*------------------------------------------------------------------------- */
 
-static void static_Hash_HwPerformDmaDigest(u8 *pData, u32 nDataLength,
-			u32 nAlgo, u32 nBytesProcessed)
+static bool tf_digest_hw_perform_dma(u8 *data, u32 nDataLength,
+			u32 algo, u32 bytes_processed)
 {
 	/*
 	 *Note: The DMA only sees physical addresses !
@@ -439,50 +451,53 @@ static void static_Hash_HwPerformDmaDigest(u8 *pData, u32 nDataLength,
 
 	int dma_ch0;
 	struct omap_dma_channel_params ch0_parameters;
-	u32 nLengthLoop = 0;
-	u32 nAlgoConstant;
-	struct SCXLNX_DEVICE *pDevice = SCXLNXGetDevice();
+	u32 length_loop = 0;
+	u32 algo_constant;
+	struct tf_device *dev = tf_get_device();
 
 	dprintk(KERN_INFO
-		"static_Hash_HwPerformDmaDigest: Buffer=0x%08x/%u\n",
-		(u32)pData, (u32)nDataLength);
+		"tf_digest_hw_perform_dma: Buffer=0x%08x/%u\n",
+		(u32)data, (u32)nDataLength);
 
 	/*lock the DMA */
-	mutex_lock(&pDevice->sm.sDMALock);
-	if (scxPublicDMARequest(&dma_ch0) != PUBLIC_CRYPTO_OPERATION_SUCCESS) {
-		mutex_unlock(&pDevice->sm.sDMALock);
-		return;
+	mutex_lock(&dev->sm.dma_mutex);
+	if (tf_dma_request(&dma_ch0) != PUBLIC_CRYPTO_OPERATION_SUCCESS) {
+		mutex_unlock(&dev->sm.dma_mutex);
+		return false;
 	}
 
 	while (nDataLength > 0) {
 
-		nAlgoConstant = 0;
-		if (nBytesProcessed == 0) {
+		algo_constant = 0;
+		if (bytes_processed == 0) {
 			/*No bytes processed so far. Will use the algo
 			 *constant instead of previous digest */
-			nAlgoConstant = 1 << 3;
+			algo_constant = 1 << 3;
 		}
 
 		/*check length */
-		if (nDataLength <= pDevice->nDMABufferLength)
-			nLengthLoop = nDataLength;
+		if (nDataLength <= dev->dma_buffer_length)
+			length_loop = nDataLength;
 		else
-			nLengthLoop = pDevice->nDMABufferLength;
+			length_loop = dev->dma_buffer_length;
 
 		/*
-		 *Copy the data from the input buffer into a preallocated
-		 *buffer which is aligned on the beginning of a page.
-		 *This may prevent potential issues when flushing/invalidating
-		 *the buffer as the cache lines are 64 bytes long.
+		 * Copy the data from the user input buffer into a preallocated
+		 * buffer which has correct properties from efficient DMA
+		 * transfers.
 		 */
-		memcpy(pDevice->pDMABuffer, pData, nLengthLoop);
+		if (copy_from_user(dev->dma_buffer, data, length_loop)) {
+			omap_free_dma(dma_ch0);
+			mutex_unlock(&dev->sm.dma_mutex);
+			return false;
+		}
 
 		/*DMA1: Mem -> HASH */
-		scxPublicSetDMAChannelCommonParams(&ch0_parameters,
-			nLengthLoop / HASH_BLOCK_BYTES_LENGTH,
+		tf_dma_set_channel_common_params(&ch0_parameters,
+			length_loop / HASH_BLOCK_BYTES_LENGTH,
 			DMA_CEN_Elts_per_Frame_SHA,
 			DIGEST1_REGS_HW_ADDR + 0x80,
-			pDevice->pDMABufferPhys,
+			dev->dma_buffer_phys,
 			OMAP44XX_DMA_SHA2_DIN_P);
 
 		/*specific for Mem -> HWA */
@@ -490,55 +505,57 @@ static void static_Hash_HwPerformDmaDigest(u8 *pData, u32 nDataLength,
 		ch0_parameters.dst_amode = OMAP_DMA_AMODE_CONSTANT;
 		ch0_parameters.src_or_dst_synch = OMAP_DMA_DST_SYNC;
 
-		scxPublicDMASetParams(dma_ch0, &ch0_parameters);
+		omap_set_dma_params(dma_ch0, &ch0_parameters);
 
 		omap_set_dma_src_burst_mode(dma_ch0, OMAP_DMA_DATA_BURST_16);
 		omap_set_dma_dest_burst_mode(dma_ch0, OMAP_DMA_DATA_BURST_16);
 
-		OUTREG32(&pSha1Md5Reg_t->DIGEST_COUNT, nBytesProcessed);
-		OUTREG32(&pSha1Md5Reg_t->MODE,
-			nAlgoConstant | (nAlgo & 0x6));
+		OUTREG32(&sha1_md5_reg->DIGEST_COUNT, bytes_processed);
+		OUTREG32(&sha1_md5_reg->MODE,
+			algo_constant | (algo & 0x6));
 
 		/*
 		 * Triggers operation
 		 * Interrupt, Free Running + GO (DMA on)
 		 */
-		OUTREG32(&pSha1Md5Reg_t->SYSCONFIG,
-			INREG32(&pSha1Md5Reg_t->SYSCONFIG) |
+		OUTREG32(&sha1_md5_reg->SYSCONFIG,
+			INREG32(&sha1_md5_reg->SYSCONFIG) |
 			DIGEST_SYSCONFIG_PDMA_EN_BIT);
-		OUTREG32(&pSha1Md5Reg_t->LENGTH, nLengthLoop);
+		OUTREG32(&sha1_md5_reg->LENGTH, length_loop);
 
 		wmb();
 
-		scxPublicDMAStart(dma_ch0, OMAP_DMA_BLOCK_IRQ);
+		tf_dma_start(dma_ch0, OMAP_DMA_BLOCK_IRQ);
 
-		scxPublicDMAWait(1);
+		tf_dma_wait(1);
 
-		OUTREG32(&pSha1Md5Reg_t->SYSCONFIG, 0);
+		OUTREG32(&sha1_md5_reg->SYSCONFIG, 0);
 
-		scxPublicDMAClearChannel(dma_ch0);
+		omap_clear_dma(dma_ch0);
 
-		pData += nLengthLoop;
-		nDataLength -= nLengthLoop;
-		nBytesProcessed =
-			INREG32(&pSha1Md5Reg_t->DIGEST_COUNT);
+		data += length_loop;
+		nDataLength -= length_loop;
+		bytes_processed =
+			INREG32(&sha1_md5_reg->DIGEST_COUNT);
 	}
 
 	/*For safety reasons, let's clean the working buffer */
-	memset(pDevice->pDMABuffer, 0, nLengthLoop);
+	memset(dev->dma_buffer, 0, length_loop);
 
 	/*release the DMA */
-	scxPublicDMARelease(dma_ch0);
+	omap_free_dma(dma_ch0);
 
-	mutex_unlock(&pDevice->sm.sDMALock);
+	mutex_unlock(&dev->sm.dma_mutex);
 
 	/*
 	 * The dma transfert is finished, now wait until the hash
 	 * operation is finished.
 	 */
-	SCXPublicCryptoWaitForReadyBitInfinitely(
-		(u32 *)&pSha1Md5Reg_t->IRQSTATUS,
+	tf_crypto_wait_for_ready_bit_infinitely(
+		(u32 *)&sha1_md5_reg->IRQSTATUS,
 		DIGEST_IRQSTATUS_CONTEXT_READY_BIT);
+
+	return true;
 }
 
 /*------------------------------------------------------------------------- */
@@ -546,96 +563,101 @@ static void static_Hash_HwPerformDmaDigest(u8 *pData, u32 nDataLength,
  *Static function, perform data digest using the DMA for data transfer.
  *
  *inputs:
- *        pData : pointer of the input data to process
- *        dataLength : number of byte to process
+ *        data : pointer of the input data to process
+ *        data_length : number of byte to process
  */
-static void PDrvCryptoUpdateHashWithDMA(
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
-	u8 *pData, u32 dataLength)
+static bool tf_digest_update_dma(
+	struct tf_crypto_sha_operation_state *sha_state,
+	u8 *data, u32 data_length)
 {
-	dprintk(KERN_INFO "PDrvCryptoUpdateHashWithDMA\n");
+	dprintk(KERN_INFO "tf_digest_update_dma\n");
 
-	if (pSHAState->nChunkLength != 0) {
+	if (sha_state->chunk_length != 0) {
 
 		u32 vLengthToComplete;
 
 		/*Fill the chunk first */
-		if (pSHAState->
-			nChunkLength + dataLength <= HASH_BLOCK_BYTES_LENGTH) {
+		if (sha_state->
+			chunk_length + data_length <= HASH_BLOCK_BYTES_LENGTH) {
 
 			/*So we fill the chunk buffer with the new data */
-			memcpy(pSHAState->
-				pChunkBuffer + pSHAState->nChunkLength,
-				pData, dataLength);
-			pSHAState->nChunkLength += dataLength;
+			if (copy_from_user(sha_state->chunk_buffer +
+					sha_state->chunk_length, data,
+					data_length))
+				return false;
+			sha_state->chunk_length += data_length;
 
 			/*We'll keep some data for the final */
-			return;
+			return true;
 		}
 
-		vLengthToComplete = HASH_BLOCK_BYTES_LENGTH - pSHAState->
-								nChunkLength;
+		vLengthToComplete = HASH_BLOCK_BYTES_LENGTH - sha_state->
+								chunk_length;
 
 		if (vLengthToComplete != 0) {
 			/*So we fill the chunk buffer with the new data to
 			 *complete to 64B */
-			memcpy(pSHAState->pChunkBuffer + pSHAState->
-				nChunkLength, pData, vLengthToComplete);
+			if (copy_from_user(sha_state->chunk_buffer +
+					sha_state->chunk_length, data,
+					vLengthToComplete))
+				return false;
 		}
 
 		/*Then we send this buffer to the HWA (no DMA) */
-		static_Hash_HwPerform64bDigest(
-			(u32 *)pSHAState->pChunkBuffer, pSHAState->CTRL,
-					pSHAState->nBytesProcessed);
+		tf_digest_hw_perform_64b(
+			(u32 *)sha_state->chunk_buffer, sha_state->CTRL,
+			sha_state->bytes_processed);
 
-		pSHAState->nBytesProcessed =
-			INREG32(&pSha1Md5Reg_t->DIGEST_COUNT);
+		sha_state->bytes_processed =
+			INREG32(&sha1_md5_reg->DIGEST_COUNT);
 
 		/*We have flushed the chunk so it is empty now */
-		pSHAState->nChunkLength = 0;
+		sha_state->chunk_length = 0;
 
 		/*Update the data buffer depending of the data already
 		 *processed */
-		pData += vLengthToComplete;
-		dataLength -= vLengthToComplete;
+		data += vLengthToComplete;
+		data_length -= vLengthToComplete;
 	}
 
-	if (dataLength > HASH_BLOCK_BYTES_LENGTH) {
+	if (data_length > HASH_BLOCK_BYTES_LENGTH) {
 
 		/*DMA only manages data length that is multiple of 64b */
-		u32 vDmaProcessSize = dataLength & 0xFFFFFFC0;
+		u32 vDmaProcessize = data_length & 0xFFFFFFC0;
 
-		if (vDmaProcessSize == dataLength) {
+		if (vDmaProcessize == data_length) {
 			/*We keep one block for the final */
-			vDmaProcessSize -= HASH_BLOCK_BYTES_LENGTH;
+			vDmaProcessize -= HASH_BLOCK_BYTES_LENGTH;
 		}
 
-		static_Hash_HwPerformDmaDigest(pData, vDmaProcessSize,
-			pSHAState->CTRL, pSHAState->nBytesProcessed);
+		if (!tf_digest_hw_perform_dma(data, vDmaProcessize,
+				sha_state->CTRL, sha_state->bytes_processed))
+			return false;
 
-		pSHAState->nBytesProcessed =
-			INREG32(&pSha1Md5Reg_t->DIGEST_COUNT);
-		pData += vDmaProcessSize;
-		dataLength -= vDmaProcessSize;
+		sha_state->bytes_processed =
+			INREG32(&sha1_md5_reg->DIGEST_COUNT);
+		data += vDmaProcessize;
+		data_length -= vDmaProcessize;
 	}
 
 	/*At that point, there is less than 64b left to process*/
-	if ((dataLength == 0) || (dataLength > HASH_BLOCK_BYTES_LENGTH)) {
+	if ((data_length == 0) || (data_length > HASH_BLOCK_BYTES_LENGTH))
 		/*Should never be in this case !!! */
-		panic("PDrvCryptoUpdateHASHWithDMA: \
-			Remaining dataLength=%u\n", dataLength);
-	}
+		return false;
 
 	/*We now fill the chunk buffer with the remaining data */
-	memcpy(pSHAState->pChunkBuffer, pData, dataLength);
-	pSHAState->nChunkLength = dataLength;
+	if (copy_from_user(sha_state->chunk_buffer, data, data_length))
+		return false;
+	sha_state->chunk_length = data_length;
+
+	return true;
 }
 
 #ifdef CONFIG_SMC_KERNEL_CRYPTO
-static void PDrvCryptoInitHash(u32 alg,
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state)
+static void tf_digest_init_operation(u32 alg,
+	struct tf_crypto_sha_operation_state *state)
 {
-	memset(state, 0, sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE));
+	memset(state, 0, sizeof(struct tf_crypto_sha_operation_state));
 
 	state->CTRL = alg << 1;
 }
@@ -663,7 +685,7 @@ static int static_Hash_HwReadDigest(u32 algo, u8 *out)
 	}
 
 	for (i = 0; i < regs; i++) {
-		tmp = INREG32(&pSha1Md5Reg_t->IDIGEST_A + i);
+		tmp = INREG32(&sha1_md5_reg->IDIGEST_A + i);
 
 		out[idx++] = (u8) ((tmp >>  0) & 0xff);
 		out[idx++] = (u8) ((tmp >>  8) & 0xff);
@@ -674,13 +696,13 @@ static int static_Hash_HwReadDigest(u32 algo, u8 *out)
 	return 0;
 }
 
-static int PDrvCryptoFinalHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state,
+static int tf_digest_final(struct tf_crypto_sha_operation_state *state,
 	u8 *out)
 {
-	u32 *data = (u32 *) state->pChunkBuffer;
+	u32 *data = (u32 *) state->chunk_buffer;
 
 	/* Hashing an empty string? */
-	if (state->nBytesProcessed + state->nChunkLength == 0) {
+	if (state->bytes_processed + state->chunk_length == 0) {
 		switch (DIGEST_MODE_GET_ALGO(state->CTRL)) {
 		case DIGEST_CTRL_ALGO_MD5:
 			memcpy(out, md5OverEmptyString, HASH_MD5_LENGTH);
@@ -701,20 +723,20 @@ static int PDrvCryptoFinalHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state,
 		return 0;
 	}
 
-	PDrvCryptoRestoreHashRegisters(state);
+	tf_digest_restore_registers(state);
 
 	/*
 	 * At this point, the chunk buffer should contain the last block of data
 	 * needed for the final.
 	 */
-	OUTREG32(&pSha1Md5Reg_t->DIGEST_COUNT, state->nBytesProcessed);
-	OUTREG32(&pSha1Md5Reg_t->MODE,
+	OUTREG32(&sha1_md5_reg->DIGEST_COUNT, state->bytes_processed);
+	OUTREG32(&sha1_md5_reg->MODE,
 		(state->CTRL & 0x6) | 0x10 |
-		(state->nBytesProcessed == 0) << 3);
-	OUTREG32(&pSha1Md5Reg_t->LENGTH, state->nChunkLength);
+		(state->bytes_processed == 0) << 3);
+	OUTREG32(&sha1_md5_reg->LENGTH, state->chunk_length);
 
-	if (SCXPublicCryptoWaitForReadyBit(
-		(u32 *) &pSha1Md5Reg_t->IRQSTATUS,
+	if (tf_crypto_wait_for_ready_bit(
+		(u32 *) &sha1_md5_reg->IRQSTATUS,
 		DIGEST_IRQSTATUS_INPUT_READY_BIT)
 			!= PUBLIC_CRYPTO_OPERATION_SUCCESS) {
 		/* Crash the system as this should never occur */
@@ -722,26 +744,26 @@ static int PDrvCryptoFinalHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state,
 		      "Input data to be ready\n");
 	}
 
-	OUTREG32(&pSha1Md5Reg_t->DIN_0, data[0]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_1, data[1]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_2, data[2]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_3, data[3]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_4, data[4]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_5, data[5]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_6, data[6]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_7, data[7]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_8, data[8]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_9, data[9]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_10, data[10]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_11, data[11]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_12, data[12]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_13, data[13]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_14, data[14]);
-	OUTREG32(&pSha1Md5Reg_t->DIN_15, data[15]);
+	OUTREG32(&sha1_md5_reg->DIN_0, data[0]);
+	OUTREG32(&sha1_md5_reg->DIN_1, data[1]);
+	OUTREG32(&sha1_md5_reg->DIN_2, data[2]);
+	OUTREG32(&sha1_md5_reg->DIN_3, data[3]);
+	OUTREG32(&sha1_md5_reg->DIN_4, data[4]);
+	OUTREG32(&sha1_md5_reg->DIN_5, data[5]);
+	OUTREG32(&sha1_md5_reg->DIN_6, data[6]);
+	OUTREG32(&sha1_md5_reg->DIN_7, data[7]);
+	OUTREG32(&sha1_md5_reg->DIN_8, data[8]);
+	OUTREG32(&sha1_md5_reg->DIN_9, data[9]);
+	OUTREG32(&sha1_md5_reg->DIN_10, data[10]);
+	OUTREG32(&sha1_md5_reg->DIN_11, data[11]);
+	OUTREG32(&sha1_md5_reg->DIN_12, data[12]);
+	OUTREG32(&sha1_md5_reg->DIN_13, data[13]);
+	OUTREG32(&sha1_md5_reg->DIN_14, data[14]);
+	OUTREG32(&sha1_md5_reg->DIN_15, data[15]);
 
 	/* Wait till the hash operation is finished */
-	SCXPublicCryptoWaitForReadyBitInfinitely(
-		(u32 *) &pSha1Md5Reg_t->IRQSTATUS,
+	tf_crypto_wait_for_ready_bit_infinitely(
+		(u32 *) &sha1_md5_reg->IRQSTATUS,
 		DIGEST_IRQSTATUS_OUTPUT_READY_BIT);
 
 	return static_Hash_HwReadDigest(DIGEST_MODE_GET_ALGO(state->CTRL), out);
@@ -754,17 +776,20 @@ static int PDrvCryptoFinalHash(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state,
 static int digest_update(struct shash_desc *desc, const u8 *data,
 	unsigned int len)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoLockUnlockHWA(PUBLIC_CRYPTO_HWA_SHA, LOCK_HWA);
+	/* Make sure SHA/MD5 HWA is accessible */
+	tf_delayed_secure_resume();
 
-	SCXPublicCryptoEnableClock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+	tf_crypto_lock_hwa(PUBLIC_CRYPTO_HWA_SHA, LOCK_HWA);
 
-	PDrvCryptoUpdateHash(state, (u8 *) data, len);
+	tf_crypto_enable_clock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
 
-	SCXPublicCryptoDisableClock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+	tf_digest_update(state, (u8 *) data, len);
 
-	PDrvCryptoLockUnlockHWA(PUBLIC_CRYPTO_HWA_SHA, UNLOCK_HWA);
+	tf_crypto_disable_clock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+
+	tf_crypto_lock_hwa(PUBLIC_CRYPTO_HWA_SHA, UNLOCK_HWA);
 
 	return 0;
 }
@@ -772,24 +797,27 @@ static int digest_update(struct shash_desc *desc, const u8 *data,
 static int digest_final(struct shash_desc *desc, u8 *out)
 {
 	int ret;
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoLockUnlockHWA(PUBLIC_CRYPTO_HWA_SHA, LOCK_HWA);
+	/* Make sure SHA/MD5 HWA is accessible */
+	tf_delayed_secure_resume();
 
-	SCXPublicCryptoEnableClock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+	tf_crypto_lock_hwa(PUBLIC_CRYPTO_HWA_SHA, LOCK_HWA);
 
-	ret = PDrvCryptoFinalHash(state, out);
+	tf_crypto_enable_clock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
 
-	SCXPublicCryptoDisableClock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+	ret = tf_digest_final(state, out);
 
-	PDrvCryptoLockUnlockHWA(PUBLIC_CRYPTO_HWA_SHA, UNLOCK_HWA);
+	tf_crypto_disable_clock(PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG);
+
+	tf_crypto_lock_hwa(PUBLIC_CRYPTO_HWA_SHA, UNLOCK_HWA);
 
 	return ret;
 }
 
 static int digest_import(struct shash_desc *desc, const void *in)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
 	memcpy(state, in, sizeof(*state));
 	return 0;
@@ -797,7 +825,7 @@ static int digest_import(struct shash_desc *desc, const void *in)
 
 static int digest_export(struct shash_desc *desc, void *out)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
 	memcpy(out, state, sizeof(*state));
 	return 0;
@@ -806,9 +834,9 @@ static int digest_export(struct shash_desc *desc, void *out)
 /* MD5 */
 static int md5_init(struct shash_desc *desc)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoInitHash(DIGEST_CTRL_ALGO_MD5, state);
+	tf_digest_init_operation(DIGEST_CTRL_ALGO_MD5, state);
 
 	return 0;
 }
@@ -820,8 +848,8 @@ static struct shash_alg smc_md5_alg = {
 	.final		= digest_final,
 	.export		= digest_export,
 	.import		= digest_import,
-	.descsize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
-	.statesize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
+	.descsize	= sizeof(struct tf_crypto_sha_operation_state),
+	.statesize	= sizeof(struct tf_crypto_sha_operation_state),
 	.base		= {
 		.cra_name		= "md5",
 		.cra_driver_name	= "md5-smc",
@@ -835,9 +863,9 @@ static struct shash_alg smc_md5_alg = {
 /* SHA1 */
 static int sha1_init(struct shash_desc *desc)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoInitHash(DIGEST_CTRL_ALGO_SHA1, state);
+	tf_digest_init_operation(DIGEST_CTRL_ALGO_SHA1, state);
 
 	return 0;
 }
@@ -849,8 +877,8 @@ static struct shash_alg smc_sha1_alg = {
 	.final		= digest_final,
 	.export		= digest_export,
 	.import		= digest_import,
-	.descsize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
-	.statesize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
+	.descsize	= sizeof(struct tf_crypto_sha_operation_state),
+	.statesize	= sizeof(struct tf_crypto_sha_operation_state),
 	.base		= {
 		.cra_name		= "sha1",
 		.cra_driver_name	= "sha1-smc",
@@ -864,9 +892,9 @@ static struct shash_alg smc_sha1_alg = {
 /* SHA224 */
 static int sha224_init(struct shash_desc *desc)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoInitHash(DIGEST_CTRL_ALGO_SHA224, state);
+	tf_digest_init_operation(DIGEST_CTRL_ALGO_SHA224, state);
 
 	return 0;
 }
@@ -878,8 +906,8 @@ static struct shash_alg smc_sha224_alg = {
 	.final		= digest_final,
 	.export		= digest_export,
 	.import		= digest_import,
-	.descsize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
-	.statesize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
+	.descsize	= sizeof(struct tf_crypto_sha_operation_state),
+	.statesize	= sizeof(struct tf_crypto_sha_operation_state),
 	.base		= {
 		.cra_name		= "sha224",
 		.cra_driver_name	= "sha224-smc",
@@ -893,9 +921,9 @@ static struct shash_alg smc_sha224_alg = {
 /* SHA256 */
 static int sha256_init(struct shash_desc *desc)
 {
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *state = shash_desc_ctx(desc);
+	struct tf_crypto_sha_operation_state *state = shash_desc_ctx(desc);
 
-	PDrvCryptoInitHash(DIGEST_CTRL_ALGO_SHA256, state);
+	tf_digest_init_operation(DIGEST_CTRL_ALGO_SHA256, state);
 
 	return 0;
 }
@@ -907,8 +935,8 @@ static struct shash_alg smc_sha256_alg = {
 	.final		= digest_final,
 	.export		= digest_export,
 	.import		= digest_import,
-	.descsize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
-	.statesize	= sizeof(struct PUBLIC_CRYPTO_SHA_OPERATION_STATE),
+	.descsize	= sizeof(struct tf_crypto_sha_operation_state),
+	.statesize	= sizeof(struct tf_crypto_sha_operation_state),
 	.base		= {
 		.cra_name		= "sha256",
 		.cra_driver_name	= "sha256-smc",

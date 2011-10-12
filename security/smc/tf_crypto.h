@@ -1,34 +1,39 @@
-/*
- * Copyright (c)2006-2008 Trusted Logic S.A.
+/**
+ * Copyright (c) 2011 Trusted Logic S.A.
  * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
  *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place, Suite 330, Boston, MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+ * MA 02111-1307 USA
  */
 
-#ifndef __SCX_PUBLIC_CRYPTO_H
-#define __SCX_PUBLIC_CRYPTO_H
+#ifndef __TF_PUBLIC_CRYPTO_H
+#define __TF_PUBLIC_CRYPTO_H
 
-#include "scxlnx_defs.h"
+#include "tf_defs.h"
 #include <linux/io.h>
 #include <mach/io.h>
 
 #include <clockdomain.h>
 
+#ifdef __ASM_ARM_ARCH_OMAP_CLOCKDOMAIN_H
+#define clkdm_wakeup omap2_clkdm_wakeup
+#define clkdm_allow_idle omap2_clkdm_allow_idle
+#endif
+
 /*-------------------------------------------------------------------------- */
 
 #define PUBLIC_CRYPTO_HWA_AES1		0x1
-#define PUBLIC_CRYPTO_HWA_AES2		0x2
 #define PUBLIC_CRYPTO_HWA_DES		0x4
 #define PUBLIC_CRYPTO_HWA_SHA		0x8
 
@@ -39,7 +44,6 @@
 
 #define PUBLIC_CRYPTO_CLKSTCTRL_CLOCK_REG	0x4A009580
 #define PUBLIC_CRYPTO_AES1_CLOCK_REG		0x4A0095A0
-#define PUBLIC_CRYPTO_AES2_CLOCK_REG		0x4A0095A8
 #define PUBLIC_CRYPTO_DES3DES_CLOCK_REG		0x4A0095B0
 #define PUBLIC_CRYPTO_SHA2MD5_CLOCK_REG		0x4A0095C8
 
@@ -110,14 +114,14 @@
 /*
  *The magic word.
  */
-#define CRYPTOKI_UPDATE_SHORTCUT_CONTEXT_MAGIC		0x45EF683C
+#define CUS_CONTEXT_MAGIC		0x45EF683C
 
 /*-------------------------------------------------------------------------- */
 /* CUS context structure                                                     */
 /*-------------------------------------------------------------------------- */
 
 /* State of an AES operation */
-struct PUBLIC_CRYPTO_AES_OPERATION_STATE {
+struct tf_crypto_aes_operation_state {
 	u32 AES_IV_0;
 	u32 AES_IV_1;
 	u32 AES_IV_2;
@@ -138,14 +142,14 @@ struct PUBLIC_CRYPTO_AES_OPERATION_STATE {
 	u32 key_is_public;
 };
 
-struct PUBLIC_CRYPTO_DES_OPERATION_STATE {
+struct tf_crypto_des_operation_state {
 	u32 DES_IV_L;
 	u32 DES_IV_H;
 };
 
 #define HASH_BLOCK_BYTES_LENGTH		64
 
-struct PUBLIC_CRYPTO_SHA_OPERATION_STATE {
+struct tf_crypto_sha_operation_state {
 	/* Current digest */
 	u32 SHA_DIGEST_A;
 	u32 SHA_DIGEST_B;
@@ -157,63 +161,60 @@ struct PUBLIC_CRYPTO_SHA_OPERATION_STATE {
 	u32 SHA_DIGEST_H;
 
 	/* This buffer contains a partial chunk */
-	u8 pChunkBuffer[HASH_BLOCK_BYTES_LENGTH];
+	u8 chunk_buffer[HASH_BLOCK_BYTES_LENGTH];
 
-	/* Number of bytes stored in pChunkBuffer (0..64) */
-	u32 nChunkLength;
+	/* Number of bytes stored in chunk_buffer (0..64) */
+	u32 chunk_length;
 
 	/*
 	 * Total number of bytes processed so far
 	 * (not including the partial chunk)
 	 */
-	u32 nBytesProcessed;
+	u32 bytes_processed;
 
 	u32 CTRL;
 };
 
-union PUBLIC_CRYPTO_OPERATION_STATE {
-	struct PUBLIC_CRYPTO_AES_OPERATION_STATE aes;
-	struct PUBLIC_CRYPTO_DES_OPERATION_STATE des;
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE sha;
+union tf_crypto_operation_state {
+	struct tf_crypto_aes_operation_state aes;
+	struct tf_crypto_des_operation_state des;
+	struct tf_crypto_sha_operation_state sha;
 };
 
 /*
  *Fully describes a public crypto operation
  *(i.e., an operation that has a shortcut attached).
  */
-struct CRYPTOKI_UPDATE_SHORTCUT_CONTEXT {
+struct cus_context {
 	/*
 	 *Identifies the public crypto operation in the list of all public
 	 *operations.
 	 */
 	struct list_head list;
 
-	u32 nMagicNumber;	/*Must be set to
-				 *{CRYPTOKI_UPDATE_SHORTCUT_CONTEXT_MAGIC} */
+	u32 magic_number;	/*Must be set to
+				 *{CUS_CONTEXT_MAGIC} */
 
 	/*basic fields */
-	u32 hClientSession;
-	u32 nCommandID;
-	u32 nHWAID;
-	u32 nHWA_CTRL;
-	u32 hKeyContext;
-	union PUBLIC_CRYPTO_OPERATION_STATE sOperationState;
-	u32 nUseCount;
-	bool bSuspended;
+	u32 client_session;
+	u32 command_id;
+	u32 hwa_id;
+	u32 hwa_ctrl;
+	u32 key_context;
+	union tf_crypto_operation_state operation_state;
+	u32 use_count;
+	bool suspended;
 };
 
-struct CRYPTOKI_UPDATE_PARAMS {
+struct cus_params {
 	/*fields for data processing of an update command */
-	u32 nInputDataLength;
-	u8 *pInputData;
-	struct SCXLNX_SHMEM_DESC *pInputShmem;
+	u32 input_data_length;
+	u8 *input_data;
+	struct tf_shmem_desc *input_shmem;
 
-	u32 nResultDataLength;
-	u8 *pResultData;
-	struct SCXLNX_SHMEM_DESC *pOutputShmem;
-
-	u8 *pS2CDataBuffer;
-	u32 nS2CDataBufferMaxLength;
+	u32 output_data_length;
+	u8 *output_data;
+	struct tf_shmem_desc *output_shmem;
 };
 
 /*-------------------------------------------------------------------------- */
@@ -224,46 +225,46 @@ struct CRYPTOKI_UPDATE_PARAMS {
 /*
 *Initialize the public crypto DMA chanels and global HWA semaphores
  */
-u32 SCXPublicCryptoInit(void);
+u32 tf_crypto_init(void);
 
 /*
  *Initialize the device context CUS fields
  *(shortcut semaphore and public CUS list)
  */
-void SCXPublicCryptoInitDeviceContext(struct SCXLNX_CONNECTION *pDeviceContext);
+void tf_crypto_init_cus(struct tf_connection *connection);
 
 /**
  *Terminate the public crypto (including DMA)
  */
-void SCXPublicCryptoTerminate(void);
+void tf_crypto_terminate(void);
 
-int SCXPublicCryptoTryShortcutedUpdate(struct SCXLNX_CONNECTION *pConn,
-	struct SCX_COMMAND_INVOKE_CLIENT_COMMAND *pMessage,
-	struct SCX_ANSWER_INVOKE_CLIENT_COMMAND *pAnswer);
+int tf_crypto_try_shortcuted_update(struct tf_connection *connection,
+	struct tf_command_invoke_client_command *command,
+	struct tf_answer_invoke_client_command *answer);
 
-int SCXPublicCryptoExecuteRPCCommand(u32 nRPCCommand, void *pRPCSharedBuffer);
+int tf_crypto_execute_rpc(u32 rpc_command, void *rpc_shared_buffer);
 
 /*-------------------------------------------------------------------------- */
 /*
  *Helper methods
  */
-u32 SCXPublicCryptoWaitForReadyBit(u32 *pRegister, u32 vBit);
-void SCXPublicCryptoWaitForReadyBitInfinitely(u32 *pRegister, u32 vBit);
+u32 tf_crypto_wait_for_ready_bit(u32 *reg, u32 bit);
+void tf_crypto_wait_for_ready_bit_infinitely(u32 *reg, u32 bit);
 
-void SCXPublicCryptoEnableClock(uint32_t vClockPhysAddr);
-void SCXPublicCryptoDisableClock(uint32_t vClockPhysAddr);
+void tf_crypto_enable_clock(uint32_t clock_paddr);
+void tf_crypto_disable_clock(uint32_t clock_paddr);
 
 #define LOCK_HWA	true
 #define UNLOCK_HWA	false
 
-void PDrvCryptoLockUnlockHWA(u32 nHWAID, bool bDoLock);
+void tf_crypto_lock_hwa(u32 hwa_id, bool do_lock);
 
 /*---------------------------------------------------------------------------*/
 /*                               AES operations                              */
 /*---------------------------------------------------------------------------*/
 
-void PDrvCryptoAESInit(void);
-void PDrvCryptoAESExit(void);
+void tf_aes_init(void);
+void tf_aes_exit(void);
 
 #ifdef CONFIG_SMC_KERNEL_CRYPTO
 int register_smc_public_crypto_aes(void);
@@ -283,21 +284,21 @@ static inline void unregister_smc_public_crypto_aes(void) {}
  *The AES1 accelerator is assumed loaded with the correct key
  *
  *AES_CTRL:		defines the mode and direction
- *pAESState:	defines the operation IV
- *pSrc:			Input buffer to process.
- *pDest:			Output buffer containing the processed data.
+ *aes_state:	defines the operation IV
+ *src:			Input buffer to process.
+ *dest:			Output buffer containing the processed data.
  *
- *nbBlocks number of block(s)to process.
+ *nb_blocks number of block(s)to process.
  */
-bool PDrvCryptoUpdateAES(struct PUBLIC_CRYPTO_AES_OPERATION_STATE *pAESState,
-	u8 *pSrc, u8 *pDest, u32 nbBlocks);
+bool tf_aes_update(struct tf_crypto_aes_operation_state *aes_state,
+	u8 *src, u8 *dest, u32 nb_blocks);
 
 /*---------------------------------------------------------------------------*/
 /*                              DES/DES3 operations                          */
 /*---------------------------------------------------------------------------*/
 
-void PDrvCryptoDESInit(void);
-void PDrvCryptoDESExit(void);
+void tf_des_init(void);
+void tf_des_exit(void);
 
 /**
  *This function performs a DES update operation.
@@ -305,21 +306,21 @@ void PDrvCryptoDESExit(void);
  *The DES accelerator is assumed loaded with the correct key
  *
  *DES_CTRL:		defines the mode and direction
- *pDESState:	defines the operation IV
- *pSrc:			Input buffer to process.
- *pDest:			Output buffer containing the processed data.
- *nbBlocks:		Number of block(s)to process.
+ *des_state:	defines the operation IV
+ *src:			Input buffer to process.
+ *dest:			Output buffer containing the processed data.
+ *nb_blocks:		Number of block(s)to process.
  */
-bool PDrvCryptoUpdateDES(u32 DES_CTRL,
-	struct PUBLIC_CRYPTO_DES_OPERATION_STATE *pDESState,
-	u8 *pSrc, u8 *pDest, u32 nbBlocks);
+bool tf_des_update(u32 DES_CTRL,
+	struct tf_crypto_des_operation_state *des_state,
+	u8 *src, u8 *dest, u32 nb_blocks);
 
 /*---------------------------------------------------------------------------*/
 /*                               Digest operations                           */
 /*---------------------------------------------------------------------------*/
 
-void PDrvCryptoDigestInit(void);
-void PDrvCryptoDigestExit(void);
+void tf_digest_init(void);
+void tf_digest_exit(void);
 
 #ifdef CONFIG_SMC_KERNEL_CRYPTO
 int register_smc_public_crypto_digest(void);
@@ -337,12 +338,12 @@ static inline void unregister_smc_public_crypto_digest(void) {}
  *This function performs a HASH update Operation.
  *
  *SHA_CTRL:		defines the algorithm
- *pSHAState:	State of the operation
- *pData:			Input buffer to process
- *dataLength:	Length in bytes of the input buffer.
+ *sha_state:	State of the operation
+ *data:			Input buffer to process
+ *data_length:	Length in bytes of the input buffer.
  */
-void PDrvCryptoUpdateHash(
-	struct PUBLIC_CRYPTO_SHA_OPERATION_STATE *pSHAState,
-	u8 *pData, u32 dataLength);
+bool tf_digest_update(
+	struct tf_crypto_sha_operation_state *sha_state,
+	u8 *data, u32 data_length);
 
-#endif /*__SCX_PUBLIC_CRYPTO_H */
+#endif /*__TF_PUBLIC_CRYPTO_H */

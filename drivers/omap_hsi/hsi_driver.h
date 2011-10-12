@@ -225,7 +225,7 @@ struct hsi_platform_data {
 			unsigned long rate);
 	int (*wakeup_enable) (int hsi_port);
 	int (*wakeup_disable) (int hsi_port);
-	int (*wakeup_is_from_hsi) (int *hsi_port);
+	bool (*wakeup_is_from_hsi) (int *hsi_port);
 	int (*board_suspend)(int hsi_port, bool dev_may_wakeup);
 	int (*board_resume)(int hsi_port);
 	u8 num_ports;
@@ -404,5 +404,16 @@ static inline int hsi_clocks_enable(struct device *dev, const char *s)
 {
 	return hsi_clocks_enable_channel(dev, HSI_CH_NUMBER_NONE, s);
 }
+
+#if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP4)
+extern u8 pm44xx_errata;
+#define IS_HSI_PM44XX_ERRATUM(id)   (pm44xx_errata & (id))
+#define OMAP4_PM_ERRATUM_HSI_SWAKEUP_iXXX       BIT(2)
+extern void omap_pm_clear_dsp_wake_up(void);
+#else
+#define IS_HSI_PM44XX_ERRATUM(id)		0
+#define OMAP4_PM_ERRATUM_HSI_SWAKEUP_iXXX       0
+#define static inline void omap_pm_clear_dsp_wake_up(void) { }
+#endif
 
 #endif /* __HSI_DRIVER_H__ */

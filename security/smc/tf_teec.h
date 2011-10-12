@@ -1,5 +1,5 @@
-/*
- * Copyright (c) 2006-2010 Trusted Logic S.A.
+/**
+ * Copyright (c) 2011 Trusted Logic S.A.
  * All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -16,30 +16,18 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
  * MA 02111-1307 USA
  */
-#include <linux/mman.h>
-#include "scxlnx_util.h"
 
-void *internal_kmalloc(size_t nSize, int nPriority)
-{
-	void *pResult;
-	struct SCXLNX_DEVICE *pDevice = SCXLNXGetDevice();
+#ifndef __TF_TEEC_H__
+#define __TF_TEEC_H__
 
-	pResult = kmalloc(nSize, nPriority);
+#ifdef CONFIG_TF_TEEC
 
-	if (pResult != NULL)
-		atomic_inc(
-			&pDevice->sDeviceStats.stat_memories_allocated);
+#include "tf_defs.h"
+#include "tee_client_api.h"
 
-	return pResult;
-}
+TEEC_Result TEEC_encode_error(int err);
+int TEEC_decode_error(TEEC_Result ret);
 
-void internal_kfree(void *pMemory)
-{
-	struct SCXLNX_DEVICE *pDevice = SCXLNXGetDevice();
+#endif /* defined(CONFIG_TF_TEEC) */
 
-	if (pMemory != NULL)
-		atomic_dec(
-			&pDevice->sDeviceStats.stat_memories_allocated);
-	return kfree(pMemory);
-}
-
+#endif  /* !defined(__TF_TEEC_H__) */

@@ -474,6 +474,7 @@ struct omap_dss_device {
 	enum omap_channel channel;
 
 	bool first_vsync;
+	bool sync_lost_error;
 
 	union {
 		struct {
@@ -552,6 +553,9 @@ struct omap_dss_device {
 
 		enum omap_panel_config config;
 		struct fb_monspecs monspecs;
+
+		u32 width_in_um;
+		u32 height_in_um;
 	} panel;
 
 	struct {
@@ -688,6 +692,9 @@ void omap_dispc_set_irq_type(int channel, enum omap_dispc_irq_type type);
 
 #define to_dss_driver(x) container_of((x), struct omap_dss_driver, driver)
 #define to_dss_device(x) container_of((x), struct omap_dss_device, dev)
+
+void omapdss_display_get_dimensions(struct omap_dss_device *dssdev,
+				u32 *width_in_um, u32 *height_in_um);
 
 void omapdss_dsi_vc_enable_hs(struct omap_dss_device *dssdev, int channel,
 		bool enable);

@@ -265,6 +265,7 @@ static struct platform_device tuna_gpio_i2c5_device = {
 
 #define OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
 #define OMAP_TUNA_ION_HEAP_TILER_SIZE		(SZ_128M - SZ_32M)
+#define OMAP_TUNA_ION_HEAP_NONSECURE_TILER_SIZE	SZ_32M
 #define OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE	SZ_32M
 #define PHYS_ADDR_SMC_SIZE	(SZ_1M * 3)
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
@@ -273,7 +274,7 @@ static struct platform_device tuna_gpio_i2c5_device = {
 				OMAP_TUNA_ION_HEAP_SECURE_INPUT_SIZE)
 
 static struct ion_platform_data tuna_ion_data = {
-	.nr = 3,
+	.nr = 4,
 	.heaps = {
 		{
 			.type = ION_HEAP_TYPE_CARVEOUT,
@@ -296,6 +297,13 @@ static struct ion_platform_data tuna_ion_data = {
 			.name = "large_surfaces",
 			.base = 0x80000000 + SZ_512M + SZ_2M,
 			.size = OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE,
+		},
+		{	.type = OMAP_ION_HEAP_TYPE_TILER,
+			.id = OMAP_ION_HEAP_NONSECURE_TILER,
+			.name = "nonsecure_tiler",
+			.base = 0x80000000 + SZ_512M + SZ_2M +
+				OMAP_TUNA_ION_HEAP_LARGE_SURFACES_SIZE,
+			.size = OMAP_TUNA_ION_HEAP_NONSECURE_TILER_SIZE,
 		},
 	},
 };
@@ -437,10 +445,10 @@ static void __init tuna_init_early(void)
 
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type		= MUSB_INTERFACE_UTMI,
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
-	.mode			= MUSB_PERIPHERAL,
-#else
+#ifdef CONFIG_USB_MUSB_OTG
 	.mode			= MUSB_OTG,
+#else
+	.mode			= MUSB_PERIPHERAL,
 #endif
 	.power			= 100,
 };
@@ -643,9 +651,28 @@ static struct regulator_init_data tuna_vusb = {
 static struct regulator_init_data tuna_clk32kg = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
-		.always_on	= true,
+		.always_on		= true,
 	},
 };
+
+static struct regulator_consumer_supply tuna_clk32kaudio_supply[] = {
+	{
+		.supply = "clk32kaudio",
+	},
+	{
+		.supply = "twl6040_clk32k",
+	}
+};
+
+static struct regulator_init_data tuna_clk32kaudio = {
+	.constraints = {
+		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.boot_on                = true,
+	},
+	.num_consumer_supplies  = ARRAY_SIZE(tuna_clk32kaudio_supply),
+	.consumer_supplies      = tuna_clk32kaudio_supply,
+};
+
 
 static struct regulator_init_data tuna_vdd3 = {
 	.constraints = {
@@ -706,6 +733,7 @@ static struct twl4030_platform_data tuna_twldata = {
 	.vaux2		= &tuna_vaux2,
 	.vaux3		= &tuna_vaux3,
 	.clk32kg	= &tuna_clk32kg,
+	.clk32kaudio	= &tuna_clk32kaudio,
 
 	/* children */
 	.codec		= &twl6040_codec,
@@ -736,9 +764,6 @@ static void tuna_audio_init(void)
 
 	omap_mux_init_signal("gpmc_a24.gpio_48", OMAP_PIN_OUTPUT | OMAP_MUX_MODE3);
 	omap_mux_init_signal("kpd_col3.gpio_171", OMAP_PIN_OUTPUT | OMAP_MUX_MODE3);
-
-	/* McASP for S/PDIF out */
-	omap_mux_init_signal("abe_dmic_din2.abe_mcasp_axr", OMAP_PIN_OUTPUT);
 }
 
 static struct i2c_board_info __initdata tuna_i2c1_boardinfo[] = {
@@ -837,7 +862,7 @@ static struct omap_board_mux board_mux[] __initdata = {
 
 static struct omap_board_mux board_wkup_mux[] __initdata = {
 	/* power button */
-	OMAP4_MUX(SIM_CD, OMAP_MUX_MODE3 | OMAP_PIN_INPUT | OMAP_WAKEUP_EN),
+	OMAP4_MUX(SIM_CD, OMAP_MUX_MODE3 | OMAP_PIN_INPUT),
 	{ .reg_offset = OMAP_MUX_TERMINATOR },
 };
 
@@ -1276,6 +1301,7 @@ static void __init tuna_init(void)
 	omap4_tuna_jack_init();
 	omap4_tuna_sensors_init();
 	omap4_tuna_led_init();
+	omap4_tuna_pogo_init();
 	omap4_tuna_connector_init();
 #ifdef CONFIG_OMAP_HSI_DEVICE
 	if (TUNA_TYPE_MAGURO == omap4_tuna_get_type())
