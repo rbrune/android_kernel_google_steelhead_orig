@@ -1083,7 +1083,8 @@ static int configure_overlay(enum omap_plane plane)
 	dispc_set_burst_size(plane, c->burst_size);
 	dispc_set_zorder(plane, c->zorder);
 	dispc_enable_zorder(plane, 1);
-	dispc_setup_plane_fifo(plane, c->fifo_low, c->fifo_high);
+	if (!cpu_is_omap44xx())
+		dispc_setup_plane_fifo(plane, c->fifo_low, c->fifo_high);
 	if (plane != OMAP_DSS_GFX)
 		_dispc_setup_color_conv_coef(plane, &c->cconv);
 
@@ -1578,14 +1579,14 @@ end:
 }
 
 static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
-			bool wait_for_vsync)
+			bool wait_for_go)
 {
 	struct overlay_cache_data *oc;
 	struct manager_cache_data *mc;
 	unsigned long flags;
 	int r, r_get, i;
 
-	DSSDBG("omap_dss_mgr_blank(%s,vsync=%d)\n", mgr->name, wait_for_vsync);
+	DSSDBG("omap_dss_mgr_blank(%s,wait=%d)\n", mgr->name, wait_for_go);
 
 	r_get = r = dispc_runtime_get();
 	/* still clear cache even if failed to get clocks, just don't config */
@@ -1645,7 +1646,7 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 			pr_info("mgr_blank while GO is set");
 	}
 
-	if (r_get || !wait_for_vsync) {
+	if (r_get || !wait_for_go) {
 		/* pretend that programming has happened */
 		for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
 			oc = &dss_cache.overlay_cache[i];
@@ -1674,8 +1675,8 @@ static int omap_dss_mgr_blank(struct omap_overlay_manager *mgr,
 
 	spin_unlock_irqrestore(&dss_cache.lock, flags);
 
-	if (wait_for_vsync && !r)
-		mgr->wait_for_vsync(mgr);
+	if (wait_for_go && !r)
+		mgr->wait_for_go(mgr);
 
 	if (!r_get)
 		dispc_runtime_put();
