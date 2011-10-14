@@ -217,7 +217,7 @@ static long setup_mgr(struct dsscomp_dev *cdev,
 		return -ENODEV;
 
 	comp = dsscomp_new(mgr);
-	if (IS_ERR(comp))
+	if (IS_ERR_OR_NULL(comp))
 		return PTR_ERR(comp);
 
 	/* swap red & blue if requested */

@@ -246,7 +246,7 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 		mgr = cdev->mgrs[ch];
 
 		comp[ch] = dsscomp_new(mgr);
-		if (IS_ERR(comp[ch])) {
+		if (IS_ERR_OR_NULL(comp[ch])) {
 			comp[ch] = NULL;
 			dev_warn(DEV(cdev), "failed to get composition on %s\n",
 								mgr->name);
@@ -271,6 +271,8 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 	/* configure manager data from gralloc composition */
 	for (i = 0; i < d->num_mgrs; i++) {
 		ch = channels[i];
+		if (!comp[ch])
+			continue;
 		r = dsscomp_set_mgr(comp[ch], d->mgrs + i);
 		if (r)
 			dev_err(DEV(cdev), "failed to set mgr%d (%d)\n", ch, r);
