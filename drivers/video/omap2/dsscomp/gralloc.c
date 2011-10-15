@@ -161,7 +161,7 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 #ifdef CONFIG_DEBUG_FS
 	u32 ms = ktime_to_ms(ktime_get());
 #endif
-	u32 channels[ARRAY_SIZE(d->mgrs)], ch;
+	int channels[ARRAY_SIZE(d->mgrs)], ch;
 	int skip;
 	struct dsscomp_gralloc_t *gsync;
 	struct dss2_rect_t win = { .w = 0 };
@@ -216,8 +216,10 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 	/* mark managers we are using */
 	for (i = 0; i < d->num_mgrs; i++) {
 		/* verify display is valid & connected, ignore if not */
-		if (d->mgrs[i].ix >= cdev->num_displays)
+		if (d->mgrs[i].ix >= cdev->num_displays) {
+			channels[i] = -1;
 			continue;
+		}
 		dev = cdev->displays[d->mgrs[i].ix];
 		if (!dev) {
 			dev_warn(DEV(cdev), "failed to get display%d\n",
@@ -271,7 +273,7 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 	/* configure manager data from gralloc composition */
 	for (i = 0; i < d->num_mgrs; i++) {
 		ch = channels[i];
-		if (!comp[ch])
+		if ((ch == -1) || !comp[ch])
 			continue;
 		r = dsscomp_set_mgr(comp[ch], d->mgrs + i);
 		if (r)
@@ -293,7 +295,7 @@ int dsscomp_gralloc_queue(struct dsscomp_setup_dispc_data *d,
 		ch = channels[mgr_ix];
 
 		/* skip overlays on compositions we could not create */
-		if (!comp[ch])
+		if ((ch == -1) || !comp[ch])
 			continue;
 
 		/* swap red & blue if requested */
