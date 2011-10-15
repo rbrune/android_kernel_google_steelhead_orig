@@ -54,11 +54,13 @@ static void l3_dump_targ_context(u32 baseaddr)
 	pr_err("CUSTOMINFO_OPCODE : 0x%08x\n", readl(baseaddr + L3_CUSTOMINFO_OPCODE));
 	pr_err("ADDRSPACESIZELOG  : 0x%08x\n", readl(baseaddr + L3_ADDRSPACESIZELOG));
 
+#ifdef CONFIG_MACH_TUNA
 	/* Identified as USBHOST EHCI error */
 	if ((readl(baseaddr + L3_MSTADDR) == 0xc0) &&
 			(readl(baseaddr + L3_SLVADDR) == 0x3))
 		if (omap4_tuna_get_type() == TUNA_TYPE_TORO)
 			print_async_list();
+#endif
 }
 
 /*
