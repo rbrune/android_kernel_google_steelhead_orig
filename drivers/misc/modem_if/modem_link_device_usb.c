@@ -64,6 +64,7 @@ static int usb_init_communication(struct link_device *ld,
 	switch (iod->format) {
 	case IPC_BOOT:
 		ld->com_state = COM_BOOT;
+		skb_queue_purge(&ld->sk_fmt_tx_q);
 		break;
 
 	case IPC_RAMDUMP:
@@ -159,7 +160,7 @@ static void usb_rx_complete(struct urb *urb)
 			}
 		}
 re_submit:
-		if (urb->status)
+		if (urb->status || atomic_read(&usb_ld->suspend_count))
 			break;
 		usb_rx_submit(pipe_data, urb, GFP_ATOMIC);
 		return;
@@ -238,12 +239,13 @@ static int usb_tx_urb_with_skb(struct usb_link_device *usb_ld,
 	struct usb_device *usbdev = usb_ld->usbdev;
 	unsigned long flags;
 
-	if (!usbdev)
+	if (!usbdev || (usbdev->state == USB_STATE_NOTATTACHED) ||
+			usb_ld->host_wake_timeout_flag)
 		return -ENODEV;
 
 	pm_runtime_get_noresume(&usbdev->dev);
 
-	if (pm_runtime_suspended(&usbdev->dev)) {
+	if (usbdev->dev.power.runtime_status != RPM_ACTIVE) {
 		usb_ld->resume_status = AP_INITIATED_RESUME;
 		SET_SLAVE_WAKEUP(usb_ld->pdata, 1);
 
@@ -257,6 +259,7 @@ static int usb_tx_urb_with_skb(struct usb_link_device *usb_ld,
 				SET_SLAVE_WAKEUP(usb_ld->pdata, 0);
 				pm_runtime_put_autosuspend(&usbdev->dev);
 				usb_change_modem_state(usb_ld, STATE_CRASH_EXIT);
+				usb_ld->host_wake_timeout_flag = 1;
 				return -1;
 			}
 			pr_err("host wakeup timeout ! retry..\n");
@@ -342,8 +345,8 @@ static void usb_tx_work(struct work_struct *work)
 
 			ret = usb_tx_urb_with_skb(usb_ld, skb, pipe_data);
 			if (ret < 0) {
-				pr_err("%s usb_tx_urb_with_skb for iod(%d)\n",
-						__func__, iod->format);
+				pr_err("%s usb_tx_urb_with_skb for iod(%d), ret(%d)\n",
+						__func__, iod->format, ret);
 				skb_queue_head(&ld->sk_fmt_tx_q, skb);
 				return;
 			}
@@ -354,8 +357,8 @@ static void usb_tx_work(struct work_struct *work)
 			pipe_data = &usb_ld->devdata[IF_USB_RAW_EP];
 			ret = usb_tx_urb_with_skb(usb_ld, skb, pipe_data);
 			if (ret < 0) {
-				pr_err("%s usb_tx_urb_with_skb for raw iod\n",
-						__func__);
+				pr_err("%s usb_tx_urb_with_skb for raw, ret(%d)\n",
+						__func__, ret);
 				skb_queue_head(&ld->sk_raw_tx_q, skb);
 				return;
 			}
@@ -621,6 +624,7 @@ static int __devinit if_usb_probe(struct usb_interface *intf,
 	atomic_set(&usb_ld->suspend_count, 0);
 
 	SET_HOST_ACTIVE(usb_ld->pdata, 1);
+	usb_ld->host_wake_timeout_flag = 0;
 
 	if (gpio_get_value(usb_ld->pdata->gpio_phone_active)) {
 		pm_runtime_set_autosuspend_delay(
@@ -632,7 +636,6 @@ static int __devinit if_usb_probe(struct usb_interface *intf,
 		}
 		usb_ld->if_usb_connected = 1;
 		usb_ld->flow_suspend = 0;
-
 		err = request_threaded_irq(usb_ld->pdata->irq_host_wakeup,
 			NULL,
 			usb_resume_irq,

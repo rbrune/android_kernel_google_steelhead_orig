@@ -54,6 +54,7 @@ enum {
 struct yas530_private_data {
 	int flags;
 	char offsets[3];
+	const int *correction_matrix;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -80,6 +81,11 @@ static unsigned char d2, d3, d4, d5, d6, d7, d8, d9, d0;
 static unsigned char dck;
 
 /* -------------------------------------------------------------------------- */
+
+static int is_overunderflow(short xy1y2)
+{
+	return (xy1y2 == 0 || xy1y2 == 4095);
+}
 
 static int set_hardware_offset(void *mlsl_handle,
 			       struct ext_slave_descr *slave,
@@ -434,7 +440,11 @@ static int yas530_read(void *mlsl_handle,
 	int busy;
 	short t, x, y1, y2;
 	int32_t xyz[3];
+	int32_t tmp[3];
+	int i;
 	short rawfixed[3];
+	struct yas530_private_data *private_data = pdata->private_data;
+	const int *correction_matrix = private_data->correction_matrix;
 
 	result = measure_normal(mlsl_handle, slave, pdata,
 				&busy, &t, &x, &y1, &y2);
@@ -444,6 +454,19 @@ static int yas530_read(void *mlsl_handle,
 	}
 
 	coordinate_conversion(x, y1, y2, t, &xyz[0], &xyz[1], &xyz[2]);
+	if (correction_matrix) {
+		for (i = 0; i < 3; i++) {
+			tmp[i] =  (correction_matrix[i * 3 + 0]
+				* (xyz[0] / 10)) / 100
+				+ (correction_matrix[i * 3 + 1]
+				* (xyz[1] / 10)) / 100
+				+ (correction_matrix[i * 3 + 2]
+				* (xyz[2] / 10)) / 100;
+		}
+		for (i = 0; i < 3; i++)
+			xyz[i] = tmp[i];
+	}
+
 
 	rawfixed[0] = (short)(xyz[0] / 100);
 	rawfixed[1] = (short)(xyz[1] / 100);
@@ -455,6 +478,9 @@ static int yas530_read(void *mlsl_handle,
 	data[3] = rawfixed[1] & 0xFF;
 	data[4] = rawfixed[2] >> 8;
 	data[5] = rawfixed[2] & 0xFF;
+	data[6] = is_overunderflow(x)
+			|| is_overunderflow(y1)
+			|| is_overunderflow(y2);
 
 	return result;
 }
@@ -502,6 +528,14 @@ static int yas530_get_config(void *mlsl_handle,
 	case MPU_SLAVE_OFFSET_VALS: {
 		if (!(private_data->flags & FLAG_RESUMED)) {
 			result = power_up(mlsl_handle, slave, pdata);
+			if (result) {
+				LOG_RESULT_LOCATION(result);
+				return result;
+			}
+		} else {
+			result = inv_serial_single_write(mlsl_handle,
+					pdata->address,
+					YAS530_REGADDR_ACTUATE_INIT_COIL, 0);
 			if (result) {
 				LOG_RESULT_LOCATION(result);
 				return result;
@@ -577,6 +611,8 @@ static int yas530_init(void *mlsl_handle,
 	if (!private_data)
 		return INV_ERROR_MEMORY_EXAUSTED;
 
+	private_data->correction_matrix = pdata->private_data;
+
 	pdata->private_data = private_data;
 
 	result = power_up(mlsl_handle, slave, pdata);
@@ -616,7 +652,7 @@ static struct ext_slave_descr yas530_descr = {
 	.type             = EXT_SLAVE_TYPE_COMPASS,
 	.id               = COMPASS_ID_YAS530,
 	.read_reg         = 0x06,
-	.read_len         = 6,
+	.read_len         = 7,
 	.endian           = EXT_SLAVE_BIG_ENDIAN,
 	.range            = {3276, 8001},
 	.trigger          = NULL,
