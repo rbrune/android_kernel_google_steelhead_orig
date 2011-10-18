@@ -45,6 +45,8 @@ extern void steelhead_set_counter_slew_rate(s32 correction);
 
 #define STEELHEAD_REV_ALPHA   0x0
 #define STEELHEAD_REV_EVT     0x1
+#define STEELHEAD_REV_EVT2    0x2
+#define STEELHEAD_REV_DVT     0x3
 extern int steelhead_hw_rev;
 
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG

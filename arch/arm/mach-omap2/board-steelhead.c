@@ -126,6 +126,8 @@ static struct steelhead_gpio_reservation hwrev_gpios[] = {
 static const char const *omap4_steelhead_hw_name[] = {
 	[STEELHEAD_REV_ALPHA] = "Steelhead ALPHA",
 	[STEELHEAD_REV_EVT]   = "Steelhead EVT",
+	[STEELHEAD_REV_EVT2]  = "Steelhead EVT2",
+	[STEELHEAD_REV_DVT]   = "Steelhead DVT",
 };
 
 static const char *omap4_steelhead_hw_rev_name(void)
@@ -163,6 +165,7 @@ static void __init omap4_steelhead_init_hw_rev(void)
 	pr_info("Steelhead HW revision: %02x (%s), cpu %s\n", steelhead_hw_rev,
 		omap4_steelhead_hw_rev_name(),
 		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460");
+
 }
 
 #define OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
@@ -1280,6 +1283,22 @@ static void __init steelhead_init(void)
 						   -1);
 		if (status)
 			pr_err("TPS62361 initialization failed: %d\n", status);
+
+		/*
+		 * Some devices have a 4430 chip on a 4460 board, manually
+		 * tweak the power tree to the 4460 style with the TPS
+		 * regulator.
+		 */
+		if (cpu_is_omap443x()) {
+			/* Disable 4430 mapping */
+			omap_twl_pmic_update("mpu", CHIP_IS_OMAP443X, 0x0);
+			omap_twl_pmic_update("core", CHIP_IS_OMAP443X, 0x0);
+			/* make 4460 map usable for 4430 */
+			omap_twl_pmic_update("core", CHIP_IS_OMAP446X,
+					     CHIP_IS_OMAP443X);
+			omap_tps6236x_update("mpu", CHIP_IS_OMAP446X,
+					     CHIP_IS_OMAP443X);
+		}
 	}
 	if (enable_sr)
 		omap_enable_smartreflex_on_init();
