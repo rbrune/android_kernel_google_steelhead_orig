@@ -58,7 +58,8 @@ const struct lpddr2_timings lpddr2_jedec_timings_400_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50
+	.tFAW		= 50,
+	.omap_emif_self_refresh_time = 80,
 };
 
 /* Base AC Timing values specified by JESD209-2 for 333 MHz operation */
@@ -82,7 +83,8 @@ const struct lpddr2_timings lpddr2_jedec_timings_333_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50
+	.tFAW		= 50,
+	.omap_emif_self_refresh_time = 80,
 };
 
 /* Base AC Timing values specified by JESD209-2 for 200 MHz operation */
@@ -106,7 +108,8 @@ const struct lpddr2_timings lpddr2_jedec_timings_200_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50
+	.tFAW		= 50,
+	.omap_emif_self_refresh_time = 80,
 };
 
 /*
