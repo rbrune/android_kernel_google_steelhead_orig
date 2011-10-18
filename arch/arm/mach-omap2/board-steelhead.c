@@ -438,11 +438,13 @@ static struct regulator_init_data steelhead_vdd3 = {
 
 /* define a regulator so on 4460 this can be turned off because
  * it's not needed.
- * on 4430 however, it needs to be always on to provide vmem to the CPU.
+ * for EVT, this is always on.  For DVT, we can disable because
+ * we tie the 1.29V output of the PMIC to memory.
  */
 static struct regulator_init_data steelhead_vmem = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.always_on              = true,
 	},
 };
 
@@ -1268,7 +1270,6 @@ static void __init steelhead_init(void)
 	omap4_steelhead_nfc_init();
 
 	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA) {
-		steelhead_vmem.constraints.always_on = true;
 		steelhead_vdd3.constraints.always_on = true;
 	} else {
 		int status;
