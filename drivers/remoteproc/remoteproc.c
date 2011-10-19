@@ -48,8 +48,6 @@ static DEFINE_SPINLOCK(rprocs_lock);
 /* debugfs parent dir */
 static struct dentry *rproc_dbg;
 
-static void complete_remoteproc_crash(struct rproc *rproc);
-
 static ssize_t rproc_format_trace_buf(char __user *userbuf, size_t count,
 				    loff_t *ppos, const void *src, int size)
 {
@@ -103,6 +101,21 @@ static ssize_t rproc_name_read(struct file *filp, char __user *userbuf,
 	i = snprintf(buf, RPROC_MAX_NAME + 2, "%s\n", rproc->name);
 
 	return simple_read_from_buffer(userbuf, count, ppos, buf, i);
+}
+
+static ssize_t rproc_version_read(struct file *filp, char __user *userbuf,
+						size_t count, loff_t *ppos)
+{
+
+	struct rproc *rproc = filp->private_data;
+	char *pch;
+	int len;
+	pch = strstr(rproc->header, "version:");
+	if (!pch)
+		return 0;
+	pch += strlen("version:") + 1;
+	len = rproc->header_len - (pch - rproc->header);
+	return simple_read_from_buffer(userbuf, count, ppos, pch, len);
 }
 
 static int rproc_open_generic(struct inode *inode, struct file *file)
@@ -376,8 +389,8 @@ ssize_t core_rproc_write(struct file *filp,
 
 	if (rproc->state == RPROC_CRASHED) {
 		pr_info("remoteproc %s: resuming crash recovery\n",
-				rproc->name);
-		complete_remoteproc_crash(rproc);
+			rproc->name);
+		blocking_notifier_call_chain(&rproc->nbh, RPROC_ERROR, NULL);
 	}
 
 done:
@@ -474,6 +487,12 @@ static const struct file_operations rproc_name_ops = {
 	.llseek	= generic_file_llseek,
 };
 
+static const struct file_operations rproc_version_ops = {
+	.read = rproc_version_read,
+	.open = rproc_open_generic,
+	.llseek	= generic_file_llseek,
+};
+
 DEBUGFS_READONLY_FILE(trace0, rproc->trace_buf0, rproc->trace_len0);
 DEBUGFS_READONLY_FILE(trace1, rproc->trace_buf1, rproc->trace_len1);
 DEBUGFS_READONLY_FILE(trace0_last, rproc->last_trace_buf0,
@@ -556,79 +575,53 @@ static int rproc_mmu_fault_isr(struct rproc *rproc, u64 da, u32 flags)
 
 static int rproc_watchdog_isr(struct rproc *rproc)
 {
-	/* If the ducati is suspended in a crash, do nothing. */
-	if (rproc->state == RPROC_CRASHED) {
-		pr_info("remoteproc %s is already in the crashed state\n",
-			rproc->name);
-		return 0;
-	}
-
 	dev_err(rproc->dev, "%s\n", __func__);
 	schedule_work(&rproc->error_work);
 	return 0;
 }
 
-static void complete_remoteproc_crash(struct rproc *rproc)
+static int rproc_crash(struct rproc *rproc)
 {
-	/* reset the ducati */
+	init_completion(&rproc->error_comp);
+#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
+	pm_runtime_dont_use_autosuspend(rproc->dev);
+#endif
+	if (rproc->ops->dump_registers)
+		rproc->ops->dump_registers(rproc);
+
 	if (rproc->trace_buf0 && rproc->last_trace_buf0)
 		memcpy(rproc->last_trace_buf0, rproc->trace_buf0,
 				rproc->last_trace_len0);
 	if (rproc->trace_buf1 && rproc->last_trace_buf1)
 		memcpy(rproc->last_trace_buf1, rproc->trace_buf1,
 				rproc->last_trace_len1);
-	pr_info("remoteproc: resetting %s...\n", rproc->name);
-	(void)blocking_notifier_call_chain(&rproc->nb_error,
-			RPROC_ERROR, NULL);
+	rproc->state = RPROC_CRASHED;
+
+	return 0;
 }
 
 static int _event_notify(struct rproc *rproc, int type, void *data)
 {
-	struct blocking_notifier_head *nh;
-
-	switch (type) {
-	case RPROC_ERROR:
-		nh = &rproc->nb_error;
-		mutex_lock(&rproc->lock);
-		init_completion(&rproc->error_comp);
-		rproc->state = RPROC_CRASHED;
-		mutex_unlock(&rproc->lock);
-#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
-		pm_runtime_dont_use_autosuspend(rproc->dev);
-#endif
-		if (rproc->ops->dump_registers)
-			rproc->ops->dump_registers(rproc);
-
-		if (!rproc->halt_on_crash)
-			complete_remoteproc_crash(rproc);
-		else
-			pr_info("remoteproc %s: halt-on-crash enabled: " \
-				"deferring crash recovery\n",
-				rproc->name);
-		break;
-#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
-	case RPROC_PRE_SUSPEND:
-		nh = &rproc->nb_presus;
-		break;
-	case RPROC_POS_SUSPEND:
-		nh = &rproc->nb_possus;
-		break;
-	case RPROC_RESUME:
-		nh = &rproc->nb_resume;
-		break;
-#endif
-	default:
-		return -EINVAL;
-	}
-
 	if (type == RPROC_ERROR) {
-		/* FIXME: send uevent here */
-		pr_info("remoteproc: %s has crashed (core dump available)\n",
-			rproc->name);
-		return 0;
+		mutex_lock(&rproc->lock);
+		/* only notify first crash */
+		if (rproc->state == RPROC_CRASHED) {
+			mutex_unlock(&rproc->lock);
+			return 0;
+		}
+		rproc_crash(rproc);
+		mutex_unlock(&rproc->lock);
+		/* If halt_on_crash do not notify the error */
+		pr_info("remoteproc: %s has crashed\n", rproc->name);
+		if (rproc->halt_on_crash) {
+			/* FIXME: send uevent here */
+			pr_info("remoteproc: %s: halt-on-crash enabled: "
+				"deferring crash recovery\n", rproc->name);
+			return 0;
+		}
 	}
 
-	return blocking_notifier_call_chain(nh, type, data);
+	return blocking_notifier_call_chain(&rproc->nbh, type, data);
 }
 
 /**
@@ -1105,6 +1098,15 @@ static void rproc_loader_cont(const struct firmware *fw, void *context)
 	}
 
 	dev_info(dev, "BIOS image version is %d\n", image->version);
+
+	rproc->header = kzalloc(image->header_len, GFP_KERNEL);
+	if (!rproc->header) {
+		dev_err(dev, "%s: kzalloc failed\n", __func__);
+		goto out;
+	}
+	memcpy(rproc->header, image->header, image->header_len);
+	rproc->header_len = image->header_len;
+
 	/* Ensure we recognize this BIOS version: */
 	if (image->version != RPROC_BIOS_VERSION) {
 		dev_err(dev, "Expected BIOS version: %d!\n",
@@ -1160,6 +1162,7 @@ static int rproc_loader(struct rproc *rproc)
 int rproc_set_secure(const char *name, bool enable)
 {
 	struct rproc *rproc;
+	int ret;
 
 	rproc = __find_rproc_by_name(name);
 	if (!rproc) {
@@ -1171,6 +1174,8 @@ int rproc_set_secure(const char *name, bool enable)
 	 * set the secure_mode here, the secure_ttb will be filled up during
 	 * the reload process.
 	 */
+	if (mutex_lock_interruptible(&rproc->secure_lock))
+		return -EINTR;
 	rproc->secure_mode = enable;
 	rproc->secure_ttb = NULL;
 	rproc->secure_ok = false;
@@ -1180,15 +1185,20 @@ int rproc_set_secure(const char *name, bool enable)
 	 * restart the processor, the mode will dictate regular load or
 	 * secure load
 	 */
-	_event_notify(rproc, RPROC_ERROR, NULL);
+	_event_notify(rproc, RPROC_SECURE, (void *)enable);
 
 	/* block until the restart is complete */
 	if (wait_for_completion_interruptible(&rproc->secure_restart)) {
 		pr_err("error waiting restart completion\n");
-		return -EINTR;
+		ret = -EINTR;
+		goto out;
 	}
 
-	return rproc->secure_ok ? 0 : -EACCES;
+	ret = rproc->secure_ok ? 0 : -EACCES;
+out:
+	mutex_unlock(&rproc->secure_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL(rproc_set_secure);
 
@@ -1304,6 +1314,7 @@ void rproc_put(struct rproc *rproc)
 
 	rproc_reset_poolmem(rproc);
 	memset(rproc->memory_maps, 0, sizeof(rproc->memory_maps));
+	kfree(rproc->header);
 
 	/*
 	 * make sure rproc is really running before powering it off.
@@ -1367,45 +1378,15 @@ static void rproc_error_work(struct work_struct *work)
 	_event_notify(rproc, RPROC_ERROR, NULL);
 }
 
-static int _register(struct rproc *rproc,
-			struct notifier_block *nb, int type, bool reg)
+int rproc_event_register(struct rproc *rproc, struct notifier_block *nb)
 {
-	struct blocking_notifier_head *nh;
-
-	switch (type) {
-	case RPROC_ERROR:
-		nh = &rproc->nb_error;
-		break;
-#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
-	case RPROC_PRE_SUSPEND:
-		nh = &rproc->nb_presus;
-		break;
-	case RPROC_POS_SUSPEND:
-		nh = &rproc->nb_possus;
-		break;
-	case RPROC_RESUME:
-		nh = &rproc->nb_resume;
-		break;
-#endif
-	default:
-		return -EINVAL;
-	}
-
-	return (reg) ? blocking_notifier_chain_register(nh, nb) :
-		blocking_notifier_chain_unregister(nh, nb);
-}
-
-int rproc_event_register(struct rproc *rproc,
-				struct notifier_block *nb, int type)
-{
-	return _register(rproc, nb, type, true);
+	return blocking_notifier_chain_register(&rproc->nbh, nb);
 }
 EXPORT_SYMBOL_GPL(rproc_event_register);
 
-int rproc_event_unregister(struct rproc *rproc,
-				struct notifier_block *nb, int type)
+int rproc_event_unregister(struct rproc *rproc, struct notifier_block *nb)
 {
-	return _register(rproc, nb, type, false);
+	return blocking_notifier_chain_unregister(&rproc->nbh, nb);
 }
 EXPORT_SYMBOL_GPL(rproc_event_unregister);
 
@@ -1668,8 +1649,9 @@ int rproc_register(struct device *dev, const char *name,
 	mutex_init(&rproc->pm_lock);
 #endif
 	mutex_init(&rproc->lock);
+	mutex_init(&rproc->secure_lock);
 	INIT_WORK(&rproc->error_work, rproc_error_work);
-	BLOCKING_INIT_NOTIFIER_HEAD(&rproc->nb_error);
+	BLOCKING_INIT_NOTIFIER_HEAD(&rproc->nbh);
 
 	rproc->state = RPROC_OFFLINE;
 
@@ -1704,15 +1686,11 @@ int rproc_register(struct device *dev, const char *name,
 		goto out;
 	}
 
-	debugfs_create_file("name", 0400, rproc->dbg_dir, rproc,
+	debugfs_create_file("name", 0444, rproc->dbg_dir, rproc,
 							&rproc_name_ops);
 
-#ifdef CONFIG_REMOTE_PROC_AUTOSUSPEND
-	BLOCKING_INIT_NOTIFIER_HEAD(&rproc->nb_presus);
-	BLOCKING_INIT_NOTIFIER_HEAD(&rproc->nb_possus);
-	BLOCKING_INIT_NOTIFIER_HEAD(&rproc->nb_resume);
-#endif
-
+	debugfs_create_file("version", 0444, rproc->dbg_dir, rproc,
+							&rproc_version_ops);
 out:
 	return 0;
 }
