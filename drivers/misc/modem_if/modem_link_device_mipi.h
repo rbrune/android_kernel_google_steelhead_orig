@@ -42,9 +42,10 @@
 
 #define HSI_LL_INVALID_CHANNEL	0xFF
 
-#define HSI_FLASHBOOT_ACK_LEN	16
 #define DUMP_PACKET_SIZE	12289 /* 48K + 4 length, word unit */
 #define DUMP_ERR_INFO_SIZE	39 /* 150 bytes + 4 length , word unit */
+
+#define MIPI_BULK_TX_SIZE	(8 * 1024)
 
 enum {
 	HSI_LL_MSG_BREAK, /* 0x0 */
@@ -86,6 +87,7 @@ enum {
 	STEP_SEND_CONN_CLOSED,
 	STEP_WAIT_FOR_CONN_CLOSED,
 	STEP_SEND_BREAK,
+	STEP_SEND_TO_CONN_CLOSED,
 };
 
 
@@ -132,7 +134,7 @@ struct mipi_link_device {
 	spinlock_t list_cmd_lock;
 
 	struct workqueue_struct *mipi_wq;
-	struct work_struct cmd_work;
+	struct delayed_work cmd_work;
 	struct delayed_work start_work;
 
 	struct wake_lock wlock;
@@ -141,6 +143,9 @@ struct mipi_link_device {
 	/* maybe -list of io devices for the link device to use
 	 * to find where to send incoming packets to */
 	struct list_head list_of_io_devices;
+
+	void *bulk_tx_buf;
+	struct sk_buff_head bulk_txq;
 };
 /* converts from struct link_device* to struct xxx_link_device* */
 #define to_mipi_link_device(linkdev) \
@@ -151,6 +156,7 @@ enum {
 	HSI_INIT_MODE_NORMAL,
 	HSI_INIT_MODE_FLASHLESS_BOOT,
 	HSI_INIT_MODE_CP_RAMDUMP,
+	HSI_INIT_MODE_FLASHLESS_BOOT_EBL,
 };
 static int hsi_init_handshake(struct mipi_link_device *mipi_ld, int mode);
 static int if_hsi_write(struct if_hsi_channel *channel, u32 *data,

@@ -472,6 +472,26 @@ static int fsa9480_detect_callback(struct otg_id_notifier_block *nb)
 	prev_dev = usbsw->curr_dev;
 
 	if (dev_type & DEV_USB_MASK) {
+		/* If there is an external id signal then verify that the ID
+		 * signal is floating.  If the ID signal is pulled low then this
+		 * may be a cable misidentification.  This can occur if the
+		 * board allows for the ID signal to be redirected away from the
+		 * FSA9480.  If the ID signal is not visible to the FSA9480 and
+		 * VBUS is present then the cable will be identified as a USB
+		 * peripheral cable.
+		 *
+		 * In the event of a cable misidentification the FSA9480 chip
+		 * will be reset to force a new detection cycle.
+		 */
+		if (usbsw->pdata->external_id >= 0 &&
+				!gpio_get_value(usbsw->pdata->external_id)) {
+			dev_info(&usbsw->client->dev, "Cable misidentified as "
+					"a USB-peripheral cable, resetting the "
+					"FSA9480\n");
+			fsa9480_reset(usbsw);
+			goto handled;
+		}
+
 		/* usb peripheral mode */
 		if (!(nb_info->detect_set->mask & FSA9480_DETECT_USB))
 			goto unhandled;
@@ -505,6 +525,7 @@ static int fsa9480_detect_callback(struct otg_id_notifier_block *nb)
 		enable_irq(usbsw->external_id_irq);
 		return OTG_ID_HANDLED;
 	} else if (dev_type == 0) {
+		usbsw->curr_dev = 0;
 		dev_info(&usbsw->client->dev,
 			 "nothing attached, keeping ownership of port\n");
 		goto handled;
@@ -534,13 +555,6 @@ handled:
 	BUG_ON((usbsw->curr_dev == FSA9480_DETECT_NONE) &&
 	       (prev_dev != FSA9480_DETECT_NONE));
 
-	/* Disable the A/V Charger detection interrupt in case it was enabled
-	 * by the proxy wait callback.
-	 */
-	usbsw->intr_mask |= INT_AV_CHARGING;
-	i2c_smbus_write_word_data(client, FSA9480_REG_INT1_MASK,
-			usbsw->intr_mask);
-
 	mutex_unlock(&usbsw->lock);
 	enable_irq(usbsw->client->irq);
 
@@ -552,17 +566,8 @@ static int fsa9480_proxy_wait_callback(struct otg_id_notifier_block *nb)
 	struct usbsw_nb_info *nb_info =
 			container_of(nb, struct usbsw_nb_info, otg_id_nb);
 	struct fsa9480_usbsw *usbsw = nb_info->usbsw;
-	struct i2c_client *client = usbsw->client;
 
 	dev_info(&usbsw->client->dev, "taking proxy ownership of port\n");
-
-	mutex_lock(&usbsw->lock);
-
-	usbsw->intr_mask &= ~INT_AV_CHARGING;
-	i2c_smbus_write_word_data(client, FSA9480_REG_INT1_MASK,
-			usbsw->intr_mask);
-
-	mutex_unlock(&usbsw->lock);
 
 	usbsw->pdata->enable(true);
 	enable_irq(usbsw->client->irq);
@@ -763,7 +768,7 @@ static int __devinit fsa9480_probe(struct i2c_client *client,
 
 	/* mask interrupts (unmask attach/detach only) */
 	usbsw->intr_mask = ~(INT_ATTACH | INT_DETACH | INT_OCP_EN | INT_OVP_EN |
-			INT_OVP_OCP_DIS);
+			INT_OVP_OCP_DIS | INT_AV_CHARGING);
 	ret = fsa9480_reset(usbsw);
 	if (ret < 0)
 		goto err_reset;
