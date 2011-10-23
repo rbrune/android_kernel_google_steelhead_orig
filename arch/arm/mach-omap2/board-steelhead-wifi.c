@@ -17,6 +17,10 @@
 #include <linux/gpio.h>
 #include <linux/skbuff.h>
 #include <linux/wlan_plat.h>
+#include <linux/pm_runtime.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/driver.h>
+#include <linux/regulator/fixed.h>
 #include <plat/mmc.h>
 
 #include "board-steelhead.h"
@@ -115,6 +119,7 @@ static struct resource steelhead_wifi_resources[] = {
 static int steelhead_wifi_cd = 0; /* WIFI virtual 'card detect' status */
 static void (*wifi_status_cb)(int card_present, void *dev_id);
 static void *wifi_status_cb_devid;
+static struct regulator *clk32kg_reg;
 
 static int steelhead_wifi_status_register(
 		void (*callback)(int card_present, void *dev_id),
@@ -154,9 +159,23 @@ static int steelhead_wifi_power_state;
 
 static int steelhead_wifi_power(int on)
 {
+	if (!clk32kg_reg) {
+		clk32kg_reg = regulator_get(0, "clk32kaudio");
+		if (IS_ERR(clk32kg_reg)) {
+			pr_err("%s: clk32kg reg not found!\n", __func__);
+			clk32kg_reg = NULL;
+		}
+	}
+
+	if (clk32kg_reg && on && !steelhead_wifi_power_state)
+		regulator_enable(clk32kg_reg);
+
 	mdelay(100);
 	gpio_set_value(GPIO_WLAN_PMENA, on);
 	mdelay(200);
+
+	if (clk32kg_reg && !on && steelhead_wifi_power_state)
+		regulator_disable(clk32kg_reg);
 
 	steelhead_wifi_power_state = on;
 	return 0;

@@ -422,11 +422,24 @@ static struct regulator_init_data steelhead_vusb = {
 };
 
 /* clk32kg is a twl6030 32khz clock modeled as a regulator, used by wifi */
+static struct regulator_consumer_supply steelhead_clk32kg_supply[] = {
+	{
+		/* we use the same name as tuna though
+		 * we're not really using the 6030's clk32kaudio
+		 * output.  that way we can share
+		 * board-tuna-bluetooth.c
+		 */
+		.supply = "clk32kaudio",
+	},
+};
+
 static struct regulator_init_data steelhead_clk32kg = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
-		.always_on              = true,
+		.boot_on		= true,
 	},
+	.num_consumer_supplies  = ARRAY_SIZE(steelhead_clk32kg_supply),
+	.consumer_supplies      = steelhead_clk32kg_supply,
 };
 
 /* define a regulator so on 4460 this can be turned off because
