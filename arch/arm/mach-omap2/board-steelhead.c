@@ -70,6 +70,9 @@
 #include <sound/pcm.h>
 #include <linux/vcnl4000.h>
 
+#include <video/omap-panel-generic-dpi.h>
+
+
 #define TPS62361_GPIO		7
 
 #define STEELHEAD_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
@@ -1067,14 +1070,28 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
 
+static struct panel_generic_dpi_data omap4_dvi_panel = {
+	.name			= "generic_720p",
+};
+
+struct omap_dss_device omap4_steelhead_dummy_dvi_device = {
+	.type			= OMAP_DISPLAY_TYPE_DPI,
+	.name			= "dvi",
+	.driver_name		= "generic_dpi_panel",
+	.data			= &omap4_dvi_panel,
+	.phy.dpi.data_lines	= 24,
+	.channel		= OMAP_DSS_CHANNEL_LCD2,
+};
+
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
+	&omap4_steelhead_dummy_dvi_device,
 	&omap4_steelhead_hdmi_device,
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
-	.default_device	= &omap4_steelhead_hdmi_device,
+	.default_device	= &omap4_steelhead_dummy_dvi_device,
 };
 
 #define STEELHEAD_FB_RAM_SIZE		SZ_16M /* ~1280*720*4 * 2 */
