@@ -327,6 +327,8 @@ int hdmi_panel_init(void)
 	INIT_DELAYED_WORK(&hpd_work.dwork, hdmi_hotplug_detect_worker);
 	omap_dss_register_driver(&hdmi_driver);
 
+	hdmi_panel_hpd_handler(hdmi_get_current_hpd());
+
 	return 0;
 }
 
