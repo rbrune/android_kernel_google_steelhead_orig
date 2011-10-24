@@ -152,7 +152,9 @@
 #include "prm44xx.h"
 #include "mux.h"
 #include "pm.h"
+#ifdef CONFIG_MACH_TUNA
 #include "board-tuna.h"
+#endif
 
 /* Maximum microseconds to wait for OMAP module to softreset */
 #define MAX_MODULE_SOFTRESET_WAIT	10000
@@ -856,9 +858,14 @@ static void _idle_sysc(struct omap_hwmod *oh)
 	if (sf & SYSC_HAS_SIDLEMODE) {
 		idlemode = (oh->flags & HWMOD_SWSUP_SIDLE) ?
 			HWMOD_IDLEMODE_FORCE : HWMOD_IDLEMODE_SMART;
+#ifdef CONFIG_MACH_TUNA
 		if (!strcmp(oh->name, "usbhs_uhh") &&
 				TUNA_TYPE_TORO == omap4_tuna_get_type())
 			idlemode = HWMOD_IDLEMODE_SMART;
+#elif defined(CONFIG_MACH_STEELHEAD)
+		if (!strcmp(oh->name, "usbhs_uhh"))
+			idlemode = HWMOD_IDLEMODE_SMART;
+#endif
 		_set_slave_idlemode(oh, idlemode, &v);
 	}
 
@@ -873,9 +880,14 @@ static void _idle_sysc(struct omap_hwmod *oh)
 			else
 				idlemode = HWMOD_IDLEMODE_SMART;
 		}
+#ifdef CONFIG_MACH_TUNA
 		if (!strcmp(oh->name, "usbhs_uhh") &&
 				TUNA_TYPE_TORO == omap4_tuna_get_type())
 			idlemode = HWMOD_IDLEMODE_SMART;
+#elif defined(CONFIG_MACH_STEELHEAD)
+		if (!strcmp(oh->name, "usbhs_uhh"))
+			idlemode = HWMOD_IDLEMODE_SMART;
+#endif
 		_set_master_standbymode(oh, idlemode, &v);
 	}
 
