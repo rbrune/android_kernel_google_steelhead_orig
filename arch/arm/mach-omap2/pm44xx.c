@@ -23,7 +23,10 @@
 #include <linux/irq.h>
 
 #include <asm/hardware/gic.h>
+#include <asm/mach-types.h>
+
 #include <mach/omap4-common.h>
+
 #include <plat/omap_hsi.h>
 #include <plat/common.h>
 #include <plat/temperature_sensor.h>
@@ -86,6 +89,19 @@ static struct powerdomain *tesla_pwrdm;
 
 u8 pm44xx_errata;
 #define is_pm44xx_erratum(erratum) (pm44xx_errata & OMAP4_PM_ERRATUM_##erratum)
+
+/* HACK: check CAWAKE wakeup event */
+#define USBB1_ULPITLL_CLK	0x4A1000C0
+#define CONTROL_PADCONF_WAKEUPEVENT_2	0x4A1001E0
+static int cawake_event_flag = 0;
+void check_cawake_wakeup_event(void)
+{
+	if ((omap_readl(USBB1_ULPITLL_CLK) & 0x80000000) ||
+		(omap_readl(CONTROL_PADCONF_WAKEUPEVENT_2) & 0x2)) {
+		pr_info("[HSI] PORT 1 CAWAKE WAKEUP EVENT\n");
+		cawake_event_flag = 1;
+	}
+}
 
 #define MAX_IOPAD_LATCH_TIME 1000
 void omap4_trigger_ioctrl(void)
@@ -635,6 +651,10 @@ static int omap4_pm_suspend(void)
 	 * More details can be found in OMAP4430 TRM section 4.3.4.2.
 	 */
 	omap4_enter_sleep(0, PWRDM_POWER_OFF, true);
+
+	/* HACK: check CAWAKE wakeup event */
+	check_cawake_wakeup_event();
+
 	omap4_print_wakeirq();
 	prcmdebug_dump(PRCMDEBUG_LASTSLEEP);
 
@@ -944,11 +964,19 @@ static irqreturn_t prcm_interrupt_handler (int irq, void *dev_id)
 	/* Check if a IO_ST interrupt */
 	if (irqstatus_mpu & OMAP4430_IO_ST_MASK) {
 		/* Check if HSI caused the IO wakeup */
-		if (omap_hsi_is_io_wakeup_from_hsi(&hsi_port)) {
+
+		/* HACK: check CAWAKE wakeup event */
+		if (cawake_event_flag) {
+			hsi_port = 1;
+			cawake_event_flag = 0;
 			omap_hsi_wakeup(hsi_port);
-		}
+		} else
+			if (omap_hsi_is_io_wakeup_from_hsi(&hsi_port))
+				omap_hsi_wakeup(hsi_port);
+
 		omap_uart_resume_idle();
-		usbhs_wakeup();
+		if (!machine_is_tuna())
+			usbhs_wakeup();
 		omap4_trigger_ioctrl();
 	}
 
@@ -1152,13 +1180,23 @@ static int __init omap4_pm_init(void)
 		/*ret |= clkdm_add_wkdep(mpuss_clkdm, emif_clkdm);*/
 		ret |= clkdm_add_wkdep(mpuss_clkdm, l4_per);
 		ret |= clkdm_add_wkdep(mpuss_clkdm, l4_cfg);
+
+		/* There appears to be a problem between the MPUSS and L3_1 */
+		ret |= clkdm_add_wkdep(mpuss_clkdm, l3_1_clkdm);
+
+		/* There appears to be a problem between the Ducati and L3/L4 */
+		ret |= clkdm_add_wkdep(ducati_clkdm, l3_1_clkdm);
+		ret |= clkdm_add_wkdep(ducati_clkdm, l3_2_clkdm);
+		ret |= clkdm_add_wkdep(ducati_clkdm, l4_per);
+		ret |= clkdm_add_wkdep(ducati_clkdm, l4_cfg);
+
 		if (ret) {
-			pr_err("Failed to add MPUSS -> "
-			       "L4* wakeup dependency\n");
+			pr_err("Failed to add MPUSS and DUCATI -> "
+			       "L4* and L3_1 wakeup dependency\n");
 			goto err2;
 		}
 		pr_info("OMAP4 PM: Static dependency added between"
-			" MPUSS <-> L4_PER/CFG.\n");
+			" MPUSS and DUCATI <-> L4_PER/CFG and L3_1.\n");
 	}
 
 	(void) clkdm_for_each(clkdms_setup, NULL);
