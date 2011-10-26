@@ -38,6 +38,7 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
 #include <linux/platform_data/lte_modem_bootloader.h>
+#include <linux/platform_data/ram_console.h>
 #include <plat/mcspi.h>
 #include <linux/i2c-gpio.h>
 
@@ -57,6 +58,8 @@
 #include <plat/remoteproc.h>
 #include <plat/omap-serial.h>
 
+#include <mach/omap_fiq_debugger.h>
+
 #include <mach/id.h>
 #include "timer-gp.h"
 
@@ -65,6 +68,7 @@
 #include "control.h"
 #include "mux.h"
 #include "board-tuna.h"
+#include "resetreason.h"
 #include <mach/dmm.h>
 
 #define TUNA_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
@@ -215,11 +219,16 @@ static struct resource ramconsole_resources[] = {
 	},
 };
 
+static struct ram_console_platform_data ramconsole_pdata;
+
 static struct platform_device ramconsole_device = {
 	.name           = "ram_console",
 	.id             = -1,
 	.num_resources  = ARRAY_SIZE(ramconsole_resources),
 	.resource       = ramconsole_resources,
+	.dev		= {
+		.platform_data = &ramconsole_pdata,
+	},
 };
 
 static struct platform_device bcm4330_bluetooth_device = {
@@ -979,11 +988,18 @@ static inline void __init board_serial_init(void)
 	omap_serial_init_port_pads(0, uart1_pads, uart1_pads_sz, NULL);
 	omap_serial_init_port_pads(1, tuna_uart2_pads,
 		ARRAY_SIZE(tuna_uart2_pads), &tuna_uart2_info);
-	omap_serial_init_port_pads(2, tuna_uart3_pads,
-		ARRAY_SIZE(tuna_uart3_pads), NULL);
 	omap_serial_init_port_pads(3, tuna_uart4_pads,
 				   ARRAY_SIZE(tuna_uart4_pads), NULL);
 }
+
+/* fiq_debugger initializes really early but OMAP resource mgmt
+ * is not yet ready @ arch_init, so init the serial debugger later */
+static int __init board_serial_debug_init(void)
+{
+	return omap_serial_debug_init(2, false, true,
+			tuna_uart3_pads, ARRAY_SIZE(tuna_uart3_pads));
+}
+device_initcall(board_serial_debug_init);
 
 /* SPI flash memory in camera module */
 #define F_ROM_SPI_BUS_NUM	3
@@ -1287,6 +1303,7 @@ static void __init tuna_init(void)
 	tuna_i2c_init();
 	tuna_bt_init();
 	tuna_gsd4t_gps_init();
+	ramconsole_pdata.bootinfo = omap4_get_resetreason();
 	platform_add_devices(tuna_devices, ARRAY_SIZE(tuna_devices));
 	board_serial_init();
 	omap2_hsmmc_init(mmc);
