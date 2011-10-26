@@ -102,10 +102,20 @@ static irqreturn_t l3_interrupt_handler(int irq, void *_l3)
 						readl(base + regoffset + L3_HDR));
 				WARN_ONCE(true, "L3 standard error");
 
+#ifdef CONFIG_MACH_TUNA
 				/* Disable ABE L3 Interrupt on LTE boards */
 				if ((readl(base + regoffset + L3_MSTADDR) == 0xc0) &&
 					(readl(base + regoffset + L3_SLVADDR) == 0x3) &&
 					(omap4_tuna_get_type() == TUNA_TYPE_TORO)) {
+#endif
+#ifdef CONFIG_MACH_STEELHEAD
+				/* Disable ABE L3 Interrupt on Steelhead
+				 * because we use USBHost for wired ethernet
+				 */
+				if ((readl(base + regoffset + L3_MSTADDR) == 0xc0) &&
+				    (readl(base + regoffset + L3_SLVADDR) == 0x3)) {
+#endif
+
 					pr_err("** Disabling ABE L3 interrupt for now....\n");
 					writel(0x1, base + regoffset + L3_MAINCTLREG);
 					writel(0x0, base + regoffset + L3_SVRTSTDLVL);
