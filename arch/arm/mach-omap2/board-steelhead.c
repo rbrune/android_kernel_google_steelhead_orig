@@ -62,6 +62,7 @@
 
 #include <linux/i2c.h>
 #include <plat/i2c.h>
+#include <plat/omap-pm.h>
 #include <plat/mcasp.h>
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
@@ -72,6 +73,15 @@
 
 #include <video/omap-panel-generic-dpi.h>
 
+static void steelhead_platform_reserve_l3_bus_bw(void) {
+	static struct device dummy_bw_reserve_dev = {
+		.init_name = "steelhead_l3_bw_reserve_dev",
+	};
+
+	omap_pm_set_min_bus_tput(&dummy_bw_reserve_dev,
+			OCP_INITIATOR_AGENT,
+			200 * 1000 * 4);
+}
 
 #define TPS62361_GPIO		7
 
@@ -1284,6 +1294,8 @@ static void __init steelhead_init(void)
 	omap4_steelhead_emif_init();
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
+
+	steelhead_platform_reserve_l3_bus_bw();
 
 	steelhead_platform_init_avr();
 	steelhead_platform_init_tas5713_audio();
