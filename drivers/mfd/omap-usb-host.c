@@ -760,10 +760,17 @@ static void omap_usbhs_init(struct device *dev)
 
 	reg = usbhs_read(omap->uhh_base, OMAP_UHH_HOSTCONFIG);
 	/* setup ULPI bypass and burst configurations */
+#ifdef CONFIG_MACH_STEELHEAD
+	reg |= (OMAP_UHH_HOSTCONFIG_INCR4_BURST_EN
+			| OMAP_UHH_HOSTCONFIG_INCR8_BURST_EN
+			| OMAP_UHH_HOSTCONFIG_INCR16_BURST_EN);
+	reg &= ~OMAP_UHH_HOSTCONFIG_INCRX_ALIGN_EN;
+#else
 	reg |= (OMAP_UHH_HOSTCONFIG_INCR4_BURST_EN
 			| OMAP_UHH_HOSTCONFIG_INCR8_BURST_EN
 			| OMAP_UHH_HOSTCONFIG_INCR16_BURST_EN
 			| OMAP_UHH_HOSTCONFIG_INCRX_ALIGN_EN);
+#endif
 
 	if (is_omap_usbhs_rev1(omap)) {
 		if (pdata->port_mode[0] == OMAP_USBHS_PORT_MODE_UNUSED)
