@@ -979,8 +979,13 @@ static const struct tas5713_init_command tas5713_init_sequence[] = {
 	 */
 	{ .size = 2, .data = "\x00\x6C" },
 
-	/* PWM Output Mux Register */
-	{ .size = 5, .data = "\x25\x01\x02\x13\x45" },
+	/* PWM Output Mux Register
+	 * Ch.1     => OUT A
+	 * Ch.1.inv => OUT B
+	 * Ch.2.inv => OUT C
+	 * Ch.2     => OUT D
+	 */
+	{ .size = 5, .data = "\x25\x01\x02\x31\x45" },
 
 	/* Channel 1 Config
 	 * Maps 100% of L and 0% of R channel 1 (default)
