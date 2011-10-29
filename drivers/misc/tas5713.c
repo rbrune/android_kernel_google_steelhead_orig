@@ -210,10 +210,12 @@ static int i2s_fifo_enable(struct tas5713_driver_state *state, int on)
 
 #ifdef LEVEL_TRANSLATOR_POP_WORKAROUND
 	if (on) {
-		// Delay for at least one 48kHz audio sample worth of output
-		// before taking the lines out of GPIO hack mode.
+		u32 tmp;
+		/* Delay for at least one 48kHz audio sample worth of output
+		 * before taking the lines out of GPIO hack mode.
+		 */
 		udelay(25);
-		u32 tmp = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_PCR0);
+		tmp = omap_mcbsp_read_reg(id, OMAP_MCBSP_REG_PCR0);
 		tmp &= ~(1 << 13);
 		omap_mcbsp_write_reg(id, OMAP_MCBSP_REG_PCR0, tmp);
 	}
@@ -268,7 +270,7 @@ static int setup_mcbsp(struct tas5713_driver_state *state)
 	rc = omap2_mcbsp_set_clks_src(id, MCBSP_CLKS_PRCM_SRC);
 	if (rc) {
 		dev_err(&state->i2c_client->dev,
-                        "%s: unable to set McBSP clock source\n",
+			"%s: unable to set McBSP clock source\n",
 			__func__);
 		omap_mcbsp_free(id);
 		return rc;
