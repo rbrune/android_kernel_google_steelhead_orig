@@ -48,6 +48,10 @@
 #include <plat/clock.h>
 
 /* EHCI Register Set */
+#define EHCI_INSNREG01					(0x94)
+#define EHCI_INSNREG01_OUT_THRESHOLD_SHIFT		(16)
+#define EHCI_INSNREG01_IN_THRESHOLD_SHIFT		(0)
+
 #define EHCI_INSNREG04					(0xA0)
 #define EHCI_INSNREG04_DISABLE_UNSUSPEND		(1 << 5)
 #define	EHCI_INSNREG05_ULPI				(0xA4)
@@ -269,6 +273,30 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	 */
 	ehci_write(regs, EHCI_INSNREG04,
 				EHCI_INSNREG04_DISABLE_UNSUSPEND);
+
+#ifdef CONFIG_MACH_STEELHEAD
+	/* Overwrite default 0x20 IN/OUT threshold to 0x80 32-bit words.
+	 *
+	 * This change increases the EHCI transfer thresholds to 512 bytes, the
+	 * maximum size of a bulk data transaction for USB 2.0.  This means that
+	 * the EHCI controller will never start a bulk data send until it has
+	 * all of the data buffered in the EHCI controller.  Likewise, it will
+	 * not try to push data to system memory from RX until it has received
+	 * the whole transaction, although this is less important overall.  Now,
+	 * no matter how badly things go with the L3 feeding data to EHCI, we
+	 * will never get into a situation where the EHCI controller underflows
+	 * during an OUT transaction and has to cancel and retry the
+	 * transaction.  This has a negative effect on the theoretical
+	 * throughput of the system, but even conservative estimates of the new
+	 * hypothetical throughput (~195Mbps) indicate that they are more than
+	 * enough for Steelhead/Tungsten (which dedicates this bus to a single
+	 * 100Mbps Ethernet controller).
+	 */
+
+	ehci_write(regs, EHCI_INSNREG01,
+				0x80 << EHCI_INSNREG01_OUT_THRESHOLD_SHIFT |
+				0x80 << EHCI_INSNREG01_IN_THRESHOLD_SHIFT);
+#endif
 
 	/* Soft reset the PHY using PHY reset command over ULPI */
 	if (pdata->port_mode[0] == OMAP_EHCI_PORT_MODE_PHY)
