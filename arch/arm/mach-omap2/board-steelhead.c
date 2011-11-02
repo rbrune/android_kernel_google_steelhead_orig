@@ -69,7 +69,6 @@
 #include <linux/aah_localtime.h>
 #include <linux/pn544.h>
 #include <sound/pcm.h>
-#include <linux/vcnl4000.h>
 
 #include <video/omap-panel-generic-dpi.h>
 
@@ -889,23 +888,6 @@ void __init omap4_steelhead_nfc_init(void)
 
 /******************************************************************************
  *                                                                            *
- *           VCNL4000 proximity detector                                      *
- *                                                                            *
- ******************************************************************************/
-
-/* A power level of 20mA gives a baseline proximity reading of about 4600
- * but needs more tuning
- */
-struct vcnl4000_platform_data vcnl4000_pdata = {
-	.poll_interval = 250, /* poll every 250 ms */
-	.ir_led_current = 20, /* 20mA current */
-	.detect_threshold = 4600,
-	.code = KEY_MUTE,     /* input key code when in proximity */
-};
-
-
-/******************************************************************************
- *                                                                            *
  *                            I2C Bus setup                                   *
  *                                                                            *
  ******************************************************************************/
@@ -914,10 +896,6 @@ static struct i2c_board_info __initdata steelhead_i2c_bus2[] = {
 	{
 		I2C_BOARD_INFO("steelhead-avr", (0x20)),
 		.platform_data = &steelhead_avr_pdata,
-	},
-	{
-		I2C_BOARD_INFO("vcnl4000", (0x13)),
-		.platform_data = &vcnl4000_pdata,
 	},
 	{
 		I2C_BOARD_INFO("tmp101", (0x48)),
