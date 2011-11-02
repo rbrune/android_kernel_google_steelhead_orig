@@ -78,10 +78,6 @@ void __init omap4_steelhead_ehci_init(void)
 	omap_mux_init_signal("usbb1_ulpitll_dat7.usbb1_ulpiphy_dat7",
 			     OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLDOWN);
 
-	/* Older boards used active high for enable */
-	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA)
-		steelhead_ethernet_gpios[0].flags = GPIOF_OUT_INIT_LOW;
-
 	ret = gpio_request_array(steelhead_ethernet_gpios,
 				 ARRAY_SIZE(steelhead_ethernet_gpios));
 	if (ret) {
@@ -111,12 +107,7 @@ void __init omap4_steelhead_ehci_init(void)
 	udelay(100);
 
 	/* enable 3.3V power */
-	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA) {
-		/* Older boards used active high for enable */
-		gpio_set_value(GPIO_ETHERNET_NENABLE, 1);
-	} else {
-		gpio_set_value(GPIO_ETHERNET_NENABLE, 0);
-	}
+	gpio_set_value(GPIO_ETHERNET_NENABLE, 0);
 
 	/* datasheet says minimum reset assertion time is 1us */
 	udelay(2);

@@ -43,29 +43,7 @@ static __initdata struct emif_device_details emif_devices = {
 	.cs0_device = &lpddr2_samsung_4G_S4_dev,
 };
 
-/*
- * LPDDR2 Configeration Data:
- * The memory organisation is as below :
- *	EMIF1 - CS0 -	2 Gb
- *		CS1 -	2 Gb
- *	EMIF2 - CS0 -	2 Gb
- *		CS1 -	2 Gb
- *	--------------------
- *	TOTAL -		8 Gb
- *
- * Same devices installed on EMIF1 and EMIF2
- */
-static __initdata struct emif_device_details alpha_emif_devices = {
-	.cs0_device = &lpddr2_elpida_2G_S4_dev,
-	.cs1_device = &lpddr2_elpida_2G_S4_dev
-};
-
-
 void __init omap4_steelhead_emif_init(void)
 {
-	if (steelhead_hw_rev == STEELHEAD_REV_ALPHA)
-		omap_emif_setup_device_details(&alpha_emif_devices,
-					       &alpha_emif_devices);
-	else
-		omap_emif_setup_device_details(&emif_devices, &emif_devices);
+	omap_emif_setup_device_details(&emif_devices, &emif_devices);
 }
