@@ -811,6 +811,7 @@ static void steelhead_platform_init_mcasp_audio(void)
 
 static struct steelhead_avr_platform_data steelhead_avr_pdata = {
 	.interrupt_gpio = AVR_INT_GPIO_ID,
+	.reset_gpio = AVR_RESET_GPIO_ID,
 };
 
 static void steelhead_platform_init_avr(void)
