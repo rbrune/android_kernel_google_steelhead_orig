@@ -19,8 +19,10 @@
 #ifdef __KERNEL__
 
 struct steelhead_avr_platform_data {
-	/* GPIO ID of the interrupt request from AVR -> OMAP */
+	/* GPIO ID of the interrupt request from AVR -> CPU */
 	unsigned interrupt_gpio;
+	/* GPIO ID of the reset request from CPU -> AVR */
+	unsigned reset_gpio;
 };
 
 #endif
@@ -43,6 +45,8 @@ struct avr_led_get_bank_vals {
 struct avr_led_set_all_vals {
 	u8 rgb[3];
 };
+
+#define avr_led_set_mute_vals avr_led_set_all_vals
 
 struct avr_led_set_bank_vals {
 	u8 bank_id;
@@ -75,5 +79,9 @@ struct avr_led_set_range_vals {
 					   struct avr_led_set_range_vals)
 #define AVR_LED_SET_VOLUME_INDICATOR  _IOW(AVR_LED_MAGIC, 12, __u8)
 #define AVR_LED_COMMIT_LED_STATE      _IOW(AVR_LED_MAGIC, 13, __u8)
+#define AVR_LED_RESET                 _IO(AVR_LED_MAGIC, 14)
+#define AVR_LED_SET_MUTE              _IOW(AVR_LED_MAGIC, 15, \
+					   struct avr_led_set_mute_vals)
+
 
 #endif  /* __LINUX_STEELHEAD_AVR_H */

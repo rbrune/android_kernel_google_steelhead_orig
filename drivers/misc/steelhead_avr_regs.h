@@ -49,6 +49,9 @@
 #define AVR_KEY_EVENT_CODE_MASK		0x3F	/* mask for key code
 						 * (keeping bit unused)
 						 */
+#define AVR_KEY_EVENT_RESET		0xFE	/* key event value returned
+						 * when AVR first boots
+						 */
 #define AVR_KEY_EVENT_EMPTY		0xFF	/* key event value returned
 						 * when fifo empty
 						 */
@@ -57,6 +60,7 @@
 #define AVR_KEY_VOLUME_UP		(AVR_KEY_MUTE + 1)
 #define AVR_KEY_VOLUME_DOWN		(AVR_KEY_VOLUME_UP + 1)
 #define AVR_KEYCODE_COUNT		(AVR_KEY_VOLUME_DOWN + 1)
+
 
 /* led registers */
 #define AVR_LED_MODE_REG_ADDR		0x20
@@ -80,6 +84,13 @@
 						 * led state to the new one?
 						 * Later!
 						 */
+
+#define AVR_LED_SET_RUN_REG_ADDR	0x25	/* set a run of LEDs
+						 * (bank independent) to
+						 * a single color
+						 */
+#define AVR_LED_SET_MUTE_ADDR		0x28	/* set mute led color */
+
 
 /* volume/system registers */
 #define AVR_VOLUME_SETTING_REG_ADDR	0x30
