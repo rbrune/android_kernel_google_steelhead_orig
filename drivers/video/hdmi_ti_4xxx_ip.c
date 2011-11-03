@@ -277,9 +277,14 @@ int hdmi_ti_4xxx_phy_init(struct hdmi_ip_data *ip_data)
 					HDMI_TXPHY_PAD_CFG_CTRL, 0x1, 27, 27);
 
 #ifdef CONFIG_MACH_STEELHEAD
-	/* flip P and N for data lanes */
-	REG_FLD_MOD(hdmi_phy_base(ip_data),
-					HDMI_TXPHY_PAD_CFG_CTRL, 0x7, 30, 28);
+	{
+		extern int steelhead_hw_rev;
+		if (steelhead_hw_rev < 0x3) { /* 0x3 is DVT */
+			/* flip P and N for data lanes */
+			REG_FLD_MOD(hdmi_phy_base(ip_data),
+				    HDMI_TXPHY_PAD_CFG_CTRL, 0x7, 30, 28);
+		}
+	}
 #endif
 
 	return 0;
