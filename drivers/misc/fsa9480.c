@@ -455,8 +455,27 @@ static int fsa9480_detect_callback(struct otg_id_notifier_block *nb)
 	u16 dev_type;
 	u8 adc_val;
 	u32 prev_dev;
+	int max_events = 100;
+
+	mutex_lock(&usbsw->lock);
 
 	usbsw->pdata->enable(true);
+
+	/* the fsa could have queued up a few events if we haven't processed
+	 * them promptly
+	 */
+	while (max_events-- > 0) {
+		s32 ret = i2c_smbus_read_word_data(client, FSA9480_REG_INT1);
+		if (!ret)
+			break;
+	}
+	if (!max_events)
+		dev_warn(&client->dev, "too many events. fsa hosed?\n");
+
+	/* fsa may take some time to update the dev_type reg after reading
+	 * the int reg.
+	 */
+	usleep_range(200, 300);
 
 	dev_type = i2c_smbus_read_word_data(client, FSA9480_REG_DEV_T1);
 	adc_val = i2c_smbus_read_byte_data(client, FSA9480_REG_ADC);
@@ -468,7 +487,6 @@ static int fsa9480_detect_callback(struct otg_id_notifier_block *nb)
 	dev_dbg(&client->dev, "trying detect (prio=%d): type=%x adc=%x\n",
 		nb_info->detect_set->prio, dev_type, adc_val);
 
-	mutex_lock(&usbsw->lock);
 	prev_dev = usbsw->curr_dev;
 
 	if (dev_type & DEV_USB_MASK) {
@@ -521,7 +539,10 @@ static int fsa9480_detect_callback(struct otg_id_notifier_block *nb)
 
 		/* Enable the external ID interrupt to detect the detach of the
 		 * USB host cable since the FSA9480 is unable to detect it.
+		 * The FSA9480 takes a while pulling that line down, so a sleep
+		 * is needed.
 		 */
+		usleep_range(8500, 8600);
 		enable_irq(usbsw->external_id_irq);
 		return OTG_ID_HANDLED;
 	} else if (dev_type == 0) {
@@ -545,10 +566,10 @@ unhandled:
 		goto handled;
 	}
 
-	mutex_unlock(&usbsw->lock);
 
 err:
 	usbsw->pdata->enable(false);
+	mutex_unlock(&usbsw->lock);
 	return OTG_ID_UNHANDLED;
 
 handled:
@@ -595,6 +616,7 @@ static irqreturn_t fsa9480_irq_thread(int irq, void *data)
 	intr = i2c_smbus_read_word_data(client, FSA9480_REG_INT1);
 	if (intr < 0) {
 		dev_err(&client->dev, "%s: err %d\n", __func__, intr);
+		intr = 0;
 	} else if (intr == 0) {
 		/* When the FSA9480 triggers an interrupt with no status bits
 		 * set the FSA9480 may have reset and the registers need to be
@@ -737,7 +759,8 @@ static int __devinit fsa9480_probe(struct i2c_client *client,
 			usbsw->intr_mask);
 
 	ret = request_threaded_irq(client->irq, NULL, fsa9480_irq_thread,
-				   IRQF_TRIGGER_FALLING, "fsa9480", usbsw);
+				   IRQF_TRIGGER_LOW | IRQF_ONESHOT, "fsa9480",
+				   usbsw);
 	if (ret) {
 		dev_err(&client->dev, "failed to request IRQ\n");
 		goto err_req_irq;

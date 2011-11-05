@@ -53,8 +53,9 @@ usb_free_urbs(struct usb_link_device *usb_ld, struct if_usb_devdata *pipe)
 		usb_poison_urb(urb);
 		usb_free_coherent(usbdev, pipe->rx_buf_size,
 				urb->transfer_buffer, urb->transfer_dma);
-		usb_free_urb(urb);
 		urb->transfer_buffer = NULL;
+		usb_put_urb(urb);
+		usb_free_urb(urb);
 	}
 }
 
@@ -259,7 +260,8 @@ static int usb_tx_urb_with_skb(struct usb_link_device *usb_ld,
 
 	pm_runtime_get_noresume(&usbdev->dev);
 
-	if (usbdev->dev.power.runtime_status != RPM_ACTIVE) {
+	if (usbdev->dev.power.runtime_status == RPM_SUSPENDED ||
+		usbdev->dev.power.runtime_status == RPM_SUSPENDING) {
 		usb_ld->resume_status = AP_INITIATED_RESUME;
 		SET_SLAVE_WAKEUP(usb_ld->pdata, 1);
 
@@ -405,7 +407,7 @@ static void runtime_pm_work(struct work_struct *work)
 
 	ret = pm_request_autosuspend(&usb_ld->usbdev->dev);
 
-	if (ret == -EAGAIN)
+	if (ret == -EAGAIN || ret == 1)
 		queue_delayed_work(system_nrt_wq, &usb_ld->runtime_pm_work,
 							msecs_to_jiffies(50));
 }

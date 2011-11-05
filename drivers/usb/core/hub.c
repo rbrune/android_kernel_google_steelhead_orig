@@ -1634,12 +1634,13 @@ void usb_disconnect(struct usb_device **pdev)
 {
 	struct usb_device	*udev = *pdev;
 	int			i;
-	struct usb_hcd		*hcd = bus_to_hcd(udev->bus);
+	struct usb_hcd		*hcd;
 
 	if (!udev) {
 		pr_debug ("%s nodev\n", __func__);
 		return;
 	}
+	hcd = bus_to_hcd(udev->bus);
 
 	/* mark the device as inactive, so any further urb submissions for
 	 * this device (and any of its children) will fail immediately.
@@ -2418,6 +2419,9 @@ static int finish_port_resume(struct usb_device *udev)
  retry_reset_resume:
 		status = usb_reset_and_verify_device(udev);
 
+	if (udev->quirks & USB_QUIRK_NO_GET_STATUS)
+		goto done;
+
  	/* 10.5.4.5 says be sure devices in the tree are still there.
  	 * For now let's assume the device didn't go crazy on resume,
 	 * and device drivers will know about any resume quirks.
@@ -2457,6 +2461,7 @@ static int finish_port_resume(struct usb_device *udev)
 		}
 		status = 0;
 	}
+done:
 	return status;
 }
 

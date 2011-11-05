@@ -204,6 +204,21 @@ static DEFINE_SPINLOCK(starttime_lock);
  */
 #define TXDATADMADIS	BIT(0)
 
+#define MCASP_ALLOWED_PPM	100
+
+/*
+ * OMAP_MCASP_DITCSRA_REG/OMAP_MCASP_DITCSRB_REG
+ */
+#define OMAP_MCASP_DITCSR_44100HZ	(0x0 << 24)
+#define OMAP_MCASP_DITCSR_48000HZ	(0x2 << 24)
+#define OMAP_MCASP_DITCSR_32000HZ	(0x3 << 24)
+#define OMAP_MCASP_DITCSR_22050HZ	(0x4 << 24)
+#define OMAP_MCASP_DITCSR_24000HZ	(0x6 << 24)
+#define OMAP_MCASP_DITCSR_88200HZ	(0x8 << 24)
+#define OMAP_MCASP_DITCSR_96000HZ	(0xA << 24)
+#define OMAP_MCASP_DITCSR_176400HZ	(0xC << 24)
+#define OMAP_MCASP_DITCSR_192000HZ	(0xE << 24)
+
 /*
  * Stream DMA parameters
  */
@@ -313,7 +328,8 @@ static int mcasp_compute_clock_dividers(long fclk_rate, int tgt_sample_rate,
 	 * the transmit clock.
 	 */
 	long divisor;
-	int i;
+	unsigned long ppm;
+	int sample_rate, i;
 	BUG_ON(!out_div_lo);
 	BUG_ON(!out_div_hi);
 
@@ -325,11 +341,19 @@ static int mcasp_compute_clock_dividers(long fclk_rate, int tgt_sample_rate,
 
 	fclk_rate >>= 7;
 
-	/* Next, make sure that our target Fs divides fClk/128 */
-	if  (fclk_rate % tgt_sample_rate)
+	/* rounded division: fclk_rate / tgt_sample_rate + 0.5 */
+	divisor = (2 * fclk_rate + tgt_sample_rate) / (2 * tgt_sample_rate);
+	if (!divisor)
 		return -EINVAL;
 
-	divisor = fclk_rate / tgt_sample_rate;
+	sample_rate = fclk_rate / divisor;
+
+	/* ppm calculation in two steps to avoid overflow */
+	ppm = abs(tgt_sample_rate - sample_rate);
+	ppm = (1000000 * ppm) / tgt_sample_rate;
+
+	if (ppm > MCASP_ALLOWED_PPM)
+		return -EINVAL;
 
 	/* At this point, divisor holds the product of the two divider values we
 	 * need to use for ACLKXCTL and AHCLKXCTL.  ACLKXCTL holds a 5 bit
@@ -389,7 +413,7 @@ static int mcasp_compute_playback_rates(long fclk_rate)
 	return res;
 }
 
-static int mcasp_start_tx(struct omap_mcasp *mcasp)
+static int omap_mcasp_start(struct omap_mcasp *mcasp)
 {
 	int i;
 	unsigned long irq_state;
@@ -432,15 +456,7 @@ static int mcasp_start_tx(struct omap_mcasp *mcasp)
 	return 0;
 }
 
-static int omap_mcasp_start(struct omap_mcasp *mcasp, int stream)
-{
-	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
-		return mcasp_start_tx(mcasp);
-
-	return -EINVAL;
-}
-
-static void mcasp_stop_tx(struct omap_mcasp *mcasp)
+static void omap_mcasp_stop(struct omap_mcasp *mcasp)
 {
 	unsigned long irq_state;
 
@@ -454,24 +470,15 @@ static void mcasp_stop_tx(struct omap_mcasp *mcasp)
 			OMAP_MCASP_TXSTAT_MASK);
 }
 
-static void omap_mcasp_stop(struct omap_mcasp *mcasp, int stream)
-{
-	if (stream == SNDRV_PCM_STREAM_PLAYBACK)
-		mcasp_stop_tx(mcasp);
-}
-
 static int omap_mcasp_startup(struct snd_pcm_substream *substream,
 			      struct snd_soc_dai *dai)
 {
-	struct platform_device *pdev;
 	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
 
 	mcasp_clk_on(mcasp);
 
-	pdev = to_platform_device(mcasp->dev);
-
 	if (!mcasp->active++)
-		pm_runtime_get_sync(&pdev->dev);
+		pm_runtime_get_sync(mcasp->dev);
 
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_SYSCONFIG_REG, 0x1);
 
@@ -481,15 +488,12 @@ static int omap_mcasp_startup(struct snd_pcm_substream *substream,
 static void omap_mcasp_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
-	struct platform_device *pdev;
 	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
-
-	pdev = to_platform_device(mcasp->dev);
 
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_SYSCONFIG_REG, 0x2);
 
 	if (!--mcasp->active)
-		pm_runtime_put_sync(&pdev->dev);
+		pm_runtime_put_sync(mcasp->dev);
 
 	mcasp_clk_off(mcasp);
 }
@@ -497,7 +501,7 @@ static void omap_mcasp_shutdown(struct snd_pcm_substream *substream,
 /* S/PDIF */
 static int omap_hw_dit_param(struct omap_mcasp *mcasp, unsigned int rate)
 {
-	u32 aclkxdiv, ahclkxdiv;
+	u32 aclkxdiv, ahclkxdiv, ditcsr;
 	int res;
 
 	/* Set TX frame synch : DIT Mode, 1 bit width, internal, rising edge */
@@ -531,6 +535,41 @@ static int omap_hw_dit_param(struct omap_mcasp *mcasp, unsigned int rate)
 		return res;
 	}
 
+	switch (rate) {
+	case 22050:
+		ditcsr = OMAP_MCASP_DITCSR_22050HZ;
+		break;
+	case 24000:
+		ditcsr = OMAP_MCASP_DITCSR_24000HZ;
+		break;
+	case 32000:
+		ditcsr = OMAP_MCASP_DITCSR_32000HZ;
+		break;
+	case 44100:
+		ditcsr = OMAP_MCASP_DITCSR_44100HZ;
+		break;
+	case 48000:
+		ditcsr = OMAP_MCASP_DITCSR_48000HZ;
+		break;
+	case 88200:
+		ditcsr = OMAP_MCASP_DITCSR_88200HZ;
+		break;
+	case 96000:
+		ditcsr = OMAP_MCASP_DITCSR_96000HZ;
+		break;
+	case 176400:
+		ditcsr = OMAP_MCASP_DITCSR_176400HZ;
+		break;
+	case 192000:
+		ditcsr = OMAP_MCASP_DITCSR_192000HZ;
+		break;
+	default:
+		dev_err(mcasp->dev, "%s: Invalid sampling rate: %d\n",
+			__func__, rate);
+		return -EINVAL;
+	}
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_DITCSRA_REG, ditcsr);
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_DITCSRB_REG, ditcsr);
 	mcasp_set_bits(mcasp->base + OMAP_MCASP_AHCLKXCTL_REG,
 					AHCLKXDIV(ahclkxdiv));
 	mcasp_set_bits(mcasp->base + OMAP_MCASP_ACLKXCTL_REG,
@@ -599,7 +638,7 @@ static int omap_mcasp_hw_params(struct snd_pcm_substream *substream,
 	int stream = substream->stream;
 	int ret = 0;
 
-	mcasp_stop_tx(mcasp);
+	omap_mcasp_stop(mcasp);
 
 	if (stream != SNDRV_PCM_STREAM_PLAYBACK)
 		return -EINVAL;
@@ -628,13 +667,13 @@ static int omap_mcasp_trigger(struct snd_pcm_substream *substream,
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-		ret = omap_mcasp_start(mcasp, substream->stream);
+		ret = omap_mcasp_start(mcasp);
 		break;
 
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-		omap_mcasp_stop(mcasp, substream->stream);
+		omap_mcasp_stop(mcasp);
 		break;
 
 	default:
