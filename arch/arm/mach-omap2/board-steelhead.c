@@ -1122,6 +1122,8 @@ static int steelhead_reboot_notifier_handler(struct notifier_block *this,
 				strcpy(sar_free_p, "recovery");
 			else if (!strcmp(_cmd, "bootloader"))
 				strcpy(sar_free_p, "bootloader");
+			else
+				strcpy(sar_free_p, "normal");
 		}
 	}
 
