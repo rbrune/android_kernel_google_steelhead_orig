@@ -1117,13 +1117,14 @@ static int steelhead_reboot_notifier_handler(struct notifier_block *this,
 	sar_free_p += PUBLIC_SAR_RAM_1_FREE_OFFSET;
 	memset(sar_free_p, 0, 32);
 	if (code == SYS_RESTART) {
+		/* set default for normal reboot */
+		strcpy(sar_free_p, "normal");
 		if (_cmd) {
+			/* do special reboot requests if needed */
 			if (!strcmp(_cmd, "recovery"))
 				strcpy(sar_free_p, "recovery");
 			else if (!strcmp(_cmd, "bootloader"))
 				strcpy(sar_free_p, "bootloader");
-			else
-				strcpy(sar_free_p, "normal");
 		}
 	}
 
