@@ -58,6 +58,7 @@
 #include "control.h"
 #include "mux.h"
 #include "board-steelhead.h"
+#include "resetreason.h"
 #include "common-board-devices.h"
 #include "pm.h"
 
@@ -65,6 +66,7 @@
 #include <plat/i2c.h>
 #include <plat/omap-pm.h>
 #include <plat/mcasp.h>
+#include <linux/platform_data/ram_console.h>
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
 #include <linux/aah_localtime.h>
@@ -97,11 +99,17 @@ static struct resource ramconsole_resources[] = {
 	},
 };
 
+static struct ram_console_platform_data ramconsole_pdata;
+
 static struct platform_device ramconsole_device = {
 	.name           = "ram_console",
 	.id             = -1,
 	.num_resources  = ARRAY_SIZE(ramconsole_resources),
 	.resource       = ramconsole_resources,
+	.dev            = {
+		.platform_data = &ramconsole_pdata,
+	},
+
 };
 
 int steelhead_hw_rev;
@@ -1298,6 +1306,7 @@ static void __init steelhead_init(void)
 #endif
 
 	steelhead_i2c_init();
+	ramconsole_pdata.bootinfo = omap4_get_resetreason();
 	platform_add_devices(steelhead_devices, ARRAY_SIZE(steelhead_devices));
 	board_serial_init();
 	omap4_twl6030_hsmmc_init(mmc);
