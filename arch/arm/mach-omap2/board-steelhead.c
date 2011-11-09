@@ -49,6 +49,7 @@
 #include <plat/usb.h>
 #include <plat/mmc.h>
 #include <plat/remoteproc.h>
+#include <mach/omap_fiq_debugger.h>
 #include <mach/id.h>
 #include <mach/dmm.h>
 #include "timer-gp.h"
@@ -545,13 +546,23 @@ static inline void __init board_serial_init(void)
 	omap_serial_init_port_pads(0, NULL, 0, NULL);
 	/* uart2 for bluetooth is done in board-steelhead-bluetooth.c */
 
-	/* uart3 is for kernel console */
-	omap_serial_init_port_pads(2, serial3_pads, ARRAY_SIZE(serial3_pads),
-				   NULL);
+	/* uart3 is for FIQ debugger and is initialized in
+	   board_serial_debug_init() */
+
 	/* uart4 is used for AVR programming */
 	omap_serial_init_port_pads(3, serial4_pads, ARRAY_SIZE(serial4_pads),
 				   NULL);
 }
+
+/* fiq_debugger initializes really early but OMAP resource mgmt
+ * is not yet ready @ arch_init, so init the serial debugger later */
+static int __init board_serial_debug_init(void)
+{
+	return omap_serial_debug_init(2, false, true, serial3_pads,
+				      ARRAY_SIZE(serial3_pads));
+}
+device_initcall(board_serial_debug_init);
+
 
 int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 				   int count,
