@@ -109,6 +109,8 @@ config SND_OMAP_SOC_STEELHEAD
 	tristate "SoC Audio support for the Tungsten/Steelhead platform"
 	select SND_OMAP_SOC_MCASP
 	select SND_OMAP_SOC_SPDIF
+	select SND_OMAP_SOC_MCBSP
+	select SND_SOC_TAS5713
 	depends on SND_OMAP_SOC
 
 config SND_OMAP_SOC_SDP4430
