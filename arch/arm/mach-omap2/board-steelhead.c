@@ -257,7 +257,7 @@ static struct omap_musb_board_data musb_board_data = {
 #elif defined(CONFIG_USB_MUSB_HOST)
 	.mode			= MUSB_HOST,
 #endif
-	.power			= 100,
+	.power			= 500,
 };
 
 static struct twl4030_usb_data omap4_usbphy_data = {
