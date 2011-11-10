@@ -577,11 +577,6 @@ config STEELHEAD_AVR
 	tristate "Steelhead AVR LED/Front Panel Support"
 	default n
 
-config TAS5713
-	depends on OMAP_MCBSP && I2C
-	tristate "TAS5713 Speaker Amplifier Driver"
-	default n
-
 config AAH_LOCALTIME
 	tristate "Android@Home Localtime Driver"
 	default n

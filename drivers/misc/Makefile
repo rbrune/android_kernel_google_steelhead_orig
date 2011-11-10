@@ -59,7 +59,6 @@ obj-$(CONFIG_USB_SWITCH_FSA9480)	+= fsa9480.o
 obj-$(CONFIG_OMAP_DIE_TEMP_SENSOR)	+= omap_temp_sensor.o
 obj-$(CONFIG_LEDS_AN30259A)	+= leds-an30259a.o
 obj-$(CONFIG_STEELHEAD_AVR)	+= steelhead_avr.o
-obj-$(CONFIG_TAS5713)		+= tas5713.o
 obj-$(CONFIG_AAH_LOCALTIME)	+= aah_localtime_driver.o
 obj-$(CONFIG_PN544)		+= pn544.o
 obj-$(CONFIG_TMP101)		+= tmp101.o
