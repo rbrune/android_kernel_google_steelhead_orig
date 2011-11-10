@@ -327,6 +327,10 @@ static struct regulator_init_data steelhead_vaux2 = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_VOLTAGE
 					| REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled	= true,
+		},
+		.initial_state		= PM_SUSPEND_MEM,
 	},
 };
 
@@ -369,6 +373,10 @@ static struct regulator_init_data steelhead_vpp = {
 		.valid_ops_mask	 = REGULATOR_CHANGE_VOLTAGE
 					| REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled	= true,
+		},
+		.initial_state		= PM_SUSPEND_MEM,
 	},
 };
 
@@ -406,7 +414,7 @@ static struct regulator_init_data steelhead_vcxio = {
 		.max_uV			= 1800000,
 		.valid_modes_mask	= REGULATOR_MODE_NORMAL
 					| REGULATOR_MODE_STANDBY,
-		.valid_ops_mask	 = REGULATOR_CHANGE_MODE
+		.valid_ops_mask		= REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 		.always_on		= true,
 	},
@@ -442,6 +450,10 @@ static struct regulator_init_data steelhead_vusb = {
 					| REGULATOR_MODE_STANDBY,
 		.valid_ops_mask	 =	REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled	= true,
+		},
+		.initial_state		= PM_SUSPEND_MEM,
 	},
 };
 
@@ -468,23 +480,27 @@ static struct regulator_init_data steelhead_clk32kg = {
 
 /* define a regulator so on 4460 this can be turned off because
  * it's not needed.
- * on 4430 however, it needs to be always on to provide vcore3 to the CPU.
  */
 static struct regulator_init_data steelhead_vdd3 = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
+		.state_mem = {
+			.disabled	= true,
+		},
+		.initial_state		= PM_SUSPEND_MEM,
 	},
 };
 
 /* define a regulator so on 4460 this can be turned off because
  * it's not needed.
- * for EVT, this is always on.  For DVT, we can disable because
- * we tie the 1.29V output of the PMIC to memory.
  */
 static struct regulator_init_data steelhead_vmem = {
 	.constraints = {
 		.valid_ops_mask		= REGULATOR_CHANGE_STATUS,
-		.always_on              = true,
+		.state_mem = {
+			.disabled	= true,
+		},
+		.initial_state		= PM_SUSPEND_MEM,
 	},
 };
 
@@ -952,6 +968,12 @@ static int __init steelhead_i2c_init(void)
 	omap_mux_init_signal("i2c3_sda.i2c3_sda", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c4_scl.i2c4_scl", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c4_sda.i2c4_sda", OMAP_PIN_INPUT);
+
+	/* for EVT, this is always on.  For DVT, it's not used because
+	 * we tie the 1.29V output of the PMIC to memory.
+	 */
+	if (steelhead_hw_rev < STEELHEAD_REV_DVT)
+		steelhead_vmem.constraints.always_on = true;
 
 	/*
 	 * This will allow unused regulator to be shutdown. This flag
