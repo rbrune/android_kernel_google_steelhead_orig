@@ -498,9 +498,6 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		was_down = (scan & AVR_KEY_EVENT_DOWN) != 0;
 		scan &= AVR_KEY_EVENT_CODE_MASK;
 
-		/* Generate the raw scan code. */
-		input_event(state->input_dev, EV_MSC, MSC_SCAN, scan);
-
 		/* Generate the translated key code. */
 		if (scan < state->input_dev->keycodemax) {
 			input_report_key(state->input_dev, state->keymap[scan],
