@@ -669,6 +669,8 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		 * to update firmware.
 		 */
 		pr_err("%s: clearing mute led failed\n", __func__);
+		/* ignore failure to allow updater to work */
+		rc = 0;
 	}
 
 	pr_info("Steelhead AVR Driver loaded.\n");
