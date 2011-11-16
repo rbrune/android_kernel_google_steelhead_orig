@@ -36,10 +36,18 @@ static u32			counter_freq = 1;
 static unsigned long		rollover_check_timer_period;
 static struct timer_list	rollover_check_timer;
 
-#define VCXO_PWM_TIMER_ID 9
-#define VCXO_PWM_PIN_NAME "dpm_emu17.dmtimer9_pwm_evt"
-#define VCXO_PWM_SAFE_MODE_PIN_NAME "dpm_emu17.safe_mode"
+#define VCXO_PWM_TIMER_ID_PRE_DVT2 9
+#define VCXO_PWM_PIN_NAME_PRE_DVT2 "dpm_emu17.dmtimer9_pwm_evt"
+#define VCXO_PWM_SAFE_MODE_PIN_NAME_PRE_DVT2 "dpm_emu17.safe_mode"
+#define VCXO_PWM_TIMER_ID_POST_DVT2 10
+#define VCXO_PWM_PIN_NAME_POST_DVT2 "dpm_emu18.dmtimer10_pwm_evt"
+#define VCXO_PWM_SAFE_MODE_PIN_NAME_POST_DVT2 "dpm_emu18.safe_mode"
 #define VCXO_PWM_CLK OMAP_TIMER_SRC_SYS_CLK
+
+static int 		VCXO_PWM_TIMER_ID = VCXO_PWM_TIMER_ID_POST_DVT2;
+static const char* 	VCXO_PWM_PIN_NAME = VCXO_PWM_PIN_NAME_POST_DVT2;
+static const char* 	VCXO_PWM_SAFE_MODE_PIN_NAME =
+			VCXO_PWM_SAFE_MODE_PIN_NAME_POST_DVT2;
 
 static struct omap_dm_timer	*vcxo_pwm_timer;
 static spinlock_t		vcxo_lock;
@@ -276,6 +284,13 @@ finished:
 
 static int __init steelhead_setup_vcxo_control(void)
 {
+	if (steelhead_hw_rev <= STEELHEAD_REV_DVT) {
+		VCXO_PWM_TIMER_ID = VCXO_PWM_TIMER_ID_PRE_DVT2;
+		VCXO_PWM_PIN_NAME = VCXO_PWM_PIN_NAME_PRE_DVT2;
+		VCXO_PWM_SAFE_MODE_PIN_NAME =
+			VCXO_PWM_SAFE_MODE_PIN_NAME_PRE_DVT2;
+	}
+
 	/* Set up our lock */
 	spin_lock_init(&vcxo_lock);
 
