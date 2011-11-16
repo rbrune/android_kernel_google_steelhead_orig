@@ -10,6 +10,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <linux/gpio.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -57,6 +58,40 @@ static char *btaddr;
 module_param(btaddr, charp, S_IRUGO);
 MODULE_PARM_DESC(btaddr, "bluetooth address");
 
+void __init steelhead_init_bluetooth_mcbsp(void) {
+	/* Currently, we are not making use of McBSP1 to drive audio into the BT
+	 * chip.  For now, to make sure we are not burning extra power,
+	 * don't leave the pins in safe mode.  Instead, configure them to be
+	 * GPIOs which are just driven low at all times. */
+	struct steelhead_gpio_reservation bt_mcbsp_pins[] = {
+		{
+			.gpio_id = 116,
+			.gpio_name = "bt_mcbsp1_dx",
+			.mux_name = "abe_mcbsp1_dx.gpio_116",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
+		{
+			.gpio_id = 114,
+			.gpio_name = "bt_mcbsp1_clkx",
+			.mux_name = "abe_mcbsp1_clkx.gpio_114",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
+		{
+			.gpio_id = 117,
+			.gpio_name = "bt_mcbsp1_fsx",
+			.mux_name = "abe_mcbsp1_fsx.gpio_117",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_LOW,
+		},
+	};
+
+	steelhead_reserve_gpios(bt_mcbsp_pins,
+			ARRAY_SIZE(bt_mcbsp_pins),
+			"bt_mcbsp", true);
+}
+
 int __init steelhead_init_bluetooth(void)
 {
 	/* Setup the GPIOs we use to control the regulator enable, reset, and
@@ -66,6 +101,9 @@ int __init steelhead_init_bluetooth(void)
 	omap_mux_init_signal("gpmc_a21.gpio_45", OMAP_PIN_OUTPUT);
 	omap_mux_init_signal("gpmc_a23.gpio_47",
 			     OMAP_WAKEUP_EN | OMAP_PIN_INPUT);
+
+	/* Setup the pins used to connect the BCM4330 to McBSP1 */
+	steelhead_init_bluetooth_mcbsp();
 
 	/* Add the serial port we will use to communicate with the BCM4330 */
 	omap_serial_init_port_pads(1,
