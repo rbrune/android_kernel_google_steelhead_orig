@@ -150,24 +150,26 @@ void omap4_enter_sleep(unsigned int cpu, unsigned int power_state, bool suspend)
 	pwrdm_clear_all_prev_pwrst(per_pwrdm);
 	omap4_device_clear_prev_off_state();
 
+	/*
+	 * Just return if we detect a scenario where we conflict
+	 * with DVFS
+	 */
+	if (omap_dvfs_is_any_dev_scaling())
+		return;
+
 	cpu0_next_state = pwrdm_read_next_pwrst(cpu0_pwrdm);
 	per_next_state = pwrdm_read_next_pwrst(per_pwrdm);
 	core_next_state = pwrdm_read_next_pwrst(core_pwrdm);
 	mpu_next_state = pwrdm_read_next_pwrst(mpu_pwrdm);
 
-	ret = omap2_gpio_prepare_for_idle(omap4_device_next_state_off());
+	ret = omap2_gpio_prepare_for_idle(omap4_device_next_state_off(), suspend);
 	if (ret)
 		goto abort_gpio;
 
 	if (mpu_next_state < PWRDM_POWER_INACTIVE) {
-		if (omap_dvfs_is_scaling(mpu_voltdm)) {
-			mpu_next_state = PWRDM_POWER_INACTIVE;
-			pwrdm_set_next_pwrst(mpu_pwrdm, mpu_next_state);
-		} else {
-			omap_sr_disable_reset_volt(mpu_voltdm);
-			omap_vc_set_auto_trans(mpu_voltdm,
-				OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
-		}
+		omap_sr_disable_reset_volt(mpu_voltdm);
+		omap_vc_set_auto_trans(mpu_voltdm,
+			OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
 	}
 
 	if (core_next_state < PWRDM_POWER_ON) {
@@ -177,22 +179,16 @@ void omap4_enter_sleep(unsigned int cpu, unsigned int power_state, bool suspend)
 		 * enabling AUTO RET requires SR to disabled, its done here for
 		 * now. Needs a relook to see if this can be optimized.
 		 */
-		if (omap_dvfs_is_scaling(core_voltdm) ||
-		    omap_dvfs_is_scaling(iva_voltdm)) {
-			core_next_state = PWRDM_POWER_ON;
-			pwrdm_set_next_pwrst(core_pwrdm, core_next_state);
-		} else {
-			omap_sr_disable_reset_volt(iva_voltdm);
-			omap_sr_disable_reset_volt(core_voltdm);
-			omap_vc_set_auto_trans(core_voltdm,
-				OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
-			if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
-				omap_vc_set_auto_trans(iva_voltdm,
-				  OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
-			}
-
-			omap_temp_sensor_prepare_idle();
+		omap_sr_disable_reset_volt(iva_voltdm);
+		omap_sr_disable_reset_volt(core_voltdm);
+		omap_vc_set_auto_trans(core_voltdm,
+			OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
+		if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
+			omap_vc_set_auto_trans(iva_voltdm,
+			  OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
 		}
+
+		omap_temp_sensor_prepare_idle();
 	}
 
 	if (omap4_device_next_state_off()) {
@@ -249,6 +245,8 @@ abort_device_off:
 		omap_gpmc_restore_context();
 	}
 
+	omap2_gpio_resume_after_idle(omap4_device_next_state_off());
+
 	if (omap4_device_next_state_off()) {
 		/* Disable the extension of Non-EMIF I/O isolation */
 		omap4_prminst_rmw_inst_reg_bits(OMAP4430_ISOOVR_EXTEND_MASK,
@@ -262,7 +260,6 @@ abort_device_off:
 		omap_sr_enable(mpu_voltdm);
 	}
 
-	omap2_gpio_resume_after_idle(omap4_device_next_state_off());
 
 abort_gpio:
 	return;
@@ -709,6 +706,35 @@ static const struct platform_suspend_ops omap_pm_ops = {
 void omap4_enter_sleep(unsigned int cpu, unsigned int power_state){ return; }
 #endif /* CONFIG_SUSPEND */
 
+/**
+ * omap4_pm_cold_reset() - Cold reset OMAP4
+ * @reason:	why am I resetting.
+ *
+ * As per the TRM, it is recommended that we set all the power domains to
+ * ON state before we trigger cold reset.
+ */
+int omap4_pm_cold_reset(char *reason)
+{
+	struct power_state *pwrst;
+
+	/* Switch ON all pwrst registers */
+	list_for_each_entry(pwrst, &pwrst_list, node) {
+		if (pwrst->pwrdm->pwrsts_logic_ret)
+			pwrdm_set_logic_retst(pwrst->pwrdm, PWRDM_POWER_ON);
+		if (pwrst->pwrdm->pwrsts)
+			omap_set_pwrdm_state(pwrst->pwrdm, PWRDM_POWER_ON);
+	}
+
+	WARN(1, "Arch Cold reset has been triggered due to %s\n", reason);
+	omap4_prm_global_cold_sw_reset(); /* never returns */
+
+	/* If we reached here - something bad went on.. */
+	BUG();
+
+	/* make the compiler happy */
+	return -EINTR;
+}
+
 /*
  * Enable hardware supervised mode for all clockdomains if it's
  * supported. Initiate sleep transition for other clockdomains, if
@@ -911,9 +937,16 @@ void omap_pm_clear_dsp_wake_up(void)
 	}
 
 	ret = pwrdm_read_pwrst(tesla_pwrdm);
-	/* If Tesla power state in RET or OFF, then not hit by errata */
-	if (ret <= PWRDM_POWER_RET)
+	/*
+	 * If current Tesla power state is in RET/OFF and not in transition,
+	 * then not hit by errata.
+	 */
+	if (ret <= PWRDM_POWER_RET) {
+		if (!(omap4_prminst_read_inst_reg(tesla_pwrdm->prcm_partition,
+				tesla_pwrdm->prcm_offs, OMAP4_PM_PWSTST)
+				& OMAP_INTRANSITION_MASK))
 		return;
+	}
 
 	if (clkdm_wakeup(tesla_clkdm))
 		pr_err("%s: Failed to force wakeup of %s\n", __func__,

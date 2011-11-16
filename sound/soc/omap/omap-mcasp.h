@@ -27,14 +27,17 @@
 struct omap_mcasp {
 	struct device *dev;
 	void __iomem *base;
+	spinlock_t lock;
 	struct clk *fclk;
-	int clk_active;
-	int active;
-	struct omap_hwmod *oh;
+	int irq;
+	unsigned int stream_rate;
+	struct pm_qos_request_list *pm_qos;
+
 
 	struct omap_mcasp_platform_data* pdata;
 	s64 start_time;
 	int start_time_valid;
+
 };
 
 #endif	/* OMAP_MCASP_H */
