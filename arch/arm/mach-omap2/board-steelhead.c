@@ -112,36 +112,11 @@ static struct platform_device ramconsole_device = {
 };
 
 int steelhead_hw_rev;
+module_param(steelhead_hw_rev, int, S_IRUGO);
+MODULE_PARM_DESC(steelhead_hw_rev, "hardware revision");
 
 static bool enable_sr = true;
 module_param(enable_sr, bool, S_IRUSR | S_IRGRP | S_IROTH);
-
-#define HW_REV_0_GPIO_ID 182
-#define HW_REV_1_GPIO_ID 101
-#define HW_REV_2_GPIO_ID 171
-static struct steelhead_gpio_reservation hwrev_gpios[] = {
-	{
-		.gpio_id = HW_REV_0_GPIO_ID,
-		.gpio_name = "board_id_0",
-		.mux_name = "fref_clk2_out.gpio_182",
-		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
-		.init_state = GPIOF_IN,
-	},
-	{
-		.gpio_id = HW_REV_1_GPIO_ID,
-		.gpio_name = "board_id_1",
-		.mux_name = "gpmc_ncs4.gpio_101",
-		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
-		.init_state = GPIOF_IN,
-	},
-	{
-		.gpio_id = HW_REV_2_GPIO_ID,
-		.gpio_name = "board_id_2",
-		.mux_name = "kpd_col3.gpio_171",
-		.pin_mode = OMAP_PIN_INPUT_PULLDOWN,
-		.init_state = GPIOF_IN,
-	},
-};
 
 static const char const *omap4_steelhead_hw_name[] = {
 	[STEELHEAD_REV_ALPHA] = "Steelhead ALPHA",
@@ -163,29 +138,9 @@ static const char *omap4_steelhead_hw_rev_name(void)
 
 static void __init omap4_steelhead_init_hw_rev(void)
 {
-	int ret;
-	int i;
-
-	/* initially an invalid value */
-	steelhead_hw_rev = ARRAY_SIZE(omap4_steelhead_hw_name);
-
-	/* mux init */
-	ret = steelhead_reserve_gpios(hwrev_gpios, ARRAY_SIZE(hwrev_gpios),
-				      "hw_rev", true);
-
-	if (ret) {
-		pr_err("unable to reserve gpios for hw rev\n");
-		return;
-	}
-	steelhead_hw_rev = 0;
-
-	for (i = 0; i < ARRAY_SIZE(hwrev_gpios); i++)
-		steelhead_hw_rev |= gpio_get_value(hwrev_gpios[i].gpio_id) << i;
-
 	pr_info("Steelhead HW revision: %02x (%s), cpu %s\n", steelhead_hw_rev,
 		omap4_steelhead_hw_rev_name(),
 		cpu_is_omap443x() ? "OMAP4430" : "OMAP4460");
-
 }
 
 #define PHYS_ADDR_SMC_SIZE				(SZ_1M * 3)
