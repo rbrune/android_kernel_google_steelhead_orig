@@ -25,6 +25,7 @@
 
 #include <plat/tc.h>
 #include <plat/board.h>
+#include <plat/mcasp.h>
 #include <plat/mcbsp.h>
 #include <mach/gpio.h>
 #include <plat/mmc.h>
@@ -41,6 +42,10 @@
 #include "control.h"
 #include "devices.h"
 #include "dvfs.h"
+
+#ifdef CONFIG_MACH_STEELHEAD
+#include "board-steelhead.h"
+#endif
 
 #define L3_MODULES_MAX_LEN 12
 #define L3_MODULES 3
@@ -483,12 +488,25 @@ static struct omap_device_pm_latency omap_mcasp_latency[] = {
 	},
 };
 
+#ifdef CONFIG_MACH_STEELHEAD
+static struct omap_mcasp_platform_data steelhead_mcasp_pdata = {
+	.get_raw_counter = steelhead_get_raw_counter,
+};
+#endif
+
 static void omap_init_mcasp(void)
 {
 	struct omap_hwmod *oh;
 	struct omap_device *od;
 	char *oh_name = "omap-mcasp-dai";
 	char *dev_name = "omap-mcasp-dai";
+#ifndef CONFIG_MACH_STEELHEAD
+	void *pdata = NULL;
+	int pdata_len = 0;
+#else
+	void *pdata = &steelhead_mcasp_pdata;
+	int pdata_len = sizeof(steelhead_mcasp_pdata);
+#endif
 
 	oh = omap_hwmod_lookup(oh_name);
 	if (!oh) {
@@ -496,7 +514,7 @@ static void omap_init_mcasp(void)
 		return;
 	}
 
-	od = omap_device_build(dev_name, -1, oh, NULL, 0,
+	od = omap_device_build(dev_name, -1, oh, pdata, pdata_len,
 				omap_mcasp_latency,
 				ARRAY_SIZE(omap_mcasp_latency), 0);
 	WARN(IS_ERR(od), "could not build omap_device for %s:%s\n",

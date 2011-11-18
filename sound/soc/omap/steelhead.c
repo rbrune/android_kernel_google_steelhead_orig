@@ -22,7 +22,7 @@ static struct snd_soc_dai_link steelhead_dai[] = {
 	{
 		.name = "SPDIF",
 		.stream_name = "SPDIF",
-		.cpu_dai_name = "omap-mcasp-dai.0",
+		.cpu_dai_name = "omap-mcasp-dai",
 		.codec_name = "spdif-dit.0",
 		.codec_dai_name = "dit-hifi",
 		.platform_name = "omap-pcm-audio",

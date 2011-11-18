@@ -65,7 +65,6 @@
 #include <linux/i2c.h>
 #include <plat/i2c.h>
 #include <plat/omap-pm.h>
-#include <plat/mcasp.h>
 #include <linux/platform_data/ram_console.h>
 #include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
@@ -804,24 +803,12 @@ err:
  *                                                                            *
  ******************************************************************************/
 
-static struct omap_mcasp_platform_data steelhead_mcasp_pdata = {
-	.get_raw_counter = steelhead_get_raw_counter,
-};
-
-static struct platform_device steelhead_mcasp_device = {
-	.name		= "omap-mcasp-dai",
-	.id		= 0,
-	.dev	= {
-		.platform_data	= &steelhead_mcasp_pdata,
-	},
-};
-
 static struct platform_device steelhead_spdif_dit_device = {
 	.name		= "spdif-dit",
 	.id		= 0,
 };
 
-static void steelhead_platform_init_mcasp_audio(void)
+static void __init steelhead_platform_init_mcasp_audio(void)
 {
 	int res;
 
@@ -834,7 +821,6 @@ static void steelhead_platform_init_mcasp_audio(void)
 	}
 
 	platform_device_register(&steelhead_spdif_dit_device);
-	platform_device_register(&steelhead_mcasp_device);
 	return;
 };
 
