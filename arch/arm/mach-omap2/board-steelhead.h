@@ -49,6 +49,8 @@ extern void steelhead_set_counter_slew_rate(s32 correction);
 #define STEELHEAD_REV_DVT     0x3
 extern int steelhead_hw_rev;
 
+extern void steelhead_set_tas5713_interface_en(int enabled);
+
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 extern void steelhead_register_timesync_event_handler(
 		void *d, void (*handler)(void *d, u64));

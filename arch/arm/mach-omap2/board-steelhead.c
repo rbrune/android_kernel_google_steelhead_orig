@@ -67,6 +67,7 @@
 #include <plat/mcasp.h>
 #include <plat/omap-pm.h>
 #include <linux/platform_data/ram_console.h>
+#include <linux/tas5713.h>
 #include <linux/steelhead_avr.h>
 #include <linux/aah_localtime.h>
 #include <linux/pn544.h>
@@ -574,6 +575,164 @@ int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 
 /******************************************************************************
  *                                                                            *
+ *              TAS5713 Class-D Audio Amplifier Initialization                *
+ *                                                                            *
+ ******************************************************************************/
+
+#define TAS5713_INTERFACE_EN_GPIO_ID 40
+#define TAS5713_RESET_GPIO_ID 42
+#define TAS5713_PDN_GPIO_ID 44
+
+static struct tas5713_platform_data tas5713_pdata = {
+	/* Reset and Power Down GPIO configuration */
+	.reset_gpio = TAS5713_RESET_GPIO_ID,
+	.pdn_gpio = TAS5713_PDN_GPIO_ID,
+
+	/* MCLK */
+	.mclk_out = NULL,
+};
+static const unsigned long tas5713_mclk_rate = 12288000;
+
+void steelhead_set_tas5713_interface_en(int enabled) {
+	gpio_set_value(TAS5713_INTERFACE_EN_GPIO_ID, enabled);
+}
+
+static void steelhead_platform_init_tas5713_audio(void)
+{
+	struct clk *m3x2_clk = NULL;
+	struct clk *mclk_out = NULL;
+	struct clk *mclk_src = NULL;
+	struct clk *mcbsp_internal_clk =  NULL;
+	struct clk *abe_24m_clk = NULL;
+	int res;
+	unsigned long tgt_rate = (tas5713_mclk_rate * 5);
+
+	static struct steelhead_gpio_reservation tas5713_iface_en_gpio[] = {
+		{
+			.gpio_id = TAS5713_INTERFACE_EN_GPIO_ID,
+			.gpio_name = "tas5713_interface_en",
+			.mux_name = "gpmc_a16.gpio_40",
+			.pin_mode = OMAP_PIN_OUTPUT,
+			.init_state = GPIOF_OUT_INIT_HIGH,
+		},
+	};
+
+	omap_mux_init_gpio(TAS5713_RESET_GPIO_ID, OMAP_PIN_OUTPUT);
+	omap_mux_init_gpio(TAS5713_PDN_GPIO_ID, OMAP_PIN_OUTPUT);
+
+	/* Reserve the level translator enable GPIO and set it up to enable the
+	 * LT so that communications are available during ASoC codec driver load
+	 * time.  The steelhead ASoC machine driver will power down the level
+	 * translator after machine driver load time, and then control the GPIO
+	 * dynamically via the callback exposed here.
+	 */
+	omap_mux_init_gpio(TAS5713_INTERFACE_EN_GPIO_ID, OMAP_PIN_OUTPUT);
+	if (steelhead_reserve_gpios(tas5713_iface_en_gpio,
+				ARRAY_SIZE(tas5713_iface_en_gpio),
+				"tas5713", true))
+		return;
+
+	/* Turn on the pins for McBSP2.  We will be using it to deliver I2S to
+	 * the TAS5713
+	 */
+	omap_mux_init_signal("abe_mcbsp2_clkx.abe_mcbsp2_clkx",
+			OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("abe_mcbsp2_dx.abe_mcbsp2_dx", OMAP_PIN_OUTPUT);
+	omap_mux_init_signal("abe_mcbsp2_fsx.abe_mcbsp2_fsx", OMAP_PIN_OUTPUT);
+
+	/* Make sure that McBSP2's internal clock selection is set to the output
+	 * of the ABE DPLL and not the PER DPLL.
+	 */
+	mcbsp_internal_clk = clk_get(NULL, "mcbsp2_sync_mux_ck");
+	if (IS_ERR_OR_NULL(mcbsp_internal_clk)) {
+		pr_err("tas5713: failed to fetch mcbsp2_sync_mux_ck\n");
+		goto err;
+	}
+
+	abe_24m_clk = clk_get(NULL, "abe_24m_fclk");
+	if (IS_ERR_OR_NULL(abe_24m_clk)) {
+		pr_err("tas5713: failed to fetch abe_24m_clk\n");
+		goto err;
+	}
+
+	res = clk_set_parent(mcbsp_internal_clk, abe_24m_clk);
+	if (res < 0) {
+		pr_err("tas5713: failed to set reference clock"
+				" for McBSP2 internal clk (res = %d)  "
+				"driver will not load.\n", res);
+		goto err;
+	}
+
+	/* We use fref_clk1_out to drive MCLK on steelhead.  It should be
+	 * configured to run from the M3 X2 output of DPLL_PER.  With a system
+	 * clock of 38.4MHz, and default multiplier of 40 as the reference for
+	 * the M3X2 divider, we should end up setting the M3 divider to 25 and
+	 * the fref_clk1_out divider to 5 to generate a 12.288MHz MCLK which
+	 * should be 256 * 48kHz.
+	 */
+	m3x2_clk = clk_get(NULL, "dpll_per_m3x2_ck");
+	if (IS_ERR_OR_NULL(m3x2_clk)) {
+		pr_err("tas5713: failed to dpll_per_m3x2_ck\n");
+		goto err;
+	}
+
+	mclk_out = clk_get(NULL, "auxclk1_ck");
+	if (IS_ERR_OR_NULL(mclk_out)) {
+		pr_err("tas5713: failed to auxclk1_ck\n");
+		goto err;
+	}
+
+	res = clk_set_rate(m3x2_clk, tgt_rate);
+	if (res < 0) {
+		pr_err("tas5713: failed to set m3x2 clk"
+			       "rate to %lu (res = %d).  "
+			       "driver will not load.\n",
+			       tgt_rate, res);
+		goto err;
+	}
+
+	mclk_src = clk_get(NULL, "auxclk1_src_ck");
+	if (IS_ERR_OR_NULL(mclk_out)) {
+		pr_err("tas5713: failed to auxclk1_ck\n");
+		goto err;
+	}
+
+	res = clk_set_parent(mclk_src, m3x2_clk);
+	if (res < 0) {
+		pr_err("tas5713: failed to set reference clock"
+				" for fref_clk1_out (res = %d)  "
+				"driver will not load.\n", res);
+		goto err;
+	}
+
+	res = clk_set_rate(mclk_out, tas5713_mclk_rate);
+	if (res < 0) {
+		pr_err("tas5713: failed to set mclk_out"
+			       "rate to %lu (res = %d).  "
+			       "driver will not load.\n",
+			       tas5713_mclk_rate, res);
+		goto err;
+	}
+
+	/* Stash the clock and enable the pin. */
+	tas5713_pdata.mclk_out = mclk_out;
+	omap_mux_init_signal("fref_clk1_out", OMAP_PIN_OUTPUT);
+
+err:
+	if (!IS_ERR_OR_NULL(m3x2_clk))
+		clk_put(m3x2_clk);
+	if (!IS_ERR_OR_NULL(mclk_src))
+		clk_put(mclk_src);
+	if (!IS_ERR_OR_NULL(mcbsp_internal_clk))
+		clk_put(mcbsp_internal_clk);
+	if (!IS_ERR_OR_NULL(abe_24m_clk))
+		clk_put(abe_24m_clk);
+	/* TODO: release gpios, but we're fatal anyway. */
+	return;
+}
+
+/******************************************************************************
+ *                                                                            *
  *                     McASP S/PDIF Audio Initialization                      *
  *                                                                            *
  ******************************************************************************/
@@ -710,6 +869,13 @@ static struct i2c_board_info __initdata steelhead_i2c_bus3[] = {
 	},
 };
 
+static struct i2c_board_info __initdata steelhead_i2c_bus4[] = {
+	{
+		I2C_BOARD_INFO("tas5713", (0x36 >> 1)),
+		.platform_data = &tas5713_pdata,
+	},
+};
+
 static int __init steelhead_i2c_init(void)
 {
 	omap_mux_init_signal("sys_nirq1", OMAP_PIN_INPUT_PULLUP |
@@ -743,6 +909,9 @@ static int __init steelhead_i2c_init(void)
 	/* i2c3 - NFC */
 	omap_register_i2c_bus(3, 400, steelhead_i2c_bus3,
 			      ARRAY_SIZE(steelhead_i2c_bus3));
+	/* i2c4 - TAS5713 */
+	omap_register_i2c_bus(4, 400, steelhead_i2c_bus4,
+			      ARRAY_SIZE(steelhead_i2c_bus4));
 
 	/*
 	 * Drive MSECURE high for TWL6030 write access.
@@ -1074,6 +1243,7 @@ static void __init steelhead_init(void)
 	register_reboot_notifier(&steelhead_reboot_notifier);
 
 	steelhead_platform_init_avr();
+	steelhead_platform_init_tas5713_audio();
 #if defined(CONFIG_SND_OMAP_SOC_MCASP)
 	steelhead_platform_init_mcasp_audio();
 #endif
