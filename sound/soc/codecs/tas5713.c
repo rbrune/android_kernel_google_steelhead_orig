@@ -14,13 +14,16 @@
 
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/tas5713.h>
 #include <sound/soc.h>
 
 #include "tas5713_reg_init.h"
+#include "tas5713_debugfs.h"
 
 #define DRV_NAME "tas5713"
 
@@ -30,6 +33,12 @@ struct tas5713_driver_state {
 	struct tas5713_platform_data *pdata;
 	int powered_up;
 	u8 vol_reg;
+
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs_dir;
+	struct dentry *debugfs_dump_regs_node;
+	struct dentry *debugfs_err_reg_node;
+#endif
 };
 
 /* From the TAS5713 datasheet, in the section titled "Shutdown Sequence" on page
@@ -62,6 +71,187 @@ static const int kSuddenPDNWaitTime = 2000;
 static const int kInitSeqPostPDNWaitTime = 100;
 static const int kInitSeqPostResetWaitTime = 13500;
 static const int kInitSeqPostOscTrimWaitTime = 50000;
+
+#ifdef CONFIG_DEBUG_FS
+static void *tas5713_dump_regs_seq_start(struct seq_file *s, loff_t *pos)
+{
+	loff_t *iter;
+
+	if (*pos >= ARRAY_SIZE(tas5713_debugfs_registers))
+		return NULL;
+
+	iter = kmalloc(sizeof(loff_t), GFP_KERNEL);
+	if (NULL == iter)
+		return NULL;
+	*iter = *pos;
+	return iter;
+}
+
+static void *tas5713_dump_regs_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	loff_t *iter = (loff_t*)v;
+	*pos = ++(*iter);
+
+	if ((*pos) >= ARRAY_SIZE(tas5713_debugfs_registers))
+		return NULL;
+
+	return v;
+}
+
+static void tas5713_dump_regs_seq_stop(struct seq_file *s, void *v)
+{
+	kfree(v);
+}
+
+static int tas5713_dump_regs_seq_show(struct seq_file *s, void *v)
+{
+	struct tas5713_driver_state *state = s->private;
+	const struct tas5713_debugfs_register* reg;
+	loff_t *iter = (loff_t*)v;
+
+	if ((*iter) >= ARRAY_SIZE(tas5713_debugfs_registers))
+		return -1;
+
+	reg = &(tas5713_debugfs_registers[*iter]);
+
+	seq_printf(s, "%33s[%02x] :", reg->name, reg->addr);
+
+	mutex_lock(&state->lock);
+	if (state->powered_up) {
+		u8 buf[32];
+		int ret;
+		int amt = (sizeof(buf) < reg->len) ? sizeof(buf) : reg->len;
+
+		ret = i2c_smbus_read_i2c_block_data(state->i2c_client,
+				reg->addr, amt, buf);
+
+		if (ret >= 0) {
+			int i;
+			for (i = 0; i < ret; ++i) {
+				if (!(i % 4))
+					seq_putc(s, ' ');
+				seq_printf(s, "%02x", buf[i]);
+			}
+			seq_printf(s, "\n");
+		} else {
+			seq_printf(s, " I2C error on read (%d)\n", ret);
+		}
+	} else {
+		seq_printf(s, " (powered down)\n");
+	}
+	mutex_unlock(&state->lock);
+
+	return 0;
+}
+
+static const struct seq_operations tas5713_dump_regs_seq_ops = {
+        .start = tas5713_dump_regs_seq_start,
+        .next  = tas5713_dump_regs_seq_next,
+        .stop  = tas5713_dump_regs_seq_stop,
+        .show  = tas5713_dump_regs_seq_show
+};
+
+static int tas5713_dump_regs_open(struct inode *inode, struct file *file)
+{
+	int ret = seq_open(file, &tas5713_dump_regs_seq_ops);
+
+	if (ret >= 0) {
+		struct seq_file *sf = file->private_data;
+		sf->private = inode->i_private;
+	}
+
+	return ret;
+}
+
+static const struct file_operations tas5713_dump_regs_file_ops = {
+        .owner   = THIS_MODULE,
+        .open    = tas5713_dump_regs_open,
+        .read    = seq_read,
+        .llseek  = seq_lseek,
+        .release = seq_release
+};
+
+static int tas5713_get_err_reg(void *__state, u64 *out)
+{
+	struct tas5713_driver_state *state = __state;
+	mutex_lock(&state->lock);
+
+	if (state->powered_up) {
+		int ret = i2c_smbus_read_byte_data(state->i2c_client, 0x02);
+		if (ret < 0)
+			*out = 0xFF01;
+		else
+			*out = ret;
+
+	} else {
+		*out = 0xFF00;
+	}
+
+	mutex_unlock(&state->lock);
+	return 0;
+}
+
+static int tas5713_set_err_reg(void *__state, u64 __unused__)
+{
+	struct tas5713_driver_state *state = __state;
+	mutex_lock(&state->lock);
+
+	i2c_smbus_write_byte_data(state->i2c_client, 0x02, 0x00);
+
+	mutex_unlock(&state->lock);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(tas5713_err_reg_fops,
+		tas5713_get_err_reg,
+		tas5713_set_err_reg,
+		"0x%llx");
+
+static void tas5713_cleanup_debugfs(struct tas5713_driver_state *state)
+{
+	if (IS_ERR_OR_NULL(state->debugfs_dir))
+		debugfs_remove_recursive(state->debugfs_dir);
+
+	state->debugfs_dir = NULL;
+	state->debugfs_dump_regs_node = NULL;
+	state->debugfs_err_reg_node = NULL;
+}
+
+static void tas5713_setup_debugfs(struct tas5713_driver_state *state)
+{
+	struct device *dev = &state->i2c_client->dev;
+	char tmp[256];
+
+	snprintf(tmp, sizeof(tmp), "%s-%s",
+			dev_driver_string(dev), dev_name(dev));
+	tmp[sizeof(tmp) - 1] = 0;
+	state->debugfs_dir = debugfs_create_dir(tmp, NULL);
+
+	if (IS_ERR_OR_NULL(state->debugfs_dir))
+		goto err;
+
+	state->debugfs_err_reg_node = debugfs_create_file(
+			"err_reg", 0644, state->debugfs_dir,
+			state, &tas5713_err_reg_fops);
+
+	if (IS_ERR_OR_NULL(state->debugfs_err_reg_node))
+		goto err;
+
+	state->debugfs_dump_regs_node = debugfs_create_file(
+			"dump_regs", 0444, state->debugfs_dir,
+			state, &tas5713_dump_regs_file_ops);
+
+	if (IS_ERR_OR_NULL(state->debugfs_dump_regs_node))
+		goto err;
+
+	return;
+err:
+	tas5713_cleanup_debugfs(state);
+}
+#else  /* CONFIG_DEBUG_FS */
+static void tas5713_setup_debugfs(struct tas5713_driver_state*) { }
+static void tas5713_cleanup_debugfs(struct tas5713_driver_state*) { }
+#endif  /* CONFIG_DEBUG_FS */
 
 static int tas5713_set_master_volume_l(struct device* dev,
 	struct tas5713_driver_state* state,
@@ -501,6 +691,8 @@ static int tas5713_i2c_probe(struct i2c_client *client,
 		goto err_register_codec;
 	}
 
+	tas5713_setup_debugfs(state);
+
 	return 0;
 
 err_register_codec:
@@ -523,6 +715,8 @@ static int __devexit tas5713_i2c_remove(struct i2c_client *client)
 
 	snd_soc_unregister_codec(&client->dev);
 	i2c_set_clientdata(client, NULL);
+
+	tas5713_cleanup_debugfs(state);
 
 	if (state) {
 		gpio_free(state->pdata->pdn_gpio);
