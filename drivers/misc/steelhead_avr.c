@@ -43,7 +43,14 @@
 #include <linux/delay.h>
 
 #define LED_BYTE_SZ 3
-#define SET_RANGE_OVERHEAD 2
+
+struct avr_led_set_range_i2c {
+	u8 reg_addr; /* AVR_LED_SET_RANGE_REG_ADDR */
+	u8 start;
+	u8 count;
+	u8 rgb_triples;
+	struct avr_led_rgb_vals rgb_vals[0]; /* array of size rgb_triples */
+};
 
 MODULE_LICENSE("Dual BSD/GPL");
 
@@ -79,6 +86,7 @@ struct avr_driver_state {
 
 	/* Current LED state. */
 	u8 led_mode;
+	u8 led_count;
 };
 
 static void cleanup_driver_state(struct avr_driver_state *state)
@@ -190,8 +198,23 @@ static int avr_get_hardware_rev(struct avr_driver_state *state, u8 *revision)
 	return rc;
 }
 
+static int avr_get_led_count(struct avr_driver_state *state, u8 *led_count)
+{
+	int rc;
+	if (!state || !led_count)
+		return -EFAULT;
+
+	mutex_lock(&state->i2c_lock);
+	rc = avr_i2c_read(state->i2c_client, AVR_LED_GET_COUNT_ADDR,
+			  sizeof(*led_count), led_count);
+	mutex_unlock(&state->i2c_lock);
+
+	pr_debug("%s: led_count %u\n", __func__, *led_count);
+	return rc;
+}
+
 static int avr_led_set_all_vals(struct avr_driver_state *state,
-				struct avr_led_set_all_vals *req)
+				struct avr_led_rgb_vals *req)
 {
 	int rc;
 
@@ -207,8 +230,49 @@ static int avr_led_set_all_vals(struct avr_driver_state *state,
 	return rc;
 }
 
+static int avr_led_set_range_vals(struct avr_driver_state *state,
+				  struct avr_led_set_range_i2c *req)
+{
+	int rc;
+	int bytes_to_send;
+
+	if (!state || !req)
+		return -EFAULT;
+
+	bytes_to_send = (sizeof(*req) +
+			 (req->rgb_triples * sizeof(struct avr_led_rgb_vals)));
+
+	mutex_lock(&state->i2c_lock);
+#ifdef DEBUG
+	{
+		int i;
+		pr_info("start = 0x%x, count = 0x%x, rgb_triples = 0x%x\n",
+			req->start, req->count, req->rgb_triples);
+		for (i = 0; i < req->rgb_triples; i++) {
+			pr_info("%d: 0x%02x 0x%02x 0x%02x\n",
+				i, req->rgb_vals[i].rgb[0],
+				req->rgb_vals[i].rgb[1],
+				req->rgb_vals[i].rgb[2]);
+		}
+	}
+#endif
+	req->reg_addr = AVR_LED_SET_RANGE_REG_ADDR;
+	/* can't use i2c_smbus_write_i2c_block_data because it has
+	   a limit of 32 bytes */
+	rc = i2c_master_send(state->i2c_client, (char *)req, bytes_to_send);
+	if (rc == bytes_to_send)
+		rc = 0;
+	else {
+		pr_err("%s: i2c_master_send() returned error %d\n",
+		       __func__, rc);
+	}
+	mutex_unlock(&state->i2c_lock);
+
+	return rc;
+}
+
 static int avr_led_set_mute(struct avr_driver_state *state,
-			    struct avr_led_set_mute_vals *req)
+			    struct avr_led_rgb_vals *req)
 {
 	int rc;
 
@@ -245,20 +309,6 @@ static int avr_led_set_mode(struct avr_driver_state *state, u8 mode)
 	return rc;
 }
 
-static int avr_led_set_vol_indicator(struct avr_driver_state *state, u8 vol)
-{
-	int rc;
-	if (!state)
-		return -EFAULT;
-
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_byte_data(state->i2c_client,
-			AVR_VOLUME_SETTING_REG_ADDR, vol);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
-}
-
 static int avr_led_commit_led_state(struct avr_driver_state *state, u8 val)
 {
 	int rc;
@@ -272,50 +322,6 @@ static int avr_led_commit_led_state(struct avr_driver_state *state, u8 val)
 
 	return rc;
 }
-
-static int avr_led_set_button_ctrl_reg(struct avr_driver_state *state, u8 val)
-{
-	int rc;
-	if (!state)
-		return -EFAULT;
-
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_byte_data(state->i2c_client,
-			AVR_BUTTON_CONTROL_REG_ADDR, val);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
-}
-
-static int avr_led_set_int_reg(struct avr_driver_state *state, u8 val)
-{
-	int rc = 0;
-	if (!state)
-		return -EFAULT;
-
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_byte_data(state->i2c_client,
-			AVR_BUTTON_INT_REG_ADDR, val);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
-}
-
-#if 0
-static int avr_led_get_int_reg(struct avr_driver_state *state, u8 *val)
-{
-	int rc = 0;
-	if (!state)
-		return -EFAULT;
-
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client,
-			AVR_BUTTON_INT_REG_ADDR, 1, val);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
-}
-#endif
 
 static int avr_leddev_open(struct inode *inode, struct file *file)
 {
@@ -334,6 +340,7 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case AVR_LED_GET_FIRMWARE_REVISION: {
 		u16 fw_rev;
+		pr_debug("%s: get firmware revision\n", __func__);
 		rc = avr_get_firmware_rev(state, &fw_rev);
 		if (rc) {
 			pr_err("%s: Failed to get avr firmware rev\n",
@@ -347,10 +354,13 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	case AVR_LED_GET_HARDWARE_TYPE:
 	case AVR_LED_GET_HARDWARE_REVISION: {
 		u8 data;
-		if (cmd == AVR_LED_GET_HARDWARE_TYPE)
+		if (cmd == AVR_LED_GET_HARDWARE_TYPE) {
+			pr_debug("%s: get hardware type\n", __func__);
 			rc = avr_get_hardware_type(state, &data);
-		else
+		} else {
+			pr_debug("%s: get hardware revision\n", __func__);
 			rc = avr_get_hardware_rev(state, &data);
+		}
 		if (rc) {
 			pr_err("%s: Failed to get avr hardware %s\n", __func__,
 			       (cmd == AVR_LED_GET_HARDWARE_TYPE) ? "type" :
@@ -361,8 +371,24 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 			rc = -EFAULT;
 	} break;
 
+	case AVR_LED_GET_COUNT:	{
+		pr_debug("%s: get led count\n", __func__);
+		if (!state->led_count) {
+			rc = avr_get_led_count(state, &state->led_count);
+			if (rc) {
+				pr_err("%s: Failed to get led count\n",
+				       __func__);
+				break;
+			}
+		}
+		if (copy_to_user((void __user *)arg, &state->led_count,
+				 sizeof(state->led_count)))
+			rc = -EFAULT;
+	} break;
+
 	case AVR_LED_GET_MODE: {
 		u8 val = state->led_mode;
+		pr_debug("%s: get mode\n", __func__);
 		if (copy_to_user((void __user *)arg,
 				&val, sizeof(val)))
 			rc = -EFAULT;
@@ -370,18 +396,19 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 
 	case AVR_LED_SET_MODE: {
 		u8 val;
+		pr_debug("%s: set mode\n", __func__);
 		if (copy_from_user(&val, (const void __user *)arg,
 					sizeof(val))) {
 			rc = -EFAULT;
 			break;
 		}
-
 		rc = avr_led_set_mode(state, val);
 	} break;
 
 	case AVR_LED_SET_ALL_VALS: {
-		struct avr_led_set_all_vals req;
+		struct avr_led_rgb_vals req;
 
+		pr_debug("%s: set all vals\n", __func__);
 		if (copy_from_user(&req, (const void __user *)arg,
 					sizeof(req))) {
 			rc = -EFAULT;
@@ -391,19 +418,75 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 		rc = avr_led_set_all_vals(state, &req);
 	} break;
 
-	case AVR_LED_SET_VOLUME_INDICATOR: {
-		u8 val;
-		if (copy_from_user(&val, (const void __user *)arg,
-					sizeof(val))) {
+	case AVR_LED_SET_RANGE_VALS: {
+		struct avr_led_set_range_vals req;
+		struct avr_led_set_range_i2c *set_range_vals;
+		size_t rgb_triples_bytes;
+
+		pr_debug("%s: set range vals, copying in %d bytes\n",
+			__func__, sizeof(req));
+		if (copy_from_user(&req, (const void __user *)arg,
+					sizeof(req))) {
 			rc = -EFAULT;
 			break;
 		}
+		if (req.start >= state->led_count) {
+			rc = -EINVAL;
+			pr_err("%s: start %d greater than led_count %d\n",
+			       __func__, req.start, state->led_count);
+			break;
+		}
+		if (req.start + req.count > state->led_count) {
+			rc = -EINVAL;
+			pr_err("%s: start %d + count %d > led_count %d\n",
+			       __func__, req.start, req.count,
+			       state->led_count);
+			break;
+		}
+		if (req.rgb_triples > req.count) {
+			rc = -EINVAL;
+			pr_err("%s: rgb_triples %d greater than count %d\n",
+			       __func__, req.rgb_triples, req.count);
+			break;
+		}
 
-		rc = avr_led_set_vol_indicator(state, val);
+		rgb_triples_bytes = (req.rgb_triples *
+				     sizeof(struct avr_led_rgb_vals));
+		pr_debug("mallocing struct of size %d, for %d triples\n",
+			sizeof(*set_range_vals) + rgb_triples_bytes + 1,
+			req.rgb_triples);
+		set_range_vals = kmalloc(sizeof(*set_range_vals) +
+					 rgb_triples_bytes + 1,
+					 GFP_KERNEL);
+		if (set_range_vals == NULL) {
+			pr_err("%s: kmalloc(set_range_vals) failed\n",
+			       __func__);
+			rc = -ENOMEM;
+			break;
+		}
+		set_range_vals->start = req.start;
+		set_range_vals->count = req.count;
+		set_range_vals->rgb_triples = req.rgb_triples;
+		pr_debug("%s: set range vals, copying in %d bytes\n",
+			__func__, rgb_triples_bytes);
+
+		if (copy_from_user(&set_range_vals->rgb_vals,
+				   (const void __user *)(arg +
+					sizeof(struct avr_led_set_range_vals)),
+				   rgb_triples_bytes)) {
+			pr_err("%s: copy_from_user failed\n",
+			       __func__);
+			rc = -EFAULT;
+			kfree(set_range_vals);
+			break;
+		}
+		rc = avr_led_set_range_vals(state, set_range_vals);
+		kfree(set_range_vals);
 	} break;
 
 	case AVR_LED_COMMIT_LED_STATE: {
 		u8 val;
+		pr_debug("%s: commit state\n", __func__);
 		if (copy_from_user(&val, (const void __user *)arg,
 					sizeof(val))) {
 			rc = -EFAULT;
@@ -427,8 +510,9 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	}
 
 	case AVR_LED_SET_MUTE: {
-		struct avr_led_set_mute_vals req;
+		struct avr_led_rgb_vals req;
 
+		pr_debug("%s: set mute\n", __func__);
 		if (copy_from_user(&req, (const void __user *)arg,
 					sizeof(req))) {
 			rc = -EFAULT;
@@ -439,6 +523,7 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	} break;
 
 	default: {
+		pr_err("%s: unknown ioctl 0x%x\n", __func__, cmd);
 		rc = -EINVAL;
 	} break;
 
@@ -484,7 +569,7 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 			 * the mute color to 0 to indicate kernel
 			 * has detected reset.
 			 */
-			struct avr_led_set_mute_vals mute_color;
+			struct avr_led_rgb_vals mute_color;
 
 			pr_info("%s: reset notification seen\n", __func__);
 			mute_color.rgb[0] = 0;
@@ -554,7 +639,7 @@ static const struct file_operations avr_led_fops = {
 static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct avr_driver_state *state;
-	struct avr_led_set_mute_vals clear_led_req;
+	struct avr_led_rgb_vals clear_led_req;
 	int i;
 	int rc;
 
@@ -673,6 +758,19 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		rc = 0;
 	}
 
+	rc = avr_get_led_count(state, &state->led_count);
+	if (rc) {
+		/* don't treat this as fatal.  userland
+		 * can still force reset and use bootloader
+		 * to update firmware.
+		 */
+		pr_err("%s: failed to get led count\n", __func__);
+		/* ignore failure to allow updater to work */
+		rc = 0;
+		state->led_count = 0;
+	} else
+		pr_info("%s: led_count = %d\n", __func__, state->led_count);
+
 	pr_info("Steelhead AVR Driver loaded.\n");
 
 	return rc;
@@ -686,12 +784,6 @@ error:
 static int __devexit avr_remove(struct i2c_client *client)
 {
 	struct avr_driver_state *state = i2c_get_clientdata(client);
-
-	/* Try to turn off interrupts. */
-	avr_led_set_int_reg(state, 0);
-
-	/* Try to turn off button inside of the AVR. */
-	avr_led_set_button_ctrl_reg(state, 0);
 
 	/* Switch back to boot animation mode before we clean out our state and
 	 * finish unloading the driver.

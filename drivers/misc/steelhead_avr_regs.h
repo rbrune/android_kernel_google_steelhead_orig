@@ -15,32 +15,6 @@
 #ifndef __STEELHEAD_AVR_REGS_H
 #define __STEELHEAD_AVR_REGS_H
 
-/* low-level button registers */
-#define AVR_BUTTON_CONTROL_REG_ADDR	0x00
-#define AVR_BUTTON_CONTROL_ENABLE0	0x01	/* Enable button 0 */
-#define AVR_BUTTON_CONTROL_ENABLE1	0x02	/* Enable button 1 */
-#define AVR_BUTTON_CONTROL_ENABLE2	0x04	/* Enable button 2 */
-#define AVR_BUTTON_CONTROL_DEBUG	0x80	/* Enable debug prints */
-
-#define AVR_BUTTON_LED_CONTROL_REG_ADDR	0x01
-#define AVR_BUTTON_LED_CONTROL_ENABLE0	0x01	/* Enable button 0 LED */
-#define AVR_BUTTON_LED_CONTROL_ENABLE1	0x02	/* Enable button 1 LED */
-#define AVR_BUTTON_LED_CONTROL_ENABLE2	0x04	/* Enable button 2 LED */
-
-#define AVR_BUTTON_STATE_REG_ADDR	0x02
-#define AVR_BUTTON_STATE_PRESSED0	0x01	/* Button 0 is pressed */
-#define AVR_BUTTON_STATE_PRESSED1	0x02	/* Button 1 is pressed */
-#define AVR_BUTTON_STATE_PRESSED2	0x04	/* Button 2 is pressed */
-
-#define AVR_BUTTON_INT_REG_ADDR		0x03
-#define AVR_BUTTON_INT_ENABLE		0x01	/* Button/key event
-						 * interrupt enabled
-						 */
-#define AVR_BUTTON_INT_PENDING		0x40	/* Button interrupt pending. */
-#define AVR_BUTTON_INT_CLEAR		0x80	/* Button interrupt clear.
-						 * Write 1 to clear
-						 */
-
 /* key event registers */
 #define AVR_KEY_COUNT_REG_ADDR		0x10
 
@@ -65,35 +39,26 @@
 /* led registers */
 #define AVR_LED_MODE_REG_ADDR		0x20
 #define AVR_LED_MODE_BOOT_ANIMATION	0x00
-#define AVR_LED_MODE_VOLUME		0x01
+#define AVR_LED_MODE_HOST_AUTO_COMMIT	0x01
 #define AVR_LED_MODE_HOST		0x02
 
 #define AVR_LED_SET_ALL_REG_ADDR	0x21
-
-#define AVR_LED_SET_BANK_REG_ADDR	0x22
 
 #define AVR_LED_SET_RANGE_REG_ADDR	0x23
 
 #define AVR_LED_COMMIT_REG_ADDR		0x24	/* push the buffered host led
 						 * values to active display
 						 */
-#define AVR_LED_COMMMIT_IMMEDIATELY	0x00	/* update the active led's
+#define AVR_LED_COMMIT_IMMEDIATELY	0x00	/* update the active led's
 						 * immediately
 						 */
-#define AVR_LED_COMMMIT_INTERPOLATE	0x01	/* animate from the current
+#define AVR_LED_COMMIT_INTERPOLATE	0x01	/* animate from the current
 						 * led state to the new one?
 						 * Later!
 						 */
 
-#define AVR_LED_SET_RUN_REG_ADDR	0x25	/* set a run of LEDs
-						 * (bank independent) to
-						 * a single color
-						 */
 #define AVR_LED_SET_MUTE_ADDR		0x28	/* set mute led color */
-
-
-/* volume/system registers */
-#define AVR_VOLUME_SETTING_REG_ADDR	0x30
+#define AVR_LED_GET_COUNT_ADDR		0x29	/* get led count */
 
 /* fw registers */
 #define AVR_HW_TYPE_REG_ADDR		0x80

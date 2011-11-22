@@ -29,34 +29,15 @@ struct steelhead_avr_platform_data {
 
 #include <linux/ioctl.h>
 
-#define AVR_LED_MAX_BANK_NAME_SIZE 64
-struct avr_led_bank_desc {
-	u8 bank_id;
-	u8 led_count;
-	char name[AVR_LED_MAX_BANK_NAME_SIZE];
-};
-
-struct avr_led_get_bank_vals {
-	u8 bank_id;
-	u8 start;
-	u8 cnt;
-};
-
-struct avr_led_set_all_vals {
-	u8 rgb[3];
-};
-
-#define avr_led_set_mute_vals avr_led_set_all_vals
-
-struct avr_led_set_bank_vals {
-	u8 bank_id;
+struct avr_led_rgb_vals {
 	u8 rgb[3];
 };
 
 struct avr_led_set_range_vals {
 	u8 start;
 	u8 count;
-	u8 *rgb_vals;
+	u8 rgb_triples;
+	struct avr_led_rgb_vals rgb_vals[0]; /* array of size rgb_triples */
 };
 
 #define AVR_LED_MAGIC 0xE2
@@ -66,22 +47,15 @@ struct avr_led_set_range_vals {
 #define AVR_LED_GET_HARDWARE_REVISION _IOR(AVR_LED_MAGIC, 3, __u8)
 #define AVR_LED_GET_MODE              _IOR(AVR_LED_MAGIC, 4, __u8)
 #define AVR_LED_SET_MODE              _IOW(AVR_LED_MAGIC, 5, __u8)
-#define AVR_LED_GET_BANK_COUNT        _IOR(AVR_LED_MAGIC, 6, __u32)
-#define AVR_LED_GET_BANK_DESC         _IOWR(AVR_LED_MAGIC, 7, \
-					    struct avr_led_bank_desc)
-#define AVR_LED_GET_BANK_VALS         _IOWR(AVR_LED_MAGIC, 8, \
-					    struct avr_led_get_bank_vals)
+#define AVR_LED_GET_COUNT             _IOR(AVR_LED_MAGIC, 6, __u8)
 #define AVR_LED_SET_ALL_VALS          _IOW(AVR_LED_MAGIC, 9, \
-					   struct avr_led_set_all_vals)
-#define AVR_LED_SET_BANK_VALS         _IOW(AVR_LED_MAGIC, 10, \
-					   struct avr_led_set_bank_vals)
+					   struct avr_led_rgb_vals)
 #define AVR_LED_SET_RANGE_VALS        _IOW(AVR_LED_MAGIC, 11, \
 					   struct avr_led_set_range_vals)
-#define AVR_LED_SET_VOLUME_INDICATOR  _IOW(AVR_LED_MAGIC, 12, __u8)
 #define AVR_LED_COMMIT_LED_STATE      _IOW(AVR_LED_MAGIC, 13, __u8)
 #define AVR_LED_RESET                 _IO(AVR_LED_MAGIC, 14)
 #define AVR_LED_SET_MUTE              _IOW(AVR_LED_MAGIC, 15, \
-					   struct avr_led_set_mute_vals)
+					   struct avr_led_rgb_vals)
 
 
 #endif  /* __LINUX_STEELHEAD_AVR_H */
