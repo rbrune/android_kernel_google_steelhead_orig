@@ -933,17 +933,26 @@ EXPORT_SYMBOL(omap_mcbsp_free);
  * If no transmitter or receiver is active prior calling, then sample-rate
  * generator and frame sync are started.
  */
-void omap_mcbsp_start(unsigned int id, int tx, int rx)
+void omap_mcbsp_start_capture_start_time(unsigned int id,
+		int tx,
+		int rx,
+		s64 *start_time)
 {
 	struct omap_mcbsp *mcbsp;
 	int enable_srg = 0;
 	u16 w;
+	u64 start1, start2;
+	int do_capture_start;
 
 	if (!omap_mcbsp_check_valid_id(id)) {
 		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
 		return;
 	}
 	mcbsp = id_to_mcbsp_ptr(id);
+
+	do_capture_start = (mcbsp->pdata &&
+			mcbsp->pdata->get_raw_counter &&
+			start_time);
 
 	if (cpu_is_omap34xx())
 		omap_st_start(mcbsp);
@@ -986,6 +995,9 @@ void omap_mcbsp_start(unsigned int id, int tx, int rx)
 		MCBSP_WRITE(mcbsp, SPCR2, w | (1 << 7));
 	}
 
+	if (do_capture_start)
+		start1 = mcbsp->pdata->get_raw_counter();
+
 	if (cpu_is_omap2430() || cpu_is_omap34xx() || cpu_is_omap44xx()) {
 		/* Release the transmitter and receiver */
 		w = MCBSP_READ_CACHE(mcbsp, XCCR);
@@ -995,6 +1007,9 @@ void omap_mcbsp_start(unsigned int id, int tx, int rx)
 		w &= ~(rx ? RDISABLE : 0);
 		MCBSP_WRITE(mcbsp, RCCR, w);
 	}
+
+	if (do_capture_start)
+		start2 = mcbsp->pdata->get_raw_counter();
 
 	/*Disable and Re-enable transmitter if ready */
 	if (tx && (MCBSP_READ(mcbsp, SPCR2) & XRDY)) {
@@ -1015,8 +1030,22 @@ void omap_mcbsp_start(unsigned int id, int tx, int rx)
 				(RRST));
 	}
 
+	if (start_time) {
+		if (do_capture_start)
+			*start_time = (start1 >> 1) + (start2 >> 1)
+				+ (start1 & start2 & 0x1);
+		else
+			*start_time = 0;
+	}
+
 	/* Dump McBSP Regs */
 	omap_mcbsp_dump_reg(id);
+}
+EXPORT_SYMBOL(omap_mcbsp_start_capture_start_time);
+
+void omap_mcbsp_start(unsigned int id, int tx, int rx)
+{
+	omap_mcbsp_start_capture_start_time(id, tx, rx, NULL);
 }
 EXPORT_SYMBOL(omap_mcbsp_start);
 

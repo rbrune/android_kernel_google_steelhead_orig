@@ -36,6 +36,10 @@
 #include "omap-mcbsp.h"
 #include "omap-pcm.h"
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+#include "steelhead_extensions.h"
+#endif
+
 #define OMAP_MCBSP_RATES	(SNDRV_PCM_RATE_8000_96000)
 
 #define OMAP_MCBSP_SOC_SINGLE_S16_EXT(xname, xmin, xmax, \
@@ -59,6 +63,12 @@ struct omap_mcbsp_data {
 	unsigned int			in_freq;
 	int				clk_div;
 	int				wlen;
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	s64 start_time;
+	int start_time_valid;
+	spinlock_t starttime_lock;
+#endif
 };
 
 static struct omap_mcbsp_data mcbsp_data[NUM_LINKS];
@@ -68,6 +78,36 @@ static struct omap_mcbsp_data mcbsp_data[NUM_LINKS];
  * since they are different between OMAP1 and later OMAPs
  */
 static struct omap_pcm_dma_data omap_mcbsp_dai_dma_params[NUM_LINKS][2];
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+static int mcbsp_ioctl_get_start_time(
+		struct snd_pcm_substream *substream,
+		struct snd_soc_dai *dai,
+		void *arg)
+{
+	struct omap_mcbsp_data *mcbsp_data = snd_soc_dai_get_drvdata(dai);
+	unsigned long irq_state;
+	s64 start;
+	int valid;
+
+	if (!mcbsp_data)
+		return -EINVAL;
+
+	spin_lock_irqsave(&mcbsp_data->starttime_lock, irq_state);
+	start = mcbsp_data->start_time;
+	valid = mcbsp_data->start_time_valid;
+	spin_unlock_irqrestore(&mcbsp_data->starttime_lock, irq_state);
+
+	if (valid) {
+		if (copy_to_user((void __user *)arg,
+					&start, sizeof(start)))
+			return -EFAULT;
+	} else
+		return -EINVAL;
+
+	return 0;
+}
+#endif
 
 static void omap_mcbsp_set_threshold(struct snd_pcm_substream *substream)
 {
@@ -185,17 +225,43 @@ static int omap_mcbsp_dai_trigger(struct snd_pcm_substream *substream, int cmd,
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE: {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+		unsigned long irq_state;
+
+		mcbsp_data->active++;
+
+		spin_lock_irqsave(&mcbsp_data->starttime_lock, irq_state);
+		if (!mcbsp_data->start_time_valid) {
+			omap_mcbsp_start_capture_start_time(
+					mcbsp_data->bus_id,
+					play, !play,
+					&mcbsp_data->start_time);
+			mcbsp_data->start_time_valid = 1;
+		} else {
+			omap_mcbsp_start(mcbsp_data->bus_id, play, !play);
+		}
+		spin_unlock_irqrestore(&mcbsp_data->starttime_lock, irq_state);
+#else
 		mcbsp_data->active++;
 		omap_mcbsp_start(mcbsp_data->bus_id, play, !play);
-		break;
+#endif
+	} break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
-	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+	case SNDRV_PCM_TRIGGER_PAUSE_PUSH: {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+		unsigned long irq_state;
+
+		spin_lock_irqsave(&mcbsp_data->starttime_lock, irq_state);
+		mcbsp_data->start_time = 0;
+		mcbsp_data->start_time_valid = 0;
+		spin_unlock_irqrestore(&mcbsp_data->starttime_lock, irq_state);
+#endif
 		omap_mcbsp_stop(mcbsp_data->bus_id, play, !play);
 		mcbsp_data->active--;
-		break;
+	} break;
 	default:
 		err = -EINVAL;
 	}
@@ -587,6 +653,21 @@ static int omap_mcbsp_dai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 	return err;
 }
 
+static int omap_mcbsp_ioctl(struct snd_pcm_substream *substream,
+		struct snd_soc_dai *cpu_dai,
+		unsigned int cmd,
+		void *arg)
+{
+	switch (cmd) {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	case SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME:
+		return mcbsp_ioctl_get_start_time(substream, cpu_dai, arg);
+#endif
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+
 static struct snd_soc_dai_ops mcbsp_dai_ops = {
 	.startup	= omap_mcbsp_dai_startup,
 	.shutdown	= omap_mcbsp_dai_shutdown,
@@ -596,6 +677,7 @@ static struct snd_soc_dai_ops mcbsp_dai_ops = {
 	.set_fmt	= omap_mcbsp_dai_set_dai_fmt,
 	.set_clkdiv	= omap_mcbsp_dai_set_clkdiv,
 	.set_sysclk	= omap_mcbsp_dai_set_dai_sysclk,
+	.ioctl		= omap_mcbsp_ioctl,
 };
 
 static int mcbsp_dai_probe(struct snd_soc_dai *dai)
@@ -755,6 +837,10 @@ EXPORT_SYMBOL_GPL(omap_mcbsp_st_add_controls);
 
 static __devinit int asoc_mcbsp_probe(struct platform_device *pdev)
 {
+	int i;
+	for (i = 0; i < ARRAY_SIZE(mcbsp_data); ++i)
+		spin_lock_init(&mcbsp_data[i].starttime_lock);
+
 	return snd_soc_register_dai(&pdev->dev, &omap_mcbsp_dai);
 }
 

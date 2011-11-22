@@ -33,11 +33,12 @@ struct omap_mcasp {
 	unsigned int stream_rate;
 	struct pm_qos_request_list *pm_qos;
 
-
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	struct omap_mcasp_platform_data* pdata;
 	s64 start_time;
 	int start_time_valid;
-
+	spinlock_t starttime_lock;
+#endif
 };
 
 #endif	/* OMAP_MCASP_H */

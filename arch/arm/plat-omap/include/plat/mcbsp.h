@@ -405,6 +405,8 @@ struct omap_mcbsp_platform_data {
 	unsigned int mcbsp_config_type;
 	char clks_pad_src[30];
 	char clks_prcm_src[30];
+
+	s64 (*get_raw_counter)(void);
 };
 
 struct omap_mcbsp_st_data {
@@ -501,6 +503,8 @@ static inline int omap_mcbsp_get_dma_op_mode(unsigned int id) { return 0; }
 #endif
 int omap_mcbsp_request(unsigned int id);
 void omap_mcbsp_free(unsigned int id);
+void omap_mcbsp_start_capture_start_time(unsigned int id,
+		int tx, int rx, s64 *start_time);
 void omap_mcbsp_start(unsigned int id, int tx, int rx);
 void omap_mcbsp_stop(unsigned int id, int tx, int rx);
 void omap_mcbsp_xmit_word(unsigned int id, u32 word);

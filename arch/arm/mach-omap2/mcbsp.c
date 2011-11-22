@@ -27,6 +27,10 @@
 
 #include "control.h"
 
+#ifdef CONFIG_MACH_STEELHEAD
+#include "board-steelhead.h"
+#endif
+
 /* McBSP internal signal muxing functions */
 
 void omap2_mcbsp1_mux_clkr_src(u8 mux)
@@ -127,6 +131,10 @@ static int omap_init_mcbsp(struct omap_hwmod *oh, void *unused)
 	}
 
 	pdata->mcbsp_config_type = oh->class->rev;
+
+#ifdef CONFIG_MACH_STEELHEAD
+	pdata->get_raw_counter = steelhead_get_raw_counter;
+#endif
 
 	if (oh->class->rev == MCBSP_CONFIG_TYPE3) {
 		strcpy(pdata->clks_pad_src, "pad_fck");

@@ -39,9 +39,9 @@
 #include "omap-pcm.h"
 #include "omap-mcasp.h"
 
-#define SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME	_IOR('A', 0xF0, __s64)
-
-static DEFINE_SPINLOCK(starttime_lock);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+#include "steelhead_extensions.h"
+#endif
 
 /*
  * McASP register definitions
@@ -280,6 +280,7 @@ static inline void mcasp_set_ctl_reg(void __iomem *regs, u32 val)
 		printk(KERN_ERR "GBLCTL write error\n");
 }
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 static int mcasp_ioctl_get_start_time(
 		struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai,
@@ -293,10 +294,10 @@ static int mcasp_ioctl_get_start_time(
 	if (!mcasp)
 		return -EINVAL;
 
-	spin_lock_irqsave(&starttime_lock, irq_state);
+	spin_lock_irqsave(&mcasp->starttime_lock, irq_state);
 	start = mcasp->start_time;
 	valid = mcasp->start_time_valid;
-	spin_unlock_irqrestore(&starttime_lock, irq_state);
+	spin_unlock_irqrestore(&mcasp->starttime_lock, irq_state);
 
 	if (valid) {
 		if (copy_to_user((void __user *)arg,
@@ -308,6 +309,7 @@ static int mcasp_ioctl_get_start_time(
 
 	return 0;
 }
+#endif
 
 static int mcasp_compute_clock_dividers(long fclk_rate, int tgt_sample_rate,
 			int *out_div_lo, int *out_div_hi)
@@ -429,11 +431,14 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 		udelay(1);
 	}
 
-	spin_lock_irqsave(&starttime_lock, irq_state);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	spin_lock_irqsave(&mcasp->starttime_lock, irq_state);
+#endif
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSMRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXFSRST);
 	mcasp_clr_bits(mcasp->base + OMAP_MCASP_TXEVTCTL_REG, TXDATADMADIS);
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	if (!mcasp->start_time_valid &&
 			mcasp->pdata &&
 			mcasp->pdata->get_raw_counter) {
@@ -441,7 +446,8 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 		mcasp->start_time = mcasp->pdata->get_raw_counter();
 	}
 
-	spin_unlock_irqrestore(&starttime_lock, irq_state);
+	spin_unlock_irqrestore(&mcasp->starttime_lock, irq_state);
+#endif
 
 	return 0;
 }
@@ -450,10 +456,12 @@ static void omap_mcasp_stop(struct omap_mcasp *mcasp)
 {
 	unsigned long irq_state;
 
-	spin_lock_irqsave(&starttime_lock, irq_state);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	spin_lock_irqsave(&mcasp->starttime_lock, irq_state);
 	mcasp->start_time_valid = 0;
 	mcasp->start_time = 0;
-	spin_unlock_irqrestore(&starttime_lock, irq_state);
+	spin_unlock_irqrestore(&mcasp->starttime_lock, irq_state);
+#endif
 
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, 0);
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG,
@@ -708,8 +716,10 @@ static int omap_mcasp_ioctl(struct snd_pcm_substream *substream,
 		void *arg)
 {
 	switch (cmd) {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	case SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME:
 		return mcasp_ioctl_get_start_time(substream, cpu_dai, arg);
+#endif
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -748,6 +758,9 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	spin_lock_init(&mcasp->lock);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	spin_lock_init(&mcasp->starttime_lock);
+#endif
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -798,7 +811,9 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 		goto err_dai;
 	}
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	mcasp->pdata = pdev->dev.platform_data;
+#endif
 	ret = snd_soc_register_dai(&pdev->dev, omap_mcasp_dai);
 	if (ret < 0)
 		goto err_dai;
