@@ -141,6 +141,8 @@ static int omap_pcm_hw_free(struct snd_pcm_substream *substream)
 
 	omap_dma_unlink_lch(prtd->dma_ch, prtd->dma_ch);
 	omap_free_dma(prtd->dma_ch);
+	omap_dma_sync_with_irq_callbacks();
+
 	prtd->dma_data = NULL;
 
 	snd_pcm_set_runtime_buffer(substream, NULL);

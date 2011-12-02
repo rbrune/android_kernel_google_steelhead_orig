@@ -129,6 +129,30 @@ static inline void disable_lnk(int lch);
 static void omap_disable_channel_irq(int lch);
 static inline void omap_enable_channel_irq(int lch);
 
+/* WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND
+ *
+ * The code below is meant to work around issue http://b/issue?id=5705297
+ * Please refer to it for details, the issue is too complicated to document
+ * here.  Once TI has supplied a better fix, this code should be removed and
+ * replaced with TI's changes.
+ *
+ * WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND
+ */
+static volatile int dma_irq_in_flight_cpu = -1;
+void omap_dma_sync_with_irq_callbacks(void) {
+	/* Spin until we are sure that all IRQs in flight have been finished.
+	 * In the special case that we are asked to sync from within the IRQ
+	 * execution context itself, don't spin as it would cause a deadlock.
+	 */
+	int our_cpu = smp_processor_id();
+	volatile int tmp;
+	do {
+		smp_rmb();
+		tmp = dma_irq_in_flight_cpu;
+	} while ((tmp >= 0) && (tmp != our_cpu));
+}
+/* WORKAROUND WORKAROUND WORKAROUND WORKAROUND WORKAROUND */
+
 #define REVISIT_24XX()		printk(KERN_ERR "FIXME: no %s on 24xx\n", \
 						__func__);
 
@@ -1922,11 +1946,14 @@ static irqreturn_t omap2_dma_irq_handler(int irq, void *dev_id)
 	u32 val, enable_reg;
 	int i;
 
+	dma_irq_in_flight_cpu = smp_processor_id();
+	smp_wmb();
+
 	val = p->dma_read(IRQSTATUS_L0, 0);
 	if (val == 0) {
 		if (printk_ratelimit())
 			printk(KERN_WARNING "Spurious DMA IRQ\n");
-		return IRQ_HANDLED;
+		goto irq_finished;
 	}
 	enable_reg = p->dma_read(IRQENABLE_L0, 0);
 	val &= enable_reg; /* Dispatch only relevant interrupts */
@@ -1936,6 +1963,9 @@ static irqreturn_t omap2_dma_irq_handler(int irq, void *dev_id)
 		val >>= 1;
 	}
 
+irq_finished:
+	dma_irq_in_flight_cpu = -1;
+	smp_wmb();
 	return IRQ_HANDLED;
 }
 

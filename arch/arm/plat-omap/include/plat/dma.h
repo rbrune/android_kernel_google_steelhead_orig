@@ -497,6 +497,7 @@ void omap_dma_global_context_save(void);
 void omap_dma_global_context_restore(void);
 
 extern void omap_dma_disable_irq(int lch);
+extern void omap_dma_sync_with_irq_callbacks(void);
 
 /* Chaining APIs */
 #ifndef CONFIG_ARCH_OMAP1
