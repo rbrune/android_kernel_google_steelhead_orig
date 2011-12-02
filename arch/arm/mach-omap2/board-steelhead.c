@@ -257,9 +257,22 @@ static int __init omap4_twl6030_hsmmc_init(struct omap2_hsmmc_info *controllers)
 	return 0;
 }
 
+/* In DVT2, this provides power to eMMC core.  In earlier devices,
+ * this is really a NOP because the supply line to VAUX1 is not
+ * connected so the PMIC won't generate anything even though we
+ * ask it to, so we don't bother doing any runtime config.
+ */
 static struct regulator_init_data steelhead_vaux1 = {
 	.constraints = {
-		.valid_ops_mask	 = REGULATOR_CHANGE_STATUS,
+		.min_uV			= 3000000,
+		.max_uV			= 3000000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask	 = REGULATOR_CHANGE_VOLTAGE
+					| REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+		.always_on	= true,
 	},
 };
 
