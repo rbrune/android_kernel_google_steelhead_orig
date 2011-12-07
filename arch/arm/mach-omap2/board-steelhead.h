@@ -47,6 +47,8 @@ extern void steelhead_set_counter_slew_rate(s32 correction);
 #define STEELHEAD_REV_EVT     0x1
 #define STEELHEAD_REV_EVT2    0x2
 #define STEELHEAD_REV_DVT     0x3
+#define STEELHEAD_REV_DVT1_5  0x4
+#define STEELHEAD_REV_DVT2    0x5
 extern int steelhead_hw_rev;
 
 extern void steelhead_set_tas5713_interface_en(int enabled);

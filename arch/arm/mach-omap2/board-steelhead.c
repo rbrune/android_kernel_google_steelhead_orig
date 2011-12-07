@@ -111,10 +111,12 @@ static bool enable_sr = true;
 module_param(enable_sr, bool, S_IRUSR | S_IRGRP | S_IROTH);
 
 static const char const *omap4_steelhead_hw_name[] = {
-	[STEELHEAD_REV_ALPHA] = "Steelhead ALPHA",
-	[STEELHEAD_REV_EVT]   = "Steelhead EVT",
-	[STEELHEAD_REV_EVT2]  = "Steelhead EVT2",
-	[STEELHEAD_REV_DVT]   = "Steelhead DVT",
+	[STEELHEAD_REV_ALPHA]  = "Steelhead ALPHA",
+	[STEELHEAD_REV_EVT]    = "Steelhead EVT",
+	[STEELHEAD_REV_EVT2]   = "Steelhead EVT2",
+	[STEELHEAD_REV_DVT]    = "Steelhead DVT",
+	[STEELHEAD_REV_DVT1_5] = "Steelhead DVT1.5",
+	[STEELHEAD_REV_DVT2]   = "Steelhead DVT2",
 };
 
 static const char *omap4_steelhead_hw_rev_name(void)
