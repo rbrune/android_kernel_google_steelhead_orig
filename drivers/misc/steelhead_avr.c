@@ -84,9 +84,17 @@ struct avr_driver_state {
 	int irq_registered;
 	int irq_id;
 
-	/* Current LED state. */
+	/* Current LED state. We cache it so we can restore if we
+	 * detect an AVR reset and not have to notify userland to
+	 * refresh the state.
+	 */
 	u8 led_mode;
 	u8 led_count;
+	struct avr_led_rgb_vals mute_led;
+	struct avr_led_set_range_i2c *led_buffer_cache;
+
+	/* Preallocated i2c data structure for the setRange ioctl */
+	struct avr_led_set_range_i2c *set_range_vals;
 };
 
 static void cleanup_driver_state(struct avr_driver_state *state)
@@ -118,6 +126,11 @@ static void cleanup_driver_state(struct avr_driver_state *state)
 	if (NULL != state->input_dev) {
 		input_free_device(state->input_dev);
 		state->input_dev = NULL;
+	}
+
+	if (NULL != state->led_buffer_cache) {
+		kfree(state->led_buffer_cache);
+		state->led_buffer_cache = NULL;
 	}
 
 	i2c_set_clientdata(state->i2c_client, NULL);
@@ -213,6 +226,21 @@ static int avr_get_led_count(struct avr_driver_state *state, u8 *led_count)
 	return rc;
 }
 
+static int avr_get_led_mode(struct avr_driver_state *state, u8 *mode)
+{
+	int rc;
+	if (!state || !mode)
+		return -EFAULT;
+
+	mutex_lock(&state->i2c_lock);
+	rc = avr_i2c_read(state->i2c_client, AVR_LED_MODE_REG_ADDR,
+			  sizeof(*mode), mode);
+	mutex_unlock(&state->i2c_lock);
+
+	pr_debug("%s: mode %u\n", __func__, *mode);
+	return rc;
+}
+
 static int avr_led_set_all_vals(struct avr_driver_state *state,
 				struct avr_led_rgb_vals *req)
 {
@@ -246,7 +274,7 @@ static int avr_led_set_range_vals(struct avr_driver_state *state,
 #ifdef DEBUG
 	{
 		int i;
-		pr_info("start = 0x%x, count = 0x%x, rgb_triples = 0x%x\n",
+		pr_info("start = %d, count = %d, rgb_triples = %d\n",
 			req->start, req->count, req->rgb_triples);
 		for (i = 0; i < req->rgb_triples; i++) {
 			pr_info("%d: 0x%02x 0x%02x 0x%02x\n",
@@ -260,9 +288,24 @@ static int avr_led_set_range_vals(struct avr_driver_state *state,
 	/* can't use i2c_smbus_write_i2c_block_data because it has
 	   a limit of 32 bytes */
 	rc = i2c_master_send(state->i2c_client, (char *)req, bytes_to_send);
-	if (rc == bytes_to_send)
+	if (rc == bytes_to_send) {
+		/* update our buffer cache copy if needed */
+		if (req != state->led_buffer_cache) {
+			int index = req->start + req->rgb_triples;
+			int end = req->start + req->count;
+			memcpy(&state->led_buffer_cache->rgb_vals[req->start],
+			       &req->rgb_vals[0],
+			       (req->rgb_triples *
+				sizeof(struct avr_led_rgb_vals)));
+			/* repeat last value when count < rgb_triples */
+			while (index < end) {
+				state->led_buffer_cache->rgb_vals[index] =
+					req->rgb_vals[req->rgb_triples-1];
+				index++;
+			}
+		}
 		rc = 0;
-	else {
+	} else {
 		pr_err("%s: i2c_master_send() returned error %d\n",
 		       __func__, rc);
 	}
@@ -280,10 +323,16 @@ static int avr_led_set_mute(struct avr_driver_state *state,
 		return -EFAULT;
 
 	mutex_lock(&state->i2c_lock);
+	pr_debug("%s: r = 0x%x, g = 0x%x, b = 0x%x\n",
+		__func__, req->rgb[0], req->rgb[1], req->rgb[2]);
 	rc = i2c_smbus_write_i2c_block_data(state->i2c_client,
 			AVR_LED_SET_MUTE_ADDR,
 			sizeof(req->rgb), req->rgb);
 	mutex_unlock(&state->i2c_lock);
+	if (!rc && (req != &state->mute_led)) {
+		/* cache mute led color */
+		state->mute_led = *req;
+	}
 
 	return rc;
 }
@@ -420,7 +469,6 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 
 	case AVR_LED_SET_RANGE_VALS: {
 		struct avr_led_set_range_vals req;
-		struct avr_led_set_range_i2c *set_range_vals;
 		size_t rgb_triples_bytes;
 
 		pr_debug("%s: set range vals, copying in %d bytes\n",
@@ -452,36 +500,22 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 
 		rgb_triples_bytes = (req.rgb_triples *
 				     sizeof(struct avr_led_rgb_vals));
-		pr_debug("mallocing struct of size %d, for %d triples\n",
-			sizeof(*set_range_vals) + rgb_triples_bytes + 1,
-			req.rgb_triples);
-		set_range_vals = kmalloc(sizeof(*set_range_vals) +
-					 rgb_triples_bytes + 1,
-					 GFP_KERNEL);
-		if (set_range_vals == NULL) {
-			pr_err("%s: kmalloc(set_range_vals) failed\n",
-			       __func__);
-			rc = -ENOMEM;
-			break;
-		}
-		set_range_vals->start = req.start;
-		set_range_vals->count = req.count;
-		set_range_vals->rgb_triples = req.rgb_triples;
+		state->set_range_vals->start = req.start;
+		state->set_range_vals->count = req.count;
+		state->set_range_vals->rgb_triples = req.rgb_triples;
 		pr_debug("%s: set range vals, copying in %d bytes\n",
 			__func__, rgb_triples_bytes);
 
-		if (copy_from_user(&set_range_vals->rgb_vals,
+		if (copy_from_user(&state->set_range_vals->rgb_vals,
 				   (const void __user *)(arg +
 					sizeof(struct avr_led_set_range_vals)),
 				   rgb_triples_bytes)) {
 			pr_err("%s: copy_from_user failed\n",
 			       __func__);
 			rc = -EFAULT;
-			kfree(set_range_vals);
 			break;
 		}
-		rc = avr_led_set_range_vals(state, set_range_vals);
-		kfree(set_range_vals);
+		rc = avr_led_set_range_vals(state, state->set_range_vals);
 	} break;
 
 	case AVR_LED_COMMIT_LED_STATE: {
@@ -565,18 +599,13 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 
 		if (scan == AVR_KEY_EVENT_RESET) {
 			/* This is the event we see whenever
-			 * the AVR reset/boots.  We always set
-			 * the mute color to 0 to indicate kernel
-			 * has detected reset.
+			 * the AVR reset/boots.  We restore
+			 * the previous state we had cached.
 			 */
-			struct avr_led_rgb_vals mute_color;
-
 			pr_info("%s: reset notification seen\n", __func__);
-			mute_color.rgb[0] = 0;
-			mute_color.rgb[1] = 0;
-			mute_color.rgb[2] = 0;
-			avr_led_set_mute(state, &mute_color);
-
+			avr_led_set_mute(state, &state->mute_led);
+			avr_led_set_mode(state, state->led_mode);
+			avr_led_set_range_vals(state, state->led_buffer_cache);
 			continue;
 		}
 
@@ -767,9 +796,34 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		pr_err("%s: failed to get led count\n", __func__);
 		/* ignore failure to allow updater to work */
 		rc = 0;
-		state->led_count = 0;
+		state->led_count = 32;
 	} else
 		pr_info("%s: led_count = %d\n", __func__, state->led_count);
+
+	/* size of one avr_led_set_range_i2c struct that can hold
+	 * an rgb triple for all led_count leds.  we allocate twice
+	 * this, one for the led_buffer_cache, and one for scratch
+	 * for the setRange ioctl to copy in from userspace.
+	 */
+	rc = (sizeof(struct avr_led_set_range_i2c) +
+	      (sizeof(struct avr_led_rgb_vals) * state->led_count));
+	state->led_buffer_cache =  kzalloc(rc * 2, GFP_KERNEL);
+	if (state->led_buffer_cache == NULL) {
+		pr_err("%s: kmalloc failed for led_buffer_cache\n", __func__);
+		rc = -ENOMEM;
+		goto error;
+	}
+	state->led_buffer_cache->count = state->led_count;
+	state->led_buffer_cache->rgb_triples = state->led_count;
+	state->set_range_vals = (void*)state->led_buffer_cache + rc;
+
+	rc = avr_get_led_mode(state, &state->led_mode);
+	if (rc) {
+		/* ignore failure to allow updater to work */
+		pr_err("%s: failed to get led mode\n", __func__);
+		rc = 0;
+		state->led_mode = AVR_LED_MODE_BOOT_ANIMATION;
+	}
 
 	pr_info("Steelhead AVR Driver loaded.\n");
 
