@@ -322,7 +322,12 @@ static int hdmi_core_ddc_edid(struct hdmi_ip_data *ip_data,
 		/* HDMI_CORE_DDC_STATUS_IN_PROG */
 		if (hdmi_wait_for_bit_change(hdmi_core_sys_base(ip_data),
 					HDMI_CORE_DDC_STATUS, 4, 4, 0) != 0) {
-			pr_err("Failed to program DDC\n");
+			pr_err("Failed to program DDC, attempting to reset...\n");
+
+			REG_FLD_MOD(hdmi_core_sys_base(ip_data),
+					HDMI_CORE_DDC_CMD, 0xF, 3, 0);
+			usleep_range(1000, 1000);
+
 			return -ETIMEDOUT;
 		}
 
@@ -333,7 +338,12 @@ static int hdmi_core_ddc_edid(struct hdmi_ip_data *ip_data,
 		/* HDMI_CORE_DDC_STATUS_IN_PROG */
 		if (hdmi_wait_for_bit_change(hdmi_core_sys_base(ip_data),
 					HDMI_CORE_DDC_STATUS, 4, 4, 0) != 0) {
-			pr_err("Failed to program DDC\n");
+			pr_err("Failed to program DDC, attempting to reset...\n");
+
+			REG_FLD_MOD(hdmi_core_sys_base(ip_data),
+					HDMI_CORE_DDC_CMD, 0xF, 3, 0);
+			usleep_range(1000, 1000);
+
 			return -ETIMEDOUT;
 		}
 
