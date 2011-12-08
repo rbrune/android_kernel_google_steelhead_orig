@@ -32,6 +32,7 @@
 #include <linux/sii9234.h>
 #include <linux/i2c/twl.h>
 #include <linux/mutex.h>
+#include <linux/switch.h>
 
 #include <plat/usb.h>
 
@@ -83,10 +84,6 @@
 #define TUNA_MANUAL_UART_LTE	2
 #define TUNA_MANUAL_UART_AP	3
 
-#define TUNA_OTG_ID_FSA9480_PRIO		INT_MIN
-#define TUNA_OTG_ID_SII9234_PRIO		INT_MIN + 1
-#define TUNA_OTG_ID_FSA9480_LAST_PRIO		INT_MAX
-
 #define CHARGERUSB_CTRL1	0x8
 #define CHARGERUSB_CTRL3	0xA
 #define CHARGERUSB_CINLIMIT	0xE
@@ -104,6 +101,8 @@ struct tuna_otg {
 	int				usb_manual_mode;
 	int				uart_manual_mode;
 	int				current_device;
+
+	struct switch_dev		dock_switch;
 };
 static struct tuna_otg tuna_otg_xceiv;
 
@@ -410,14 +409,14 @@ static void tuna_fsa_usb_detected(int device)
 			else
 				tuna_ap_usb_detach(tuna_otg);
 			break;
-		case FSA9480_DETECT_UART:
-			break;
 		case FSA9480_DETECT_USB_HOST:
 			tuna_usb_host_detach(tuna_otg);
 			break;
 		case FSA9480_DETECT_CHARGER:
-		default:
 			tuna_ap_usb_detach(tuna_otg);
+			break;
+		case FSA9480_DETECT_UART:
+		default:
 			break;
 		};
 		break;
@@ -436,6 +435,7 @@ static void tuna_fsa_usb_detected(int device)
 		};
 		break;
 	case FSA9480_DETECT_UART:
+	default:
 		break;
 	}
 
@@ -703,28 +703,72 @@ static void sii9234_enable_vbus(bool enable)
 
 }
 
-static void sii9234_vbus_present(bool on)
+static void sii9234_connect(bool on, u8 *devcap)
 {
 	struct tuna_otg *tuna_otg = &tuna_otg_xceiv;
+	unsigned long val;
+	int dock = 0;
 
 	tuna_otg->otg.state = OTG_STATE_B_IDLE;
 	tuna_otg->otg.default_a = false;
 	tuna_otg->otg.last_event = on ? USB_EVENT_VBUS : USB_EVENT_NONE;
+
+	if (on) {
+		if(devcap &&
+		   devcap[MHL_DEVCAP_ADOPTER_ID_H] == 0x33 &&
+		   devcap[MHL_DEVCAP_ADOPTER_ID_L] == 0x33) {
+
+			if (devcap[MHL_DEVCAP_RESERVED] == 2)
+				val = USB_EVENT_CHARGER;
+			else
+				val = USB_EVENT_VBUS;
+
+			if (devcap[MHL_DEVCAP_DEVICE_ID_H] == 0x12 &&
+			    devcap[MHL_DEVCAP_DEVICE_ID_L] == 0x34)
+				dock = 1;
+		} else {
+			val = USB_EVENT_VBUS;
+		}
+	} else {
+		val = USB_EVENT_NONE;
+	}
+
 	atomic_notifier_call_chain(&tuna_otg->otg.notifier,
-				on ? USB_EVENT_VBUS : USB_EVENT_NONE,
-				tuna_otg->otg.gadget);
+				   val, tuna_otg->otg.gadget);
+	tuna_otg_set_dock_switch(dock);
+
 }
 
-void tuna_otg_pogo_charger(bool on)
+void tuna_otg_pogo_charger(enum pogo_power_state pogo_state)
 {
 	struct tuna_otg *tuna_otg = &tuna_otg_xceiv;
+	unsigned long power_state;
+
+	switch (pogo_state) {
+		case POGO_POWER_CHARGER:
+			power_state = USB_EVENT_CHARGER;
+			break;
+		case POGO_POWER_HOST:
+			power_state = USB_EVENT_VBUS;
+			break;
+		case POGO_POWER_DISCONNECTED:
+		default:
+			power_state = USB_EVENT_NONE;
+			break;
+	}
 
 	tuna_otg->otg.state = OTG_STATE_B_IDLE;
 	tuna_otg->otg.default_a = false;
-	tuna_otg->otg.last_event = on ? USB_EVENT_CHARGER : USB_EVENT_NONE;
-	atomic_notifier_call_chain(&tuna_otg->otg.notifier,
-				on ? USB_EVENT_CHARGER : USB_EVENT_NONE,
+	tuna_otg->otg.last_event = power_state;
+	atomic_notifier_call_chain(&tuna_otg->otg.notifier, power_state,
 				tuna_otg->otg.gadget);
+}
+
+void tuna_otg_set_dock_switch(int enable)
+{
+	struct tuna_otg *tuna_otg = &tuna_otg_xceiv;
+
+	switch_set_state(&tuna_otg->dock_switch, enable);
 }
 
 static struct sii9234_platform_data sii9234_pdata = {
@@ -732,7 +776,7 @@ static struct sii9234_platform_data sii9234_pdata = {
 	.enable = tuna_mux_usb_to_mhl,
 	.power = sii9234_power,
 	.enable_vbus = sii9234_enable_vbus,
-	.vbus_present = sii9234_vbus_present,
+	.connect = sii9234_connect,
 };
 
 static struct i2c_board_info __initdata tuna_i2c5_boardinfo[] = {
@@ -857,6 +901,9 @@ int __init omap4_tuna_connector_init(void)
 
 	i2c_register_board_info(5, tuna_i2c5_boardinfo,
 			ARRAY_SIZE(tuna_i2c5_boardinfo));
+
+	tuna_otg->dock_switch.name = "dock";
+	switch_dev_register(&tuna_otg->dock_switch);
 
 	return 0;
 }
