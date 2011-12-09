@@ -31,6 +31,7 @@
 #include <plat/mmc.h>
 #include <plat/dma.h>
 #include <plat/gpu.h>
+#include <plat/hdmi_audio_codec.h>
 #include <plat/omap_hwmod.h>
 #include <plat/omap_device.h>
 #include <plat/omap4-keypad.h>
@@ -423,6 +424,14 @@ static struct platform_device omap4_hdmi_audio = {
 	.id	= -1,
 };
 
+struct omap_hdmi_audio_codec_platform_data hdmi_audio_codec_pdata = {
+#ifdef CONFIG_MACH_STEELHEAD
+	.get_raw_counter = steelhead_get_raw_counter,
+#else
+	.get_raw_counter = NULL,
+#endif
+};
+
 /*
  * OMAP2420 has 2 McBSP ports
  * OMAP2430 has 5 McBSP ports
@@ -454,7 +463,10 @@ static void omap_init_audio(void)
 			__func__, dev_hdmi_name);
 
 		od_hdmi_codec = omap_device_build(dev_hdmi_codec_name,
-					-1, oh_hdmi, NULL, 0, NULL, 0, false);
+					-1, oh_hdmi,
+					&hdmi_audio_codec_pdata,
+					sizeof(hdmi_audio_codec_pdata),
+					NULL, 0, false);
 
 		WARN(IS_ERR(od_hdmi_codec), "%s: could not build omap_device for %s\n",
 			__func__, dev_hdmi_codec_name);

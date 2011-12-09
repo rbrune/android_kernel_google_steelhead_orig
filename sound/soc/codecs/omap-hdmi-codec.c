@@ -35,12 +35,17 @@
 #include <sound/initval.h>
 #include <sound/tlv.h>
 
+#include <plat/hdmi_audio_codec.h>
 #include <plat/omap_hwmod.h>
 #include <video/omapdss.h>
 #include <video/hdmi_ti_4xxx_ip.h>
 
 #include "../../../drivers/video/omap2/dss/dss_features.h"
 #include "../../../drivers/video/omap2/dss/dss.h"
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+#include "../omap/steelhead_extensions.h"
+#endif
 
 #define HDMI_WP		0x0
 #define HDMI_CORE_SYS	0x400
@@ -68,8 +73,46 @@ struct hdmi_codec_data {
 	struct notifier_block notifier;
 	struct hdmi_params params;
 	int active;
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	struct omap_hdmi_audio_codec_platform_data* pdata;
+	s64 start_time;
+	int start_time_valid;
+	spinlock_t starttime_lock;
+#endif
 } hdmi_data;
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+static int hdmi_audio_ioctl_get_start_time(
+		struct snd_pcm_substream *substream,
+		struct snd_soc_dai *dai,
+		void *arg)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_codec *codec = rtd->codec;
+	struct hdmi_codec_data *priv = snd_soc_codec_get_drvdata(codec);
+	unsigned long irq_state;
+	s64 start;
+	int valid;
+
+	if (!priv)
+		return -EINVAL;
+
+	spin_lock_irqsave(&priv->starttime_lock, irq_state);
+	start = priv->start_time;
+	valid = priv->start_time_valid;
+	spin_unlock_irqrestore(&priv->starttime_lock, irq_state);
+
+	if (valid) {
+		if (copy_to_user((void __user *)arg,
+					&start, sizeof(start)))
+			return -EFAULT;
+	} else
+		return -EINVAL;
+
+	return 0;
+}
+#endif
 
 static int hdmi_audio_set_configuration(struct hdmi_codec_data *priv)
 {
@@ -247,8 +290,20 @@ int hdmi_audio_notifier_callback(struct notifier_block *nb,
 
 	if (state == OMAP_DSS_DISPLAY_ACTIVE) {
 		/* this happens just after hdmi_power_on */
-		if (hdmi_data.active)
+		if (hdmi_data.active) {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			unsigned long irq_state;
+			spin_lock_irqsave(&hdmi_data.starttime_lock, irq_state);
+#endif
 			hdmi_ti_4xxx_audio_enable(&hdmi_data.ip_data, 0);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			hdmi_data.start_time = 0;
+			hdmi_data.start_time_valid = 0;
+			spin_unlock_irqrestore(&hdmi_data.starttime_lock,
+					irq_state);
+#endif
+		}
+
 		hdmi_audio_set_configuration(&hdmi_data);
 		if (hdmi_data.active) {
 			omap_hwmod_set_slave_idlemode(hdmi_data.oh,
@@ -297,14 +352,48 @@ static int hdmi_audio_trigger(struct snd_pcm_substream *substream, int cmd,
 		 */
 		omap_hwmod_set_slave_idlemode(priv->oh,
 			HWMOD_IDLEMODE_NO);
-		hdmi_ti_4xxx_audio_enable(&priv->ip_data, 1);
+		{
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			s64 start_time = 0;
+			unsigned long irq_state;
+			spin_lock_irqsave(&priv->starttime_lock, irq_state);
+			if (priv->pdata && priv->pdata->get_raw_counter)
+				start_time = priv->pdata->get_raw_counter();
+#endif
+			hdmi_ti_4xxx_audio_enable(&priv->ip_data, 1);
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			if (priv->pdata && priv->pdata->get_raw_counter) {
+				s64 tmp;
+				tmp = priv->pdata->get_raw_counter();
+				priv->start_time = (start_time >> 1)
+				                 + (tmp >> 1)
+				                 + (start_time & tmp & 0x1);
+				priv->start_time_valid = 1;
+			}
+			spin_unlock_irqrestore(&priv->starttime_lock,
+					irq_state);
+#endif
+		}
 		priv->active = 1;
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		priv->active = 0;
-		hdmi_ti_4xxx_audio_enable(&priv->ip_data, 0);
+		{
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			unsigned long irq_state;
+			spin_lock_irqsave(&priv->starttime_lock, irq_state);
+#endif
+			hdmi_ti_4xxx_audio_enable(&priv->ip_data, 0);
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+			priv->start_time = 0;
+			priv->start_time_valid = 0;
+			spin_unlock_irqrestore(&priv->starttime_lock,
+					irq_state);
+#endif
+		}
 		/*
 		 * switch back to smart-idle & wakeup capable
 		 * after audio activity stops
@@ -327,11 +416,31 @@ static int hdmi_audio_startup(struct snd_pcm_substream *substream,
 	}
 	return 0;
 }
+
+static int hdmi_audio_ioctl(
+		struct snd_pcm_substream* substream,
+		struct snd_soc_dai* dai,
+		unsigned int cmd, void *arg)
+{
+	switch (cmd) {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	case SNDRV_PCM_IOCTL_GET_TUNGSTEN_START_TIME:
+		return hdmi_audio_ioctl_get_start_time(substream, dai, arg);
+#endif
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+
 static int hdmi_probe(struct snd_soc_codec *codec)
 {
 	struct platform_device *pdev = to_platform_device(codec->dev);
 	struct resource *hdmi_rsrc;
 	int ret = 0;
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	spin_lock_init(&hdmi_data.starttime_lock);
+#endif
 
 	snd_soc_codec_set_drvdata(codec, &hdmi_data);
 
@@ -409,6 +518,7 @@ static struct snd_soc_dai_ops hdmi_audio_codec_ops = {
 	.hw_params = hdmi_audio_hw_params,
 	.trigger = hdmi_audio_trigger,
 	.startup = hdmi_audio_startup,
+	.ioctl = hdmi_audio_ioctl,
 };
 
 static struct snd_soc_dai_driver hdmi_codec_dai_drv = {
@@ -435,6 +545,10 @@ static __devinit int hdmi_codec_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "can't register ASoC HDMI audio codec\n");
 		return r;
 	}
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	hdmi_data.pdata = pdev->dev.platform_data;
+#endif
 
 	return 0;
 }
