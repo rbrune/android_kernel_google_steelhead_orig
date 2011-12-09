@@ -582,11 +582,12 @@ static int omap_mcbsp_dai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 	struct omap_mcbsp_reg_cfg *regs = &mcbsp_data->regs;
 	int err = 0;
 
-	if (mcbsp_data->active)
+	if (mcbsp_data->active) {
 		if (freq == mcbsp_data->in_freq)
 			return 0;
 		else
 			return -EBUSY;
+	}
 
 	/* The McBSP signal muxing functions are only available on McBSP1 */
 	if (clk_id == OMAP_MCBSP_CLKR_SRC_CLKR ||
@@ -687,8 +688,7 @@ static int mcbsp_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
-static struct snd_soc_dai_driver omap_mcbsp_dai =
-{
+static struct snd_soc_dai_driver omap_mcbsp_dai = {
 	.probe = mcbsp_dai_probe,
 	.playback = {
 		.channels_min = 1,
@@ -837,9 +837,11 @@ EXPORT_SYMBOL_GPL(omap_mcbsp_st_add_controls);
 
 static __devinit int asoc_mcbsp_probe(struct platform_device *pdev)
 {
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	int i;
 	for (i = 0; i < ARRAY_SIZE(mcbsp_data); ++i)
 		spin_lock_init(&mcbsp_data[i].starttime_lock);
+#endif
 
 	return snd_soc_register_dai(&pdev->dev, &omap_mcbsp_dai);
 }
