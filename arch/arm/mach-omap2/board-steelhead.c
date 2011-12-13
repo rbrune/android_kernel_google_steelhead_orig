@@ -598,6 +598,24 @@ int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 #define TAS5713_RESET_GPIO_ID 42
 #define TAS5713_PDN_GPIO_ID 44
 
+static void steelhead_tas5713_before_power_up(
+		struct tas5713_platform_data* pdata)
+{
+	if (NULL != pdata) {
+		int gpio_num = (int)(pdata->board_data);
+		gpio_set_value(gpio_num, 1);
+	}
+}
+
+static void steelhead_tas5713_after_power_down(
+		struct tas5713_platform_data* pdata)
+{
+	if (NULL != pdata) {
+		int gpio_num = (int)(pdata->board_data);
+		gpio_set_value(gpio_num, 1);
+	}
+}
+
 static struct tas5713_platform_data tas5713_pdata = {
 	/* Reset and Power Down GPIO configuration */
 	.reset_gpio = TAS5713_RESET_GPIO_ID,
@@ -605,12 +623,13 @@ static struct tas5713_platform_data tas5713_pdata = {
 
 	/* MCLK */
 	.mclk_out = NULL,
+
+	/* Callbacks */
+	.before_power_up = steelhead_tas5713_before_power_up,
+	.after_power_down = steelhead_tas5713_after_power_down,
+	.board_data = (void*)TAS5713_INTERFACE_EN_GPIO_ID,
 };
 static const unsigned long tas5713_mclk_rate = 12288000;
-
-void steelhead_set_tas5713_interface_en(int enabled) {
-	gpio_set_value(TAS5713_INTERFACE_EN_GPIO_ID, enabled);
-}
 
 static void steelhead_platform_init_tas5713_audio(void)
 {
@@ -628,18 +647,16 @@ static void steelhead_platform_init_tas5713_audio(void)
 			.gpio_name = "tas5713_interface_en",
 			.mux_name = "gpmc_a16.gpio_40",
 			.pin_mode = OMAP_PIN_OUTPUT,
-			.init_state = GPIOF_OUT_INIT_HIGH,
+			.init_state = GPIOF_OUT_INIT_LOW,
 		},
 	};
 
 	omap_mux_init_gpio(TAS5713_RESET_GPIO_ID, OMAP_PIN_OUTPUT);
 	omap_mux_init_gpio(TAS5713_PDN_GPIO_ID, OMAP_PIN_OUTPUT);
 
-	/* Reserve the level translator enable GPIO and set it up to enable the
-	 * LT so that communications are available during ASoC codec driver load
-	 * time.  The steelhead ASoC machine driver will power down the level
-	 * translator after machine driver load time, and then control the GPIO
-	 * dynamically via the callback exposed here.
+	/* Reserve the level translator enable GPIO and set it up to disable the
+	 * LT.  The TAS5713 driver will enable and disable the LT as needed
+	 * using the callbacks provided in the pdata.
 	 */
 	omap_mux_init_gpio(TAS5713_INTERFACE_EN_GPIO_ID, OMAP_PIN_OUTPUT);
 	if (steelhead_reserve_gpios(tas5713_iface_en_gpio,

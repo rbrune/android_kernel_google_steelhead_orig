@@ -271,6 +271,16 @@ static void tas5713_setup_debugfs(struct tas5713_driver_state*) { }
 static void tas5713_cleanup_debugfs(struct tas5713_driver_state*) { }
 #endif  /* CONFIG_DEBUG_FS */
 
+static void do_before_power_up(struct tas5713_driver_state* state) {
+	if (state && state->pdata && state->pdata->before_power_up)
+		state->pdata->before_power_up(state->pdata);
+}
+
+static void do_after_power_down(struct tas5713_driver_state* state) {
+	if (state && state->pdata && state->pdata->after_power_down)
+		state->pdata->after_power_down(state->pdata);
+}
+
 static int tas5713_set_master_volume_l(struct device* dev,
 	struct tas5713_driver_state* state,
 	u8 vol_reg)
@@ -344,6 +354,7 @@ static int tas5713_check_device_exists(struct device* dev,
 	 * internally tas5713 generated MCLK will be good enough for I2C
 	 * acceess.
 	 */
+	do_before_power_up(state);
 	tas5713_do_reset(state, 0, 0);
 
 	/* Check to see that the device exists by attempting to read the device
@@ -363,6 +374,7 @@ static int tas5713_check_device_exists(struct device* dev,
 	/* Place the device back into power-down/reset. */
 	gpio_set_value(state->pdata->pdn_gpio, 0);
 	gpio_set_value(state->pdata->reset_gpio, 0);
+	do_after_power_down(state);
 
 	return ret;
 }
@@ -465,6 +477,7 @@ err_setup:
 	state->cur_power_state = kPoweredDown;
 
 	mutex_unlock(&state->lock);
+	do_after_power_down(state);
 	usleep_range(kPowerUpRetryTimeout, kPowerUpRetryTimeout);
 	mutex_lock(&state->lock);
 }
@@ -548,9 +561,11 @@ static void tas5713_power_transition(struct work_struct* work)
 		if (state->tgt_power_state == kPoweredDown) {
 			spin_unlock_irqrestore(pwr_lock, irq_flags);
 			tas5713_power_down(state);
+			do_after_power_down(state);
 			spin_lock_irqsave(pwr_lock, irq_flags);
 	  	} else if (state->tgt_power_state == kPoweredUp) {
 			spin_unlock_irqrestore(pwr_lock, irq_flags);
+			do_before_power_up(state);
 			tas5713_power_up(state);
 			spin_lock_irqsave(pwr_lock, irq_flags);
 	  	} else {

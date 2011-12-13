@@ -27,6 +27,12 @@ struct tas5713_platform_data {
 
 	/* CLK selected by the board to provide MCLK to the TAS5713 */
 	struct clk *mclk_out;
+
+	/* Callback hooks board specific behavior during asynchronous power
+	 * sequencing.  */
+	void (*before_power_up)(struct tas5713_platform_data*);
+	void (*after_power_down)(struct tas5713_platform_data*);
+	void* board_data;
 };
 #endif
 

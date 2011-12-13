@@ -56,26 +56,6 @@ struct steelhead_tas5713_drvdata {
 
 static struct steelhead_tas5713_drvdata tas5713_drvdata;
 
-static int steelhead_tas5713_startup(struct snd_pcm_substream* substream)
-{
-	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
-		return -ENODEV;
-
-	/* Turn on the level translator between OMAP and the TAS5713 */
-	steelhead_set_tas5713_interface_en(1);
-
-	return 0;
-}
-
-static void steelhead_tas5713_shutdown(struct snd_pcm_substream* substream)
-{
-	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
-		return;
-
-	/* Turn off the level translator between OMAP and the TAS5713 */
-	steelhead_set_tas5713_interface_en(0);
-}
-
 static int steelhead_tas5713_hw_params(
 		struct snd_pcm_substream* substream,
 		struct snd_pcm_hw_params* params)
@@ -153,8 +133,6 @@ static int steelhead_tas5713_hw_free(struct snd_pcm_substream *substream) {
 }
 
 static struct snd_soc_ops steelhead_tas5713_ops = {
-	.startup = steelhead_tas5713_startup,
-	.shutdown = steelhead_tas5713_shutdown,
 	.hw_params = steelhead_tas5713_hw_params,
 	.hw_free = steelhead_tas5713_hw_free,
 };
@@ -258,17 +236,7 @@ err:
 	if (!IS_ERR_OR_NULL(abe_24m_clk))
 		clk_put(abe_24m_clk);
 
-	/* The level translator enable signal was left enabled by the steelhead
-	 * board file so that the TAS5713 codec driver could find (or not find)
-	 * the device via I2C probe.  Whether or not we have successfully
-	 * created an ASoC card representing the TAS5713 audio path, its time to
-	 * turn the level translator back off.  Moving forward, it will be
-	 * enabled/disabled dynamically by the machine driver as needed.
-	 */
-	steelhead_set_tas5713_interface_en(0);
-
 	return ret;
-
 }
 
 static int __init steelhead_soc_init(void)
