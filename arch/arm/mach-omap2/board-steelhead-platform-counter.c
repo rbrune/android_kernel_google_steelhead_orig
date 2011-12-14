@@ -13,10 +13,12 @@
 
 #include <linux/err.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/aah_localtime.h>
+#include <asm-generic/uaccess.h>
 #include <plat/dmtimer.h>
 
 #include "board-steelhead.h"
@@ -51,6 +53,7 @@ static const char	*VCXO_PWM_SAFE_MODE_PIN_NAME =
 
 static struct omap_dm_timer	*vcxo_pwm_timer;
 static spinlock_t		vcxo_lock;
+static s16			vcxo_last_rate;
 
 static struct counter_state counter_state = {
 	.upper = 0,
@@ -278,7 +281,8 @@ static void steelhead_set_vcxo_rate(s16 rate)
 	timer_write_reg(vcxo_pwm_timer, TIMER_CTRL_OFFSET, ctrl);
 
 finished:
-	/* release our lock and get out */
+	/* update our last rate, release our lock and get out */
+	vcxo_last_rate = rate;
 	spin_unlock_irqrestore(&vcxo_lock, irq_state);
 }
 
@@ -375,6 +379,212 @@ static struct platform_device aah_localtime_device = {
 	},
 };
 
+#ifdef CONFIG_DEBUG_FS
+/******************************************************************************
+ *                                                                            *
+ *              DebugFS support for VCXO Factory Diagnostics                  *
+ *                                                                            *
+ ******************************************************************************/
+static struct dentry *vcxo_debugfs_dir;
+static struct dentry *vcxo_debugfs_test_node;
+static struct dentry *vcxo_debugfs_vcxo_value_node;
+
+static const char *kVCXODebugDirName = "steelhead-vcxo";
+static const char *kVCXOTestNodeName = "factory_test";
+static const char *kVCXOValueNodeName = "value";
+
+static DEFINE_SPINLOCK(vcxo_factory_test_spinlock);
+static u32 vcxo_factory_test_32k_start_time;
+static s64 vcxo_factory_test_38400k_start_time;
+static int vcxo_factory_test_in_progress;
+
+#define SYS32K_COUNTER_REG 0x4A304010
+static u32 vcxo_debugfs_read_32k(void)
+{
+	/* Note: I am reading this register with a 32 bit access right now
+	 * because that is what the code in arch/arm/plat-omap/counter_32k.c
+	 * does, even though the TRM (section 22.4.4.1) says that the counter
+	 * must be accessed 16 bits at a time.  I have an email in flight to TI
+	 * asking for clarification and will come back to update this comment
+	 * once they weigh in.
+	 */
+	return omap_readl(SYS32K_COUNTER_REG);
+}
+
+static int vcxo_debugfs_test_open(struct inode *node, struct file *f)
+{
+	f->private_data = NULL;
+	return 0;
+}
+
+static ssize_t vcxo_debugfs_test_read(struct file *f,
+			       char __user *user_buf,
+			       size_t count,
+			       loff_t *pos)
+{
+	ssize_t ret_val = 0;
+	size_t amt;
+	char buf[512];
+	unsigned long irq_state;
+	u32 delta_32k;
+	s64 delta_38400k;
+	int was_in_progress;
+
+	if (NULL != f->private_data)
+		goto finished;
+
+	spin_lock_irqsave(&vcxo_factory_test_spinlock, irq_state);
+	was_in_progress = vcxo_factory_test_in_progress;
+	vcxo_factory_test_in_progress = 0;
+	if (was_in_progress) {
+		delta_32k = vcxo_debugfs_read_32k() -
+			vcxo_factory_test_32k_start_time;
+		delta_38400k = steelhead_get_raw_counter() -
+			vcxo_factory_test_38400k_start_time;
+	}
+	spin_unlock_irqrestore(&vcxo_factory_test_spinlock, irq_state);
+
+	if (was_in_progress) {
+		s64 usec_delta_32k, usec_delta_38400k, ppm;
+
+		/* usec_delta_32k = delta_32k * 1000000 / 32768
+		 *                = delta_32k * 15625 / 512
+		 */
+		usec_delta_32k = ((s64)delta_32k * 15625ll);
+		do_div(usec_delta_32k, 512);
+
+		/* usec_delta_38400k = delta_38400k * 1000000 / 38400000
+		 *                   = delta_38400k * 10 / 384
+		 */
+		usec_delta_38400k = ((s64)delta_38400k * 10ll);
+		do_div(usec_delta_38400k, 384);
+
+		ppm = usec_delta_38400k - usec_delta_32k;
+		ppm *= 1000000;
+		if (ppm < 0) {
+			ppm = -ppm;
+			do_div(ppm, (uint32_t)usec_delta_32k);
+			ppm = -ppm;
+		} else {
+			do_div(ppm, (uint32_t)usec_delta_32k);
+		}
+		snprintf(buf, sizeof(buf),
+				"VCXO Factory Test\n"
+				"uSec on 32 KHz Clock   = %lld\n"
+				"uSec on 38.4 MHz Clock = %lld\n"
+				"ppm difference         = %lld\n",
+				usec_delta_32k, usec_delta_38400k, ppm);
+	} else {
+		snprintf(buf, sizeof(buf),
+				"VCXO Factory Test was not started.\n");
+	}
+
+	buf[sizeof(buf) - 1] = 0;
+
+	amt = strlen(buf);
+	if (amt > count)
+		amt = count;
+
+	if (copy_to_user(user_buf, buf, amt)) {
+		ret_val = -EFAULT;
+		goto finished;
+	}
+
+	ret_val = amt;
+
+finished:
+	/* Mark the fact that we have been through here before */
+	f->private_data = (void *)(0x01);
+	return ret_val;
+}
+
+static ssize_t vcxo_debugfs_test_write(struct file *f,
+				const char __user *user_buf,
+				size_t count,
+				loff_t *pos)
+{
+	unsigned long irq_state;
+	spin_lock_irqsave(&vcxo_factory_test_spinlock, irq_state);
+
+	vcxo_factory_test_32k_start_time = vcxo_debugfs_read_32k();
+	vcxo_factory_test_38400k_start_time = steelhead_get_raw_counter();
+	vcxo_factory_test_in_progress = 1;
+
+	spin_unlock_irqrestore(&vcxo_factory_test_spinlock, irq_state);
+	return count;
+}
+
+static const struct file_operations vcxo_debugfs_test_fops = {
+	.owner	= THIS_MODULE,
+	.open	= vcxo_debugfs_test_open,
+	.read	= vcxo_debugfs_test_read,
+	.write	= vcxo_debugfs_test_write
+};
+
+static int vcxo_debugfs_get_vcxo_value(void *ctx, u64 *out)
+{
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&vcxo_lock, irq_state);
+	*out = (u64)vcxo_last_rate;
+	spin_unlock_irqrestore(&vcxo_lock, irq_state);
+
+	return 0;
+}
+
+static int vcxo_debugfs_set_vcxo_value(void *ctx, u64 value)
+{
+	s16 rate = (s16)value;
+	steelhead_set_vcxo_rate(rate);
+	return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(vcxo_debugfs_vcxo_value_fops,
+		vcxo_debugfs_get_vcxo_value,
+		vcxo_debugfs_set_vcxo_value,
+		"%lld");
+
+static void vcxo_debugfs_cleanup(void)
+{
+	if (IS_ERR_OR_NULL(vcxo_debugfs_dir))
+		debugfs_remove_recursive(vcxo_debugfs_dir);
+
+	vcxo_debugfs_dir = NULL;
+	vcxo_debugfs_test_node = NULL;
+	vcxo_debugfs_vcxo_value_node = NULL;
+}
+
+static void vcxo_debugfs_init(void)
+{
+	vcxo_debugfs_dir = debugfs_create_dir(kVCXODebugDirName, NULL);
+
+	if (IS_ERR_OR_NULL(vcxo_debugfs_dir))
+		goto err;
+
+	vcxo_debugfs_test_node = debugfs_create_file(
+			kVCXOTestNodeName,
+			0644, vcxo_debugfs_dir,
+			NULL, &vcxo_debugfs_test_fops);
+
+	if (IS_ERR_OR_NULL(vcxo_debugfs_test_node))
+		goto err;
+
+	vcxo_debugfs_vcxo_value_node = debugfs_create_file(
+			kVCXOValueNodeName,
+			0644, vcxo_debugfs_dir,
+			NULL, &vcxo_debugfs_vcxo_value_fops);
+
+	if (IS_ERR_OR_NULL(vcxo_debugfs_vcxo_value_node))
+		goto err;
+
+	return;
+err:
+	vcxo_debugfs_cleanup();
+}
+#else
+static void vcxo_debugfs_init(void) { }
+#endif
+
 void __init steelhead_platform_init_counter(void)
 {
 	u64 tmp;
@@ -453,7 +663,11 @@ void __init steelhead_platform_init_counter(void)
 	 * system oscillator. */
 	steelhead_setup_vcxo_control();
 
-	/* Finally, register the platform driver which will give user-land
-	 * access to the local time clock */
+	/* Register the platform driver which will give user-land access to the
+	 * local time clock */
 	platform_device_register(&aah_localtime_device);
+
+	/* Finally, register the debugFS entries used in manufacturing
+	 * diagnostics to verify VCXO performance. */
+	vcxo_debugfs_init();
 }
