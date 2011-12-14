@@ -44,9 +44,9 @@ static struct timer_list	rollover_check_timer;
 #define VCXO_PWM_SAFE_MODE_PIN_NAME_POST_DVT2 "dpm_emu18.safe_mode"
 #define VCXO_PWM_CLK OMAP_TIMER_SRC_SYS_CLK
 
-static int 		VCXO_PWM_TIMER_ID = VCXO_PWM_TIMER_ID_POST_DVT2;
-static const char* 	VCXO_PWM_PIN_NAME = VCXO_PWM_PIN_NAME_POST_DVT2;
-static const char* 	VCXO_PWM_SAFE_MODE_PIN_NAME =
+static int		VCXO_PWM_TIMER_ID = VCXO_PWM_TIMER_ID_POST_DVT2;
+static const char	*VCXO_PWM_PIN_NAME = VCXO_PWM_PIN_NAME_POST_DVT2;
+static const char	*VCXO_PWM_SAFE_MODE_PIN_NAME =
 			VCXO_PWM_SAFE_MODE_PIN_NAME_POST_DVT2;
 
 static struct omap_dm_timer	*vcxo_pwm_timer;
