@@ -401,12 +401,12 @@ static int vcxo_factory_test_in_progress;
 #define SYS32K_COUNTER_REG 0x4A304010
 static u32 vcxo_debugfs_read_32k(void)
 {
-	/* Note: I am reading this register with a 32 bit access right now
-	 * because that is what the code in arch/arm/plat-omap/counter_32k.c
-	 * does, even though the TRM (section 22.4.4.1) says that the counter
-	 * must be accessed 16 bits at a time.  I have an email in flight to TI
-	 * asking for clarification and will come back to update this comment
-	 * once they weigh in.
+	/* Note: This register is being read with a 32 bit access even though the
+	 * TRM (section 22.4.4.1, dated Jan 2011) says that the counter must be
+	 * accessed 16 bits at a time.  I checked with TI and they verified via
+	 * simulation that the documentation was out of date and that 32 bit
+	 * access should be no problem.  Expect later versions of the TRM to
+	 * have this detail corrected.
 	 */
 	return omap_readl(SYS32K_COUNTER_REG);
 }
