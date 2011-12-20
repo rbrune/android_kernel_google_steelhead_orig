@@ -65,6 +65,14 @@ static void throttle_delayed_work_fn(struct work_struct *work);
 #define OMAP_ADC_START_VALUE	530
 #define OMAP_ADC_END_VALUE	923
 
+static int bgap_threshold_t_hot = BGAP_THRESHOLD_T_HOT;
+module_param(bgap_threshold_t_hot, int, S_IRUGO);
+MODULE_PARM_DESC(bgap_threshold_t_hot, "Bandgap threshold temp hot");
+
+static int bgap_threshold_t_cold = BGAP_THRESHOLD_T_COLD;
+module_param(bgap_threshold_t_cold, int, S_IRUGO);
+MODULE_PARM_DESC(bgap_threshold_t_cold, "Bandgap threshold temp cold");
+
 /*
  * omap_temp_sensor structure
  * @pdev - Platform device pointer
@@ -214,8 +222,8 @@ static void omap_configure_temp_sensor_thresholds(struct omap_temp_sensor
 {
 	u32 temp = 0, t_hot, t_cold, tshut_hot, tshut_cold;
 
-	t_hot = temp_to_adc_conversion(BGAP_THRESHOLD_T_HOT);
-	t_cold = temp_to_adc_conversion(BGAP_THRESHOLD_T_COLD);
+	t_hot = temp_to_adc_conversion(bgap_threshold_t_hot);
+	t_cold = temp_to_adc_conversion(bgap_threshold_t_cold);
 
 	if ((t_hot == -EINVAL) || (t_cold == -EINVAL)) {
 		pr_err("%s:Temp thresholds out of bounds\n", __func__);
@@ -390,9 +398,9 @@ static void throttle_delayed_work_fn(struct work_struct *work)
 					     throttle_work.work);
 	curr = omap_read_current_temp(temp_sensor);
 
-	if (curr >= BGAP_THRESHOLD_T_HOT || curr < 0) {
-		pr_warn("%s: OMAP temp read %d exceeds the threshold\n",
-			__func__, curr);
+	if (curr >= bgap_threshold_t_hot || curr < 0) {
+		pr_warn("%s: OMAP temp read %d exceeds threshold %d\n",
+			__func__, curr, bgap_threshold_t_hot);
 		omap_thermal_throttle();
 		schedule_delayed_work(&temp_sensor->throttle_work,
 			msecs_to_jiffies(THROTTLE_DELAY_MS));
