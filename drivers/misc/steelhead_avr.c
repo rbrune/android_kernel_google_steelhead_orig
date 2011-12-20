@@ -25,7 +25,6 @@
  * implements some macro led modes (like volume mode) which doesn't make
  * sense in the led API.
  */
-
 #include <linux/fs.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
@@ -594,8 +593,17 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		int was_down;
 
 		rc = avr_read_event_fifo(state, &scan);
-		if (rc || (scan == AVR_KEY_EVENT_EMPTY))
+		if (rc || (scan == AVR_KEY_EVENT_EMPTY)) {
+			/* after receiving an error and a fifo
+			 * empty response, sleep for a while
+			 * because we can read much faster than
+			 * the AVR can toggle the interrupt line
+			 * and reading too fast can cause i2c
+			 * errors because the AVR can't keep up.
+			 */
+			msleep(100);
 			break;
+		}
 
 		if (scan == AVR_KEY_EVENT_RESET) {
 			/* This is the event we see whenever
@@ -718,11 +726,12 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	state->input_dev->id.product = 0x0001;
 	state->input_dev->id.version = 0x0001; /* just made up */
 
-	/* our device produces only key events, and uses the stock linux key
-	 * repeat mechanism.
+	/* our device produces only key events, no repeating (volume
+	 * up and volume down always comes in pairs of press/release
+	 * events, so repeat is meaningless, and we don't want mute
+	 * to have a repeating mechanism either).
 	 */
 	set_bit(EV_KEY, state->input_dev->evbit);
-	set_bit(EV_REP, state->input_dev->evbit);
 
 	/* Set our keymap and report which key codes we can actually generate.
 	 */

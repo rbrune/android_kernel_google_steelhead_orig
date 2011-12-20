@@ -16,9 +16,7 @@
 #define __STEELHEAD_AVR_REGS_H
 
 /* key event registers */
-#define AVR_KEY_COUNT_REG_ADDR		0x10
-
-#define AVR_KEY_EVENT_FIFO_REG_ADDR	0x11
+#define AVR_KEY_EVENT_FIFO_REG_ADDR	0x00
 #define AVR_KEY_EVENT_DOWN		0x80	/* set when key down */
 #define AVR_KEY_EVENT_CODE_MASK		0x3F	/* mask for key code
 						 * (keeping bit unused)
@@ -30,6 +28,8 @@
 						 * when fifo empty
 						 */
 
+#define AVR_KEY_MUTE_THRESHOLD_REG_ADDR 0x01
+
 #define AVR_KEY_MUTE			0x00
 #define AVR_KEY_VOLUME_UP		(AVR_KEY_MUTE + 1)
 #define AVR_KEY_VOLUME_DOWN		(AVR_KEY_VOLUME_UP + 1)
@@ -37,16 +37,16 @@
 
 
 /* led registers */
-#define AVR_LED_MODE_REG_ADDR		0x20
+#define AVR_LED_MODE_REG_ADDR		0x02
 #define AVR_LED_MODE_BOOT_ANIMATION	0x00
 #define AVR_LED_MODE_HOST_AUTO_COMMIT	0x01
 #define AVR_LED_MODE_HOST		0x02
 
-#define AVR_LED_SET_ALL_REG_ADDR	0x21
+#define AVR_LED_SET_ALL_REG_ADDR	0x03
 
-#define AVR_LED_SET_RANGE_REG_ADDR	0x23
+#define AVR_LED_SET_RANGE_REG_ADDR	0x04
 
-#define AVR_LED_COMMIT_REG_ADDR		0x24	/* push the buffered host led
+#define AVR_LED_COMMIT_REG_ADDR		0x05	/* push the buffered host led
 						 * values to active display
 						 */
 #define AVR_LED_COMMIT_IMMEDIATELY	0x00	/* update the active led's
@@ -57,17 +57,17 @@
 						 * Later!
 						 */
 
-#define AVR_LED_SET_MUTE_ADDR		0x28	/* set mute led color */
-#define AVR_LED_GET_COUNT_ADDR		0x29	/* get led count */
+#define AVR_LED_SET_MUTE_ADDR		0x06	/* set mute led color */
+#define AVR_LED_GET_COUNT_ADDR		0x07	/* get led count */
 
 /* fw registers */
-#define AVR_HW_TYPE_REG_ADDR		0x80
+#define AVR_HW_TYPE_REG_ADDR		0x08
 #define AVR_HE_TYPE_UNKNOWN		0x00
 #define AVR_HE_TYPE_SPHERE		0x01
 #define AVR_HE_TYPE_RHOMBUS		0x02
 
-#define AVR_HW_REVISION_REG_ADDR	0x81
+#define AVR_HW_REVISION_REG_ADDR	0x09
 
-#define AVR_FW_VERSION_REG_ADDR		0x82	/* 16 bit register 8.8 */
+#define AVR_FW_VERSION_REG_ADDR		0x0a	/* 16 bit register 8.8 */
 
 #endif  /* __STEELHEAD_AVR_REGS_H */
