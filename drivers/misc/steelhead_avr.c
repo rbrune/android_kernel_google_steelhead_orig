@@ -145,12 +145,65 @@ static inline struct avr_driver_state *state_from_file(struct file *file)
 	return state;
 }
 
-static int avr_i2c_read(struct i2c_client *client, u8 cmd, u16 len, u8 *buf)
+/* the AVR can be temporarily busy doing other things and be unable
+ * to respond to a i2c request (it's not multi-threaded) so we need
+ * to retry on failure a few times.
+ */
+#define MAX_I2C_ATTEMPTS 5
+static int avr_i2c_write_block(struct avr_driver_state *state, u8 cmd,
+			       u16 len, u8 *buf)
 {
-	int rc;
-	rc = i2c_smbus_write_byte(client, cmd);
-	if (rc)
+	int rc, try;
+
+	mutex_lock(&state->i2c_lock);
+	for (try = 0; try < MAX_I2C_ATTEMPTS; try++) {
+		rc = i2c_smbus_write_i2c_block_data(state->i2c_client, cmd,
+						    len, buf);
+		if (rc == 0)
+			break;
+	}
+	mutex_unlock(&state->i2c_lock);
+	if (rc) {
+		pr_err("%s: write to reg %d failed after %d attempts\n",
+		       __func__, cmd, MAX_I2C_ATTEMPTS);
+	}
+	return rc;
+}
+
+static int avr_i2c_write_byte(struct avr_driver_state *state, u8 cmd, u8 data)
+{
+	int rc, try;
+
+	mutex_lock(&state->i2c_lock);
+	for (try = 0; try < MAX_I2C_ATTEMPTS; try++) {
+		rc = i2c_smbus_write_byte_data(state->i2c_client, cmd, data);
+		if (rc == 0)
+			break;
+	}
+	mutex_unlock(&state->i2c_lock);
+	if (rc) {
+		pr_err("%s: write to reg %d failed after %d attempts\n",
+		       __func__, cmd, MAX_I2C_ATTEMPTS);
+	}
+	return rc;
+}
+
+static int avr_i2c_read(struct avr_driver_state *state, u8 cmd,
+			u16 len, u8 *buf)
+{
+	int rc, try;
+
+	mutex_lock(&state->i2c_lock);
+	for (try = 0; try < MAX_I2C_ATTEMPTS; try++) {
+		rc = i2c_smbus_write_byte(state->i2c_client, cmd);
+		if (rc == 0)
+			break;
+	}
+	if (rc) {
+		mutex_unlock(&state->i2c_lock);
+		pr_err("%s: error writing reg addr %u\n", __func__, cmd);
 		return rc;
+	}
 
 	/* Need to wait a little bit between the write of the register ID
 	 * and the read of the actual data.  Failure to do so will not
@@ -158,12 +211,18 @@ static int avr_i2c_read(struct i2c_client *client, u8 cmd, u16 len, u8 *buf)
 	 */
 	usleep_range(50, 50);
 
-	rc = i2c_master_recv(client, buf, len);
+	for (try = 0; try < MAX_I2C_ATTEMPTS; try++) {
+		rc = i2c_master_recv(state->i2c_client, buf, len);
+		if (rc == len)
+			break;
+	}
+	mutex_unlock(&state->i2c_lock);
+	if (rc == len)
+		return 0;
 
-	if (rc >= 0)
-		rc = (rc == len) ? 0 : -EIO;
-
-	return rc;
+	pr_err("%s: error reading reg %u, failed after %d attempts\n",
+	       __func__, cmd, MAX_I2C_ATTEMPTS);
+	return -EIO;
 }
 
 static int avr_get_firmware_rev(struct avr_driver_state *state, u16 *revision)
@@ -173,10 +232,7 @@ static int avr_get_firmware_rev(struct avr_driver_state *state, u16 *revision)
 	if (!state || !revision)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client,
-			AVR_FW_VERSION_REG_ADDR, sizeof(buf), buf);
-	mutex_unlock(&state->i2c_lock);
+	rc = avr_i2c_read(state, AVR_FW_VERSION_REG_ADDR, sizeof(buf), buf);
 
 	*revision = ((u16)buf[0] << 8) | (u16)buf[1];
 	pr_debug("%s: fw revision %d.%d, %u\n", __func__,
@@ -186,28 +242,18 @@ static int avr_get_firmware_rev(struct avr_driver_state *state, u16 *revision)
 
 static int avr_get_hardware_type(struct avr_driver_state *state, u8 *type)
 {
-	int rc;
 	if (!state || !type)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client,
-			AVR_HW_TYPE_REG_ADDR, 1, type);
-	mutex_unlock(&state->i2c_lock);
-	return rc;
+	return avr_i2c_read(state, AVR_HW_TYPE_REG_ADDR, 1, type);
 }
 
 static int avr_get_hardware_rev(struct avr_driver_state *state, u8 *revision)
 {
-	int rc;
 	if (!state || !revision)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client,
-			AVR_HW_REVISION_REG_ADDR, 1, revision);
-	mutex_unlock(&state->i2c_lock);
-	return rc;
+	return avr_i2c_read(state, AVR_HW_REVISION_REG_ADDR, 1, revision);
 }
 
 static int avr_get_led_count(struct avr_driver_state *state, u8 *led_count)
@@ -216,10 +262,8 @@ static int avr_get_led_count(struct avr_driver_state *state, u8 *led_count)
 	if (!state || !led_count)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client, AVR_LED_GET_COUNT_ADDR,
+	rc = avr_i2c_read(state, AVR_LED_GET_COUNT_ADDR,
 			  sizeof(*led_count), led_count);
-	mutex_unlock(&state->i2c_lock);
 
 	pr_debug("%s: led_count %u\n", __func__, *led_count);
 	return rc;
@@ -231,10 +275,8 @@ static int avr_get_led_mode(struct avr_driver_state *state, u8 *mode)
 	if (!state || !mode)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client, AVR_LED_MODE_REG_ADDR,
+	rc = avr_i2c_read(state, AVR_LED_MODE_REG_ADDR,
 			  sizeof(*mode), mode);
-	mutex_unlock(&state->i2c_lock);
 
 	pr_debug("%s: mode %u\n", __func__, *mode);
 	return rc;
@@ -243,24 +285,17 @@ static int avr_get_led_mode(struct avr_driver_state *state, u8 *mode)
 static int avr_led_set_all_vals(struct avr_driver_state *state,
 				struct avr_led_rgb_vals *req)
 {
-	int rc;
-
 	if (!state || !req)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_i2c_block_data(state->i2c_client,
-			AVR_LED_SET_ALL_REG_ADDR,
-			sizeof(req->rgb), req->rgb);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
+	return avr_i2c_write_block(state, AVR_LED_SET_ALL_REG_ADDR,
+				   sizeof(req->rgb), req->rgb);
 }
 
 static int avr_led_set_range_vals(struct avr_driver_state *state,
 				  struct avr_led_set_range_i2c *req)
 {
-	int rc;
+	int rc, try;
 	int bytes_to_send;
 
 	if (!state || !req)
@@ -286,7 +321,13 @@ static int avr_led_set_range_vals(struct avr_driver_state *state,
 	req->reg_addr = AVR_LED_SET_RANGE_REG_ADDR;
 	/* can't use i2c_smbus_write_i2c_block_data because it has
 	   a limit of 32 bytes */
-	rc = i2c_master_send(state->i2c_client, (char *)req, bytes_to_send);
+	for (try = 0; try < MAX_I2C_ATTEMPTS; try++) {
+		rc = i2c_master_send(state->i2c_client, (char *)req,
+				     bytes_to_send);
+		if (rc == bytes_to_send)
+			break;
+	}
+	mutex_unlock(&state->i2c_lock);
 	if (rc == bytes_to_send) {
 		/* update our buffer cache copy if needed */
 		if (req != state->led_buffer_cache) {
@@ -308,7 +349,6 @@ static int avr_led_set_range_vals(struct avr_driver_state *state,
 		pr_err("%s: i2c_master_send() returned error %d\n",
 		       __func__, rc);
 	}
-	mutex_unlock(&state->i2c_lock);
 
 	return rc;
 }
@@ -321,13 +361,11 @@ static int avr_led_set_mute(struct avr_driver_state *state,
 	if (!state || !req)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
 	pr_debug("%s: r = 0x%x, g = 0x%x, b = 0x%x\n",
 		__func__, req->rgb[0], req->rgb[1], req->rgb[2]);
-	rc = i2c_smbus_write_i2c_block_data(state->i2c_client,
-			AVR_LED_SET_MUTE_ADDR,
-			sizeof(req->rgb), req->rgb);
-	mutex_unlock(&state->i2c_lock);
+	rc = avr_i2c_write_block(state, AVR_LED_SET_MUTE_ADDR,
+				 sizeof(req->rgb), req->rgb);
+
 	if (!rc && (req != &state->mute_led)) {
 		/* cache mute led color */
 		state->mute_led = *req;
@@ -342,10 +380,7 @@ static int avr_led_set_mode(struct avr_driver_state *state, u8 mode)
 	if (!state)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_byte_data(state->i2c_client,
-			AVR_LED_MODE_REG_ADDR, mode);
-	mutex_unlock(&state->i2c_lock);
+	rc = avr_i2c_write_byte(state, AVR_LED_MODE_REG_ADDR, mode);
 
 	/* If the command failed, then skip the update of our internal
 	 * bookkeeping and just get out.
@@ -359,16 +394,10 @@ static int avr_led_set_mode(struct avr_driver_state *state, u8 mode)
 
 static int avr_led_commit_led_state(struct avr_driver_state *state, u8 val)
 {
-	int rc;
 	if (!state)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = i2c_smbus_write_byte_data(state->i2c_client,
-			AVR_LED_COMMIT_REG_ADDR, val);
-	mutex_unlock(&state->i2c_lock);
-
-	return rc;
+	return avr_i2c_write_byte(state, AVR_LED_COMMIT_REG_ADDR, val);
 }
 
 static int avr_leddev_open(struct inode *inode, struct file *file)
@@ -569,15 +598,11 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 static int avr_read_event_fifo(struct avr_driver_state *state, u8 *next_event)
 {
 	int rc;
-
 	if (!state || !next_event)
 		return -EFAULT;
 
-	mutex_lock(&state->i2c_lock);
-	rc = avr_i2c_read(state->i2c_client,
-			AVR_KEY_EVENT_FIFO_REG_ADDR, 1, next_event);
+	rc = avr_i2c_read(state, AVR_KEY_EVENT_FIFO_REG_ADDR, 1, next_event);
 	pr_debug("%s: avr_i2c_read() returned %d\n", __func__, rc);
-	mutex_unlock(&state->i2c_lock);
 	return rc;
 }
 
@@ -593,17 +618,8 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		int was_down;
 
 		rc = avr_read_event_fifo(state, &scan);
-		if (rc || (scan == AVR_KEY_EVENT_EMPTY)) {
-			/* after receiving an error and a fifo
-			 * empty response, sleep for a while
-			 * because we can read much faster than
-			 * the AVR can toggle the interrupt line
-			 * and reading too fast can cause i2c
-			 * errors because the AVR can't keep up.
-			 */
-			msleep(100);
+		if (rc || (scan == AVR_KEY_EVENT_EMPTY))
 			break;
-		}
 
 		if (scan == AVR_KEY_EVENT_RESET) {
 			/* This is the event we see whenever
@@ -650,19 +666,7 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		pr_err("I2C Error while reading key event queue, "
 		       "disabling IRQ.  No more key events will be "
 		       "generated from front panel.");
-#if 0
 		disable_irq(state->irq_id);
-#else
-		/* this seems to happen if we rotate the dome a lot.
-		 * probably due to the AVR being too busy handling
-		 * rotation encoder interrupts to keep up with i2c
-		 * requests.  it goes away so we'll ignore for now.
-		 * might go with a delayed timer to reenable, but
-		 * more likely we'll want to optimize the AVR code
-		 * to be able to keep up better.
-		 */
-		pr_info("ignoring for now");
-#endif
 	}
 	return IRQ_HANDLED;
 }
@@ -824,7 +828,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	}
 	state->led_buffer_cache->count = state->led_count;
 	state->led_buffer_cache->rgb_triples = state->led_count;
-	state->set_range_vals = (void*)state->led_buffer_cache + rc;
+	state->set_range_vals = (void *)state->led_buffer_cache + rc;
 
 	rc = avr_get_led_mode(state, &state->led_mode);
 	if (rc) {
