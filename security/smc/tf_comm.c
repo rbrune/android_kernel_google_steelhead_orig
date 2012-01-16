@@ -506,8 +506,8 @@ static void tf_get_l2_page_descriptor(
 	struct page *page;
 
 	dprintk(KERN_INFO
-		"%s *l2_page_descriptor=%x vm_flags=%lx\n",
-		__func__, *l2_page_descriptor, vmas->vm_flags);
+		"%s *l2_page_descriptor=%x\n",
+		__func__, *l2_page_descriptor);
 
 	if (*l2_page_descriptor == L2_DESCRIPTOR_FAULT)
 		return;
