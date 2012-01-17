@@ -1214,7 +1214,7 @@ int tf_invoke_client_command(
 				goto error;
 			}
 
-			dprintk(KERN_INFO "new_handle %x", new_handle);
+			dprintk(KERN_INFO "new_handle %p", new_handle);
 			error = ion_phys(connection->ion_client,
 					new_handle,
 					&ion_addr,
@@ -1222,7 +1222,7 @@ int tf_invoke_client_command(
 			if (error) {
 				dprintk(KERN_ERR
 				"%s: unable to convert ion handle "
-				"0x%08X (error code 0x%08X)\n",
+				"%p (error code 0x%08X)\n",
 				__func__,
 				new_handle,
 				error);
@@ -1230,7 +1230,7 @@ int tf_invoke_client_command(
 				goto error;
 			}
 			dprintk(KERN_INFO
-			"%s: handle=0x%08x phys_add=0x%08x length=0x%08x\n",
+			"%s: handle=0x%08x phys_add=0x%08lx length=0x%08x\n",
 			__func__, invoke->params[i].value.a, ion_addr, ion_len);
 
 			invoke->params[i].value.a = (u32) ion_addr;
