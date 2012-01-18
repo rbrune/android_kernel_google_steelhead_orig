@@ -763,6 +763,12 @@ static int _dvfs_scale(struct device *req_dev, struct device *target_dev,
 	/* Disable smartreflex module across voltage and frequency scaling */
 	omap_sr_disable(voltdm);
 
+	/* Lock OPP100 voltage for CORE voltage domain to meet USB
+	 * host timing requirements.
+	 */
+	if (cpu_is_omap44xx() && !strcmp(voltdm->name, "core"))
+		curr_volt = new_volt;
+
 	if (curr_volt == new_volt) {
 		volt_scale_dir = DVFS_VOLT_SCALE_NONE;
 	} else if (curr_volt < new_volt) {
