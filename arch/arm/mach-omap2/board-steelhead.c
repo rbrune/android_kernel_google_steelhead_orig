@@ -1094,6 +1094,34 @@ static struct omapfb_platform_data steelhead_fb_pdata = {
 
 void omap4_steelhead_display_init(void)
 {
+	/* set the clock source for gfx to DPLL_PER, not sure why it's not
+	 * already that way because the OPP definition for gpu_fck
+	 * says to use DPLL_PER, but the default source is DPLL_CORE and
+	 * nothing else appears to set the source.
+	 */
+	struct clk *dpll_per_m7x2_clk;
+	struct clk *gpu_fck_clk;
+
+	dpll_per_m7x2_clk = clk_get(NULL, "dpll_per_m7x2_ck");
+	if (IS_ERR_OR_NULL(dpll_per_m7x2_clk)) {
+		pr_err("%s: failed to fetch dpll_per_m7x2_ck\n",
+		       __func__);
+		goto err_get_dpll_per_m7x2_ck;
+	}
+	gpu_fck_clk = clk_get(NULL, "gpu_fck");
+	if (IS_ERR_OR_NULL(gpu_fck_clk)) {
+		pr_err("%s: failed to fetch gpu_fck\n", __func__);
+		goto err_get_gpu_fck;
+	}
+	if (clk_set_parent(gpu_fck_clk, dpll_per_m7x2_clk) < 0) {
+		pr_err("%s: failed to set gpu_fck to dpll_per_m7x2_ck\n",
+		       __func__);
+	}
+	clk_put(gpu_fck_clk);
+err_get_gpu_fck:
+	clk_put(dpll_per_m7x2_clk);
+err_get_dpll_per_m7x2_ck:
+
 	omap_vram_set_sdram_vram(STEELHEAD_FB_RAM_SIZE, 0);
 	omapfb_set_platform_data(&steelhead_fb_pdata);
 	omap4_steelhead_hdmi_mux_init();
