@@ -117,18 +117,8 @@ static struct omap_opp_def __initdata omap443x_opp_def_list[] = {
 	OPP_INITIALIZER("mpu", "dpll_mpu_ck", "mpu", true, 800000000, OMAP4430_VDD_MPU_OPPTURBO_UV),
 	/* MPU OPP4 - OPP-SB */
 	OPP_INITIALIZER("mpu", "dpll_mpu_ck", "mpu", true, 1008000000, OMAP4430_VDD_MPU_OPPNITRO_UV),
-#ifdef CONFIG_MACH_STEELHEAD
-	/* steelhead has a usb host client that needs the higher voltage,
-	 * but we want the clocks to be able to go lower when the
-	 * perf allows.  so instead of holding a bandwidth constraint
-	 * for opp100, change opp50 to have a higher voltage setting.
-	 */
-	/* L3 OPP1 - OPP50 */
-	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 100000000, OMAP4430_VDD_CORE_OPP100_UV),
-#else
 	/* L3 OPP1 - OPP50 */
 	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 100000000, OMAP4430_VDD_CORE_OPP50_UV),
-#endif
 	/* L3 OPP2 - OPP100, OPP-Turbo, OPP-SB */
 	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 200000000, OMAP4430_VDD_CORE_OPP100_UV),
 	/* IVA OPP1 - OPP50 */
@@ -252,16 +242,7 @@ static struct omap_opp_def __initdata omap446x_opp_def_list[] = {
 	/* MPU OPP4 - OPP-Nitro SpeedBin */
 	OPP_INITIALIZER("mpu", "virt_dpll_mpu_ck", "mpu", false, 1500000000, OMAP4460_VDD_MPU_OPPNITRO_UV),
 	/* L3 OPP1 - OPP50 */
-#ifdef CONFIG_MACH_STEELHEAD
-	/* steelhead has a usb host client that needs the higher voltage,
-	 * but we want the clocks to be able to go lower when the
-	 * perf allows.  so instead of holding a bandwidth constraint
-	 * for opp100, change opp50 to have a higher voltage setting.
-	 */
-	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 100000000, OMAP4460_VDD_CORE_OPP100_UV),
-#else
 	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 100000000, OMAP4460_VDD_CORE_OPP50_UV),
-#endif
 	/* L3 OPP2 - OPP100 */
 	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 200000000, OMAP4460_VDD_CORE_OPP100_UV),
 	OPP_INITIALIZER("l3_main_1", "virt_l3_ck", "core", true, 200000000, OMAP4460_VDD_CORE_OPP100_OV_UV),
