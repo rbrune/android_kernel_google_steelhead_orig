@@ -43,12 +43,21 @@ extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
 extern void steelhead_set_counter_slew_rate(s32 correction);
 
-#define STEELHEAD_REV_ALPHA   0x0
-#define STEELHEAD_REV_EVT     0x1
-#define STEELHEAD_REV_EVT2    0x2
-#define STEELHEAD_REV_DVT     0x3
-#define STEELHEAD_REV_DVT1_5  0x4
-#define STEELHEAD_REV_DVT2    0x5
+enum {
+	STEELHEAD_REV_ALPHA  = 0x0,
+	STEELHEAD_REV_EVT    = 0x1,
+	STEELHEAD_REV_EVT2   = 0x2,
+	STEELHEAD_REV_DVT    = 0x3,
+	STEELHEAD_REV_DVT1_5 = 0x4,
+	STEELHEAD_REV_DVT2   = 0x5,
+	STEELHEAD_REV_DVT3   = 0x6,
+	STEELHEAD_REV_DVT4   = 0x7,
+	STEELHEAD_REV_PVT    = 0x8,
+	STEELHEAD_REV_PROD   = 0x9,
+	STEELHEAD_REV_PROD1  = 0xA,
+};
+
+
 extern int steelhead_hw_rev;
 
 extern void steelhead_set_tas5713_interface_en(int enabled);

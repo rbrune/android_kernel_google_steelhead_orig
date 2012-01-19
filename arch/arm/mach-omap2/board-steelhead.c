@@ -117,6 +117,11 @@ static const char const *omap4_steelhead_hw_name[] = {
 	[STEELHEAD_REV_DVT]    = "Steelhead DVT",
 	[STEELHEAD_REV_DVT1_5] = "Steelhead DVT1.5",
 	[STEELHEAD_REV_DVT2]   = "Steelhead DVT2",
+	[STEELHEAD_REV_DVT3]   = "Steelhead DVT3",
+	[STEELHEAD_REV_DVT4]   = "Steelhead DVT4",
+	[STEELHEAD_REV_PVT]    = "Steelhead PVT",
+	[STEELHEAD_REV_PROD]   = "Steelhead PROD",
+	[STEELHEAD_REV_PROD1]  = "Steelhead PROD1",
 };
 
 static const char *omap4_steelhead_hw_rev_name(void)
