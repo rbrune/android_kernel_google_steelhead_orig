@@ -26,6 +26,7 @@
 
 #define DM_TIMER_ID 8
 #define DM_TIMER_CLK OMAP_TIMER_SRC_SYS_CLK
+#define DM_TIMER_CAPTURE_PIN_NAME "dpm_emu16.dmtimer8_pwm_evt"
 
 struct counter_state {
 	u32 upper;
@@ -628,6 +629,10 @@ void __init steelhead_platform_init_counter(void)
 	rollover_check_timer.expires  = jiffies + rollover_check_timer_period;
 	add_timer(&rollover_check_timer);
 
+	/* Our GP timer should be fully set up now.  Go ahead and start it up.
+	 */
+	omap_dm_timer_set_load_start(counter_timer, 1, 0);
+
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	/* If we are set up to monitor the local clock rate for debugging
 	 * purposes from an externally synchronized event, then set up capture
@@ -650,14 +655,23 @@ void __init steelhead_platform_init_counter(void)
 					"interrupt (status = %d)\n", status);
 			BUG_ON(1);
 		}
-		omap_dm_timer_set_int_enable(counter_timer,
+
+		/* NOTE: do not use omap_dm_timer_set_int_enable.  TI's timer
+		 * libraries are super broken right now (see comments up near
+		 * the VCXO control code) and will disable the timer
+		 * unconditionally after enabling interrupts which causes all
+		 * sorts of other trouble.
+		 */
+		timer_write_reg(counter_timer, TIMER_INT_EN_OFFSET,
 				OMAP_TIMER_INT_CAPTURE);
+		timer_write_reg(counter_timer, TIMER_WAKEUP_EN_OFFSET,
+				OMAP_TIMER_INT_CAPTURE);
+
+		/* enable the capture interrupt pin as an input */
+		omap_mux_init_signal(DM_TIMER_CAPTURE_PIN_NAME,
+				OMAP_PIN_INPUT_PULLDOWN);
 	}
 #endif
-
-	/* Our GP timer should be fully set up now.  Go ahead and start it up.
-	 */
-	omap_dm_timer_start(counter_timer);
 
 	/* Now setup the PWM we use to control the VCXO used to slew the main
 	 * system oscillator. */
