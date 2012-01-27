@@ -26,6 +26,7 @@
 #include "clock.h"
 #include "cm-regbits-24xx.h"
 #include "cm-regbits-34xx.h"
+#include "cm-regbits-44xx.h"
 
 /* DPLL rate rounding: minimum DPLL multiplier, divider values */
 #define DPLL_MIN_MULTIPLIER		2
@@ -196,6 +197,13 @@ void omap2_init_dpll_parent(struct clk *clk)
 		    v == OMAP4XXX_EN_DPLL_FRBYPASS ||
 		    v == OMAP4XXX_EN_DPLL_MNBYPASS)
 			clk_reparent(clk, dd->clk_bypass);
+
+		/* Disable drift guard */
+		v = __raw_readl(dd->control_reg);
+		if (v & OMAP4430_DPLL_DRIFTGUARD_EN_MASK) {
+			v &= ~OMAP4430_DPLL_DRIFTGUARD_EN_MASK;
+			__raw_writel(v, dd->control_reg);
+		}
 	}
 	return;
 }
