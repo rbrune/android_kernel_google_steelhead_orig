@@ -835,7 +835,7 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		/* ignore failure to allow updater to work */
 		pr_err("%s: failed to get led mode\n", __func__);
 		rc = 0;
-		state->led_mode = AVR_LED_MODE_BOOT_ANIMATION;
+		state->led_mode = AVR_LED_MODE_HOST_AUTO_COMMIT;
 	}
 
 	pr_info("Steelhead AVR Driver loaded.\n");
@@ -847,7 +847,6 @@ error:
 	return rc;
 }
 
-
 static int __devexit avr_remove(struct i2c_client *client)
 {
 	struct avr_driver_state *state = i2c_get_clientdata(client);
@@ -855,11 +854,19 @@ static int __devexit avr_remove(struct i2c_client *client)
 	/* Switch back to boot animation mode before we clean out our state and
 	 * finish unloading the driver.
 	 */
-	avr_led_set_mode(state, AVR_LED_MODE_BOOT_ANIMATION);
+	avr_led_set_mode(state, AVR_LED_MODE_POWER_UP_ANIMATION);
 
 	/* cleanup our state and get out. */
 	cleanup_driver_state(state);
 	return 0;
+}
+
+static void avr_shutdown(struct i2c_client *client)
+{
+	struct avr_driver_state *state = i2c_get_clientdata(client);
+
+	/* Switch back to power up animation mode as device reboots. */
+	avr_led_set_mode(state, AVR_LED_MODE_POWER_UP_ANIMATION);
 }
 
 static struct i2c_device_id avr_idtable[] = {
@@ -879,7 +886,7 @@ static struct i2c_driver avr_driver = {
 	.remove = __devexit_p(avr_remove),
 
 	/* TODO(johngro) implement these optional power management routines. */
-	.shutdown = NULL,
+	.shutdown = avr_shutdown,
 	.suspend = NULL,
 	.resume = NULL,
 };
