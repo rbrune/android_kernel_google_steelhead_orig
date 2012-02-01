@@ -1166,6 +1166,8 @@ static int steelhead_reboot_notifier_handler(struct notifier_block *this,
 			/* do special reboot requests if needed */
 			if (!strcmp(_cmd, "recovery"))
 				strcpy(sar_free_p, "recovery");
+			else if (!strcmp(_cmd, "recovery:wipe_data"))
+				strcpy(sar_free_p, "recovery:wipe_data");
 			else if (!strcmp(_cmd, "bootloader"))
 				strcpy(sar_free_p, "bootloader");
 		}
