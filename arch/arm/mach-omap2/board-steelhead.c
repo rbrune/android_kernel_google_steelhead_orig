@@ -146,7 +146,11 @@ static void __init omap4_steelhead_init_hw_rev(void)
 #define PHYS_ADDR_DUCATI_SIZE				(SZ_1M * 105)
 #define OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
 #define OMAP_STEELHEAD_ION_HEAP_TILER_SIZE		(SZ_1M * 81)
-#define OMAP_STEELHEAD_ION_HEAP_NONSECURE_TILER_SIZE	(SZ_1M * 15)
+/* We need more than Tuna because our orientation is landscape
+ * and the SGX alignment requirements imposed in omaplfb_displayclass.c
+ * causes the memory requirements to be greater.
+ */
+#define OMAP_STEELHEAD_ION_HEAP_NONSECURE_TILER_SIZE	(SZ_1M * 18)
 
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - \
