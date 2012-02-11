@@ -34,8 +34,7 @@ const struct lpddr2_timings lpddr2_elpida_timings_400_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50,
-	.omap_emif_self_refresh_time = 80,
+	.tFAW		= 50
 };
 
 const struct lpddr2_timings lpddr2_elpida_timings_333_mhz = {
@@ -58,8 +57,7 @@ const struct lpddr2_timings lpddr2_elpida_timings_333_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50,
-	.omap_emif_self_refresh_time = 80,
+	.tFAW		= 50
 };
 
 const struct lpddr2_timings lpddr2_elpida_timings_200_mhz = {
@@ -82,8 +80,7 @@ const struct lpddr2_timings lpddr2_elpida_timings_200_mhz = {
 	.tZQINIT	= 1000,
 	.tDQSCKMAXx2	= 11,
 	.tRASmax	= 70,
-	.tFAW		= 50,
-	.omap_emif_self_refresh_time = 80,
+	.tFAW		= 50
 };
 
 const struct lpddr2_min_tck lpddr2_elpida_min_tck = {
