@@ -261,4 +261,5 @@ config AVERAGE
 	  functions require Y here.
 
 	  If unsure, say N.
+
 endmenu

@@ -152,9 +152,6 @@
 #include "prm44xx.h"
 #include "mux.h"
 #include "pm.h"
-#ifdef CONFIG_MACH_TUNA
-#include "board-tuna.h"
-#endif
 
 /* Maximum microseconds to wait for OMAP module to softreset */
 #define MAX_MODULE_SOFTRESET_WAIT	10000
@@ -2132,27 +2129,6 @@ void __iomem *omap_hwmod_get_mpu_rt_va(struct omap_hwmod *oh)
 		return NULL;
 
 	return oh->_mpu_rt_va;
-}
-
-/**
- * omap_hwmod_get_clk - returns pointer to this module's struct clk
- * @oh: struct omap_hwmod *
- *
- * Return the struct clk pointer associated with the OMAP module
- * Returns NULL on error, or a struct clk * on success.
- */
-struct clk *omap_hwmod_get_clk(struct omap_hwmod *oh)
-{
-	if (!oh)
-		return NULL;
-
-	if (oh->_int_flags & _HWMOD_NO_MPU_PORT)
-		return NULL;
-
-	if (oh->_state == _HWMOD_STATE_UNKNOWN)
-		return NULL;
-
-	return oh->_clk;
 }
 
 /**

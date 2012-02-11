@@ -40,7 +40,6 @@
 #define OMAP_TIMER_SRC_SYS_CLK			0x00
 #define OMAP_TIMER_SRC_32_KHZ			0x01
 #define OMAP_TIMER_SRC_EXT_CLK			0x02
-#define OMAP_TIMER_SRC_ABE_SYSCLK		0x02
 
 /* timer interrupt enable bits */
 #define OMAP_TIMER_INT_CAPTURE			(1 << 2)

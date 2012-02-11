@@ -37,7 +37,7 @@
 #define BT_RESET_GPIO		52
 #define BT_WAKE_GPIO		45
 #define BT_HOST_WAKE_GPIO	47
-#else
+#elif defined(CONFIG_MACH_TUNA)
 #define BT_REG_GPIO		103
 #define BT_RESET_GPIO		42
 #define BT_WAKE_GPIO		27

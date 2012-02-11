@@ -600,7 +600,6 @@ void __init steelhead_platform_init_counter(void)
 	BUG_ON(IS_ERR_OR_NULL(counter_timer));
 
 	omap_dm_timer_set_source(counter_timer, DM_TIMER_CLK);
-	omap_dm_timer_set_load(counter_timer, 1, 0);
 
 	steelhead_clock = omap_dm_timer_get_fclk(counter_timer);
 	BUG_ON(IS_ERR_OR_NULL(steelhead_clock));
@@ -611,10 +610,10 @@ void __init steelhead_platform_init_counter(void)
 	 * called frequently enough to detect rollover.
 	 */
 	counter_state.upper = 0;
-	counter_state.lower_last = get_counter_lower();
+	counter_state.lower_last = 0;
 #ifdef CONFIG_AAH_TIMESYNC_DEBUG
 	tsdebug_counter_state.upper = 0;
-	tsdebug_counter_state.lower_last = get_counter_lower();
+	tsdebug_counter_state.lower_last = 0;
 #endif
 
 	/* Just to be safe, check for rollover every 1/4 of a 32 bit counter

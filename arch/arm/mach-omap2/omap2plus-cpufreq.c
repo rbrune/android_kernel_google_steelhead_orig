@@ -52,8 +52,6 @@ static DEFINE_PER_CPU(struct lpj_info, lpj_ref);
 static struct lpj_info global_lpj_ref;
 #endif
 
-#define THROTTLE_DELAY_MS 10000
-
 static struct cpufreq_frequency_table *freq_table;
 static atomic_t freq_table_users = ATOMIC_INIT(0);
 static struct clk *mpu_clk;
