@@ -656,6 +656,31 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 			/* clear EDID and mode on disable only */
 			hdmi.edid_set = false;
 			hdmi.custom_set = 0;
+
+			/* clear the HDMI mode back to DVI.  The audio subsystem
+			 * uses the hdmi.mode to determine if audio support is
+			 * present.  We don't want the audio system to decide
+			 * that we have audio support when the display is
+			 * disabled.  Right now, the audio subsystem calls
+			 * omapdss_hdmi_get_mode() and if its return value is
+			 * non-zero, it decides that the system supports audio.
+			 * There are only two values used for the mode, they are
+			 * HDMI_DVI (which is 0) and HDMI_HDMI (which is 1).  By
+			 * setting this back to HDMI_DVI when the display is
+			 * enabled, we can be sure that the audio subsystem will
+			 * be told that there is no support for audio while the
+			 * display is disabled.
+			 *
+			 * TODO: need to contact TI regarding this method for
+			 * determining audio support.  It is not a guarantee
+			 * that a downstream device supports audio just because
+			 * its interconnect is HDMI.  Also, just because audio
+			 * is supported does not imply that all audio modes are
+			 * supported and valid.  There is a lot of room for
+			 * improvement here.
+			 */
+			hdmi.mode = HDMI_DVI;
+
 			pr_info("hdmi: clearing EDID info\n");
 		}
 	regulator_disable(hdmi.hdmi_reg);
