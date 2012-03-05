@@ -31,6 +31,8 @@
 
 #include <video/hdmi_ti_4xxx_ip.h>
 
+#define MAX_EDID_READ_ATTEMPTS 5
+
 static struct {
 	struct mutex hdmi_lock;
 	struct switch_dev hpd_switch;
@@ -170,22 +172,67 @@ err:
 }
 
 enum {
-	HPD_STATE_OFF,
-	HPD_STATE_START,
-	HPD_STATE_EDID_TRYLAST = HPD_STATE_START + 5,
+	HPD_STATE_RESET,
+	HPD_STATE_CHECK_PLUG_STATE,
+	HPD_STATE_CHECK_EDID,
+	HPD_STATE_DONE_ENABLED,
+	HPD_STATE_DONE_DISABLED,
 };
 
+static DEFINE_SPINLOCK(hpd_state_lock);
 static struct hpd_worker_data {
 	struct delayed_work dwork;
-	atomic_t state;
+	int state;
+	int edid_reads;
 } hpd_work;
 static struct workqueue_struct *my_workq;
+
+static int hdmi_hpd_set_state(int target_state, int resched_time) {
+	unsigned long flags;
+	int ret = 0;
+	spin_lock_irqsave(&hpd_state_lock, flags);
+
+	/* If the state machine is attempting to advance to anything past
+	 * CHECK_PLUG_STATE, but we are currently in the RESET state, then we
+	 * must have been reset by an HPD IRQ while conducting some long running
+	 * operation in the worker callback.  There should already be another
+	 * worker callback in flight, so we should do nothing and just get out
+	 * of the pending callback's way.
+	 */
+	if ((hpd_work.state == HPD_STATE_RESET) &&
+			(target_state >= HPD_STATE_CHECK_EDID)) {
+		ret = -1;
+		goto done;
+	}
+
+	__cancel_delayed_work(&hpd_work.dwork);
+	hpd_work.state = target_state;
+	if (resched_time >= 0)
+		queue_delayed_work(my_workq,
+				&hpd_work.dwork,
+				msecs_to_jiffies(resched_time));
+
+done:
+	spin_unlock_irqrestore(&hpd_state_lock, flags);
+	return ret;
+}
+
+static int hdmi_hpd_get_state(void) {
+	unsigned long flags;
+	int ret;
+
+	spin_lock_irqsave(&hpd_state_lock, flags);
+	ret = hpd_work.state;
+	spin_unlock_irqrestore(&hpd_state_lock, flags);
+
+	return ret;
+}
 
 static void hdmi_hotplug_detect_worker(struct work_struct *work)
 {
 	struct hpd_worker_data *d = container_of(work, typeof(*d), dwork.work);
 	struct omap_dss_device *dssdev = NULL;
-	int state = atomic_read(&d->state);
+	int state;
 
 	int match(struct omap_dss_device *dssdev, void *arg)
 	{
@@ -193,12 +240,20 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 	}
 	dssdev = omap_dss_find_device(NULL, match);
 
-	pr_err("in hpd work %d, state=%d\n", state, dssdev->state);
 	if (dssdev == NULL)
 		return;
 
 	mutex_lock(&hdmi.hdmi_lock);
-	if (state == HPD_STATE_OFF) {
+
+	state = hdmi_hpd_get_state();
+	pr_info("in hpd work state %d, dssdev state %d, hpd state %d\n",
+			state, dssdev->state, hdmi_get_current_hpd());
+
+	switch (state) {
+	case HPD_STATE_RESET:
+		/* Were we just reset?  If so, shut everything down, then
+		 * schedule a check of the plug state in the near future.
+		 */
 		switch_set_state(&hdmi.hpd_switch, 0);
 		switch_set_state(&hdmi.hdmi_audio_switch, 0);
 		memset(&dssdev->panel.audspecs, 0,
@@ -208,48 +263,92 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 			dssdev->driver->disable(dssdev);
 			mutex_lock(&hdmi.hdmi_lock);
 		}
-		goto done;
-	} else {
-		if (state == HPD_STATE_START) {
+
+		hdmi_hpd_set_state(HPD_STATE_CHECK_PLUG_STATE, 60);
+		break;
+
+	case HPD_STATE_CHECK_PLUG_STATE:
+		if (hdmi_get_current_hpd()) {
+			/* Looks like there is something plugged in.
+			 * Enable the DSS driver and get ready to read the
+			 * sink's EDID information.
+			 */
+			hpd_work.edid_reads = 0;
+
 			mutex_unlock(&hdmi.hdmi_lock);
 			dssdev->driver->enable(dssdev);
 			mutex_lock(&hdmi.hdmi_lock);
-		} else if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE ||
-			   hdmi.hpd_switch.state) {
-			/* powered down after enable - skip EDID read */
-			goto done;
-		} else if (hdmi_read_edid(&dssdev->panel.timings)) {
-			/* get monspecs from edid */
-			hdmi_get_monspecs(&dssdev->panel.monspecs);
 
-			/* get audio support from edid */
-			hdmi_get_audspecs(&dssdev->panel.audspecs);
-
-			pr_info("panel size %d by %d\n",
-					dssdev->panel.monspecs.max_x,
-					dssdev->panel.monspecs.max_y);
-			dssdev->panel.width_in_um =
-					dssdev->panel.monspecs.max_x * 10000;
-			dssdev->panel.height_in_um =
-					dssdev->panel.monspecs.max_y * 10000;
-			switch_set_state(&hdmi.hpd_switch, 1);
-			goto done;
-		} else if (state == HPD_STATE_EDID_TRYLAST){
-			pr_info("Failed to read EDID after %d times. Giving up.", state - HPD_STATE_START);
-			goto done;
+			hdmi_hpd_set_state(HPD_STATE_CHECK_EDID, 60);
+		} else {
+			/* nothing plugged in, so we are finished.  Go
+			 * to the DONE_DISABLED state and stay
+			 * there until the next HPD event. */
+			hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
 		}
-		if (atomic_add_unless(&d->state, 1, HPD_STATE_OFF))
-			queue_delayed_work(my_workq, &d->dwork, msecs_to_jiffies(60));
+		break;
+
+	case HPD_STATE_CHECK_EDID:
+		if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
+			/* powered down after enable - skip EDID read */
+			hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
+			break;
+		}
+
+		if (!hdmi_read_edid(&dssdev->panel.timings)) {
+			/* Failed to read EDID.  If we still have retry attempts
+			 * left, schedule another attempt.  Otherwise give up
+			 * and just go to the disabled state.
+			 */
+			hpd_work.edid_reads++;
+			if (hpd_work.edid_reads >= MAX_EDID_READ_ATTEMPTS) {
+				pr_info("Failed to read EDID after %d times."
+				        " Giving up.\n", hpd_work.edid_reads);
+				hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
+			} else {
+				hdmi_hpd_set_state(HPD_STATE_CHECK_EDID, 60);
+			}
+			break;
+		}
+
+		/* get monspecs from edid */
+		hdmi_get_monspecs(&dssdev->panel.monspecs);
+
+		/* get audio support from edid */
+		hdmi_get_audspecs(&dssdev->panel.audspecs);
+
+		pr_info("panel size %d by %d\n",
+				dssdev->panel.monspecs.max_x,
+				dssdev->panel.monspecs.max_y);
+		dssdev->panel.width_in_um =
+				dssdev->panel.monspecs.max_x * 10000;
+		dssdev->panel.height_in_um =
+				dssdev->panel.monspecs.max_y * 10000;
+
+		/* Finally, if we have not already been reset by another hot
+		 * plug event, set the switch which informs the user mode code
+		 * that we are plugged and ready to have our video mode
+		 * configured.
+		 */
+		if (!hdmi_hpd_set_state(HPD_STATE_DONE_ENABLED, -1))
+			switch_set_state(&hdmi.hpd_switch, 1);
+
+		break;
+
+	default:
+		/* We should not have scheduled work in any other states.  Log a
+		 * warning and ignore the work. */
+		pr_warn("HPD worker scheduled unexpected state %d",
+				hpd_work.state);
+		break;
 	}
-done:
+
 	mutex_unlock(&hdmi.hdmi_lock);
 }
 
 int hdmi_panel_hpd_handler(int hpd)
 {
-	__cancel_delayed_work(&hpd_work.dwork);
-	atomic_set(&hpd_work.state, hpd ? HPD_STATE_START : HPD_STATE_OFF);
-	queue_delayed_work(my_workq, &hpd_work.dwork, msecs_to_jiffies(hpd ? 40 : 30));
+	hdmi_hpd_set_state(HPD_STATE_RESET, 40);
 	return 0;
 }
 
