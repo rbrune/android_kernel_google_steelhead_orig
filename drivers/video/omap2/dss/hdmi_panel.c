@@ -34,6 +34,7 @@
 static struct {
 	struct mutex hdmi_lock;
 	struct switch_dev hpd_switch;
+	struct switch_dev hdmi_audio_switch;
 } hdmi;
 
 static ssize_t hdmi_deepcolor_show(struct device *dev,
@@ -199,6 +200,9 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 	mutex_lock(&hdmi.hdmi_lock);
 	if (state == HPD_STATE_OFF) {
 		switch_set_state(&hdmi.hpd_switch, 0);
+		switch_set_state(&hdmi.hdmi_audio_switch, 0);
+		memset(&dssdev->panel.audspecs, 0,
+				sizeof(dssdev->panel.audspecs));
 		if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
 			mutex_unlock(&hdmi.hdmi_lock);
 			dssdev->driver->disable(dssdev);
@@ -217,6 +221,10 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 		} else if (hdmi_read_edid(&dssdev->panel.timings)) {
 			/* get monspecs from edid */
 			hdmi_get_monspecs(&dssdev->panel.monspecs);
+
+			/* get audio support from edid */
+			hdmi_get_audspecs(&dssdev->panel.audspecs);
+
 			pr_info("panel size %d by %d\n",
 					dssdev->panel.monspecs.max_x,
 					dssdev->panel.monspecs.max_y);
@@ -299,6 +307,42 @@ static int hdmi_get_modedb(struct omap_dss_device *dssdev,
 	return modedb_len;
 }
 
+static int hdmi_set_mode(struct omap_dss_device *dssdev,
+			 struct fb_videomode *vm)
+{
+	int ret = omapdss_hdmi_display_set_mode(dssdev, vm);
+
+	mutex_lock(&hdmi.hdmi_lock);
+
+	/* if we succeeded in setting our display mode, and our display is
+	 * active, and our edid reports that we have support for any audio modes
+	 * at all, then signal that fact to the user mode level of code.
+	 *
+	 * TODO: There is still a lot about audio support which could be made
+	 * better.  For example, the audio driver does not bother to ask which
+	 * audio modes are supported when deciding to enable or not.  In fact,
+	 * it only checks to see if the selected video mode is an "hdmi video
+	 * mode" or not.  Its possible for an HDMI panel to accept a VESA/DVI
+	 * video mode and still support audio.  Likewise, just because a panel
+	 * is using HDMI does not mean that the panel must support audio.
+	 * Finally, just because the panel supports a particual audio mode does
+	 * not mean that the mode can be driven at all times.  Some high bitrate
+	 * audio modes can only be supported if the chosen pixel clock is high
+	 * enough.  All of these factors should be taken into account by the
+	 * HDMI audio driver when it decides which audio modes are allowed and
+	 * which ones are not.  Currently none of this is taken into account.
+	 */
+	if (!ret &&
+	   (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) &&
+	   (dssdev->panel.audspecs.basic_audio_support ||
+	    dssdev->panel.audspecs.valid_mode_cnt))
+		switch_set_state(&hdmi.hdmi_audio_switch, 1);
+
+	mutex_unlock(&hdmi.hdmi_lock);
+
+	return ret;
+}
+
 static struct omap_dss_driver hdmi_driver = {
 	.probe		= hdmi_panel_probe,
 	.remove		= hdmi_panel_remove,
@@ -310,7 +354,7 @@ static struct omap_dss_driver hdmi_driver = {
 	.set_timings	= hdmi_set_timings,
 	.check_timings	= hdmi_check_timings,
 	.get_modedb	= hdmi_get_modedb,
-	.set_mode	= omapdss_hdmi_display_set_mode,
+	.set_mode	= hdmi_set_mode,
 	.driver			= {
 		.name   = "hdmi_panel",
 		.owner  = THIS_MODULE,
@@ -320,8 +364,12 @@ static struct omap_dss_driver hdmi_driver = {
 int hdmi_panel_init(void)
 {
 	mutex_init(&hdmi.hdmi_lock);
+
 	hdmi.hpd_switch.name = "hdmi";
 	switch_dev_register(&hdmi.hpd_switch);
+
+	hdmi.hdmi_audio_switch.name = "hdmi_audio";
+	switch_dev_register(&hdmi.hdmi_audio_switch);
 
 	my_workq = create_singlethread_workqueue("hdmi_hotplug");
 	INIT_DELAYED_WORK(&hpd_work.dwork, hdmi_hotplug_detect_worker);

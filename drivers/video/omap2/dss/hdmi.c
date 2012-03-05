@@ -256,6 +256,146 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 	specs->modedb_len = j;
 }
 
+#define EDID_BLK_SIZE 0x80
+static void hdmi_parse_cea_audio_blocks(struct omap_hdmi_audio_modes *specs,
+					const u8* edid)
+{
+	u8 parse_offset;
+	u8 data_block_end;
+
+	/* At this point, we know that we are parsing an EDID CEA Extension
+	 * block.  Byte index 2 of the header should mark where the CEA data
+	 * blocks finish and where the VESA detailed timing descriptors start.
+	 * We are looking for CEA Audio Data blocks, so don't bother to parse
+	 * past the end of the data block region.
+	 */
+	parse_offset = 4;
+	data_block_end = edid[2];
+	if (data_block_end > EDID_BLK_SIZE)
+		data_block_end = EDID_BLK_SIZE;
+
+	while (parse_offset < data_block_end) {
+		/* Read the tag and length of the data block. */
+		u8 tag = (edid[parse_offset] >> 5) & 0x7;
+		u8 len = (edid[parse_offset] & 0x1F) + 1;
+		const u8* desc;
+		int desc_cnt;
+
+		/* Sanity check length */
+		if ((parse_offset + len) > data_block_end) {
+			pr_warn("Malformed data block detected in EDID CEA "
+				"Extension block at offset %d in the extension "
+			        "block.  Block length (%d) exceeds end of "
+				"extension section (%d)",
+				parse_offset, len, data_block_end);
+			break;
+		}
+
+		/* 0x1 is the tag for an audio data block */
+		if (tag != 0x01) {
+			parse_offset += len;
+			continue;
+		}
+
+		desc = edid + parse_offset + 1;
+		desc_cnt = (len - 1) / 3;
+
+		while (desc_cnt && (specs->valid_mode_cnt <
+					OMAP_MAX_HDMI_AUDIO_MODES)) {
+			struct cea861_short_audio_descriptor* d;
+			d = specs->audio_modes + specs->valid_mode_cnt;
+
+			/* audio code are bits[3, 6] of byte index 0 */
+			d->code = (desc[0] >> 3) & 0xF;
+
+			/* max channels - 1 are bits [0, 2] of byte index 0.  A
+			 * raw value of 0 indicates unknown. */
+			d->max_channels = desc[0] & 0x7;
+			if (d->max_channels)
+				d->max_channels++;
+
+			/* sample rate bitfield is made of bits[0, 6] of
+			 * byte index 1. */
+			d->sample_rates = desc[1] & 0x7F;
+
+			/* if the audio code is in the range [2, 8], then byte
+			 * index 2 indicated the max bit rate of the compressed
+			 * audio in kbps divided by 8 */
+			if ((d->code >= CEA861_AUDIO_CODE_AC3) &&
+			    (d->code <= CEA861_AUDIO_CODE_ATRAC))
+			    d->max_bitrate = ((u32)desc[2]) * 8;
+
+			/* Finally, stash the raw value of byte index 2 in the
+			 * structure.  It can contain format specific
+			 * information for audio codes > 8 */
+			d->extra_data = desc[2];
+
+			/* advance to the next descriptor */
+			specs->valid_mode_cnt++;
+			desc += 3;
+			desc_cnt--;
+		}
+
+		parse_offset += len;
+	}
+}
+
+void hdmi_get_audspecs(struct omap_hdmi_audio_modes *specs)
+{
+	u32 blk_offset;
+
+	if (!specs)
+		return;
+
+	memset(specs, 0, sizeof(*specs));
+
+	if (!hdmi.edid_set)
+		return;
+
+	/* Search our EDID structure for valid CEA Extensions blocks.  For each
+	 * CEA Extension block, search for and parse Audio Data Blocks which
+	 * will contain CEA Short Audio Descriptors.
+	 *
+	 * EDID block 0 should always be a VESA block, so we should start
+	 * looking for CEA Extension blocks at block 1.
+	 */
+	for ( blk_offset =  EDID_BLK_SIZE;
+	     (blk_offset +  EDID_BLK_SIZE) <= HDMI_EDID_MAX_LENGTH;
+	      blk_offset += EDID_BLK_SIZE) {
+		const u8* edid = ((u8*)hdmi.edid) + blk_offset;
+
+		/* Is this a CEA Extension?  If so, its tag will be 0x02. */
+		if (edid[0] != 0x02)
+			continue;
+
+		/* We only understand CEA Extension block versions 1-3.  If this
+		 * is a version 2 or version 3 extension block, it will have a
+		 * flags field which (among other things) will indicate whether
+		 * or not basic audio support is present.
+		 */
+		switch (edid[1]) {
+			/* V1, no flags data. */
+			case 0x01:
+				break;
+
+			/* V[23], check basic audio flag. */
+			case 0x02:
+			case 0x03:
+				/* bit 6 of the flags field indicates basic
+				 * audio support. */
+				if (edid[3] & 0x40)
+					specs->basic_audio_support = 1;
+				break;
+
+			/* unknown version, skip it. */
+			default:
+				continue;
+		}
+
+		hdmi_parse_cea_audio_blocks(specs, edid);
+	}
+}
+
 u8 *hdmi_read_edid(struct omap_video_timings *dp)
 {
 	int ret = 0, i;

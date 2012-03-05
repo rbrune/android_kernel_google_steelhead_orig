@@ -547,6 +547,7 @@ int omapdss_hdmi_get_deepcolor(void);
 void omapdss_hdmi_set_deepcolor(int val);
 int hdmi_get_current_hpd(void);
 void hdmi_get_monspecs(struct fb_monspecs *specs);
+void hdmi_get_audspecs(struct omap_hdmi_audio_modes *specs);
 u8 *hdmi_read_edid(struct omap_video_timings *);
 
 int hdmi_panel_init(void);
