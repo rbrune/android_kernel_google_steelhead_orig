@@ -1182,9 +1182,9 @@ static OMAPLFB_ERROR OMAPLFBInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 		psPVRFBInfo->ulHeight = psLINFBInfo->var.yres;
 		psPVRFBInfo->ulByteStride = PAGE_ALIGN(psPVRFBInfo->ulWidth * psPVRFBInfo->uiBytesPerPixel);
 		w = psPVRFBInfo->ulByteStride >> PAGE_SHIFT;
-
 		/* this is an "effective" FB size to get correct number of buffers */
-		psPVRFBInfo->ulFBSize = sAllocData.h * n * psPVRFBInfo->ulByteStride;
+		psPVRFBInfo->ulFBSize = sAllocData.h * n *
+		(psPVRFBInfo->ulByteStride + 32-(psLINFBInfo->var.xres%32));
 		psPVRFBInfo->psPageList = kzalloc(w * n * psPVRFBInfo->ulHeight * sizeof(*psPVRFBInfo->psPageList), GFP_KERNEL);
 		if (!psPVRFBInfo->psPageList)
 		{
