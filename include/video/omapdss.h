@@ -622,6 +622,8 @@ struct omap_dss_device {
 
 		u32 width_in_um;
 		u32 height_in_um;
+		u32 fb_width_in_pixels;
+		u32 fb_height_in_pixels;
 	} panel;
 
 	struct {
@@ -721,6 +723,8 @@ struct omap_dss_driver {
 	/* for wrapping around state changes */
 	void (*disable_orig)(struct omap_dss_device *display);
 	int (*enable_orig)(struct omap_dss_device *display);
+	void (*get_fb_resolution)(struct omap_dss_device *dssdev,
+			u16 *xres, u16 *yres);
 };
 
 int omap_dss_register_driver(struct omap_dss_driver *);
