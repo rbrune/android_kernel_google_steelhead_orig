@@ -510,7 +510,13 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 		dssdev->panel.timings.y_res);
 
 	if (!hdmi.custom_set) {
-		struct fb_videomode vesa_vga = vesa_modes[4];
+		u32 hdmi_code = 4;
+		struct fb_videomode vesa_vga = vesa_modes[hdmi_code];
+
+		hdmi_code = dssdev->panel.hdmi_default_cea_code;
+		if (hdmi_code != 0 && hdmi_code < CEA_MODEDB_SIZE)
+			vesa_vga = cea_modes[hdmi_code];
+
 		hdmi_set_timings(&vesa_vga, false);
 	}
 

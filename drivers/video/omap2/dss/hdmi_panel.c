@@ -69,17 +69,12 @@ static int hdmi_panel_probe(struct omap_dss_device *dssdev)
 	dssdev->panel.config = OMAP_DSS_LCD_TFT |
 			OMAP_DSS_LCD_IVS | OMAP_DSS_LCD_IHS;
 
-	/*
-	 * Initialize the timings to 640 * 480
-	 * This is only for framebuffer update not for TV timing setting
-	 * Setting TV timing will be done only on enable
-	 */
-	dssdev->panel.timings.x_res = 640;
-	dssdev->panel.timings.y_res = 480;
-
 	/* sysfs entry to provide user space control to set deepcolor mode */
 	if (device_create_file(&dssdev->dev, &dev_attr_deepcolor))
 		DSSERR("failed to create sysfs file\n");
+	if (dssdev->panel.timings.x_res == 0)
+		dssdev->panel.timings = (struct omap_video_timings)
+			{640, 480, 31746, 128, 24, 29, 9, 40, 2};
 
 	DSSDBG("hdmi_panel_probe x_res= %d y_res = %d\n",
 		dssdev->panel.timings.x_res,
@@ -405,6 +400,36 @@ static int hdmi_get_modedb(struct omap_dss_device *dssdev,
 	memcpy(modedb, specs->modedb, sizeof(*modedb) * modedb_len);
 	return modedb_len;
 }
+static void hdmi_get_resolution(struct omap_dss_device *dssdev,
+			       u16 *xres, u16 *yres)
+{
+	/*
+	 * Initialize the timings to 640 * 480
+	 * This is only for framebuffer update not for TV timing setting
+	 * Setting TV timing will be done only on enable
+	 */
+	if (dssdev->panel.timings.x_res == 0) {
+		*xres = 640;
+		*yres = 480;
+	} else {
+		*xres = dssdev->panel.timings.x_res;
+		*yres = dssdev->panel.timings.y_res;
+	}
+}
+
+static void hdmi_get_fb_resolution(struct omap_dss_device *dssdev,
+			       u16 *xres, u16 *yres)
+{
+	if (dssdev->panel.fb_width_in_pixels == 0) {
+		*xres = 640;
+		*yres = 480;
+	} else {
+		*xres = dssdev->panel.fb_width_in_pixels;
+		*yres = dssdev->panel.fb_height_in_pixels;
+	}
+}
+
+
 
 static int hdmi_set_mode(struct omap_dss_device *dssdev,
 			 struct fb_videomode *vm)
@@ -452,6 +477,8 @@ static struct omap_dss_driver hdmi_driver = {
 	.get_timings	= hdmi_get_timings,
 	.set_timings	= hdmi_set_timings,
 	.check_timings	= hdmi_check_timings,
+	.get_resolution = hdmi_get_resolution,
+	.get_fb_resolution = hdmi_get_fb_resolution,
 	.get_modedb	= hdmi_get_modedb,
 	.set_mode	= hdmi_set_mode,
 	.driver			= {

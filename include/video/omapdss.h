@@ -624,6 +624,7 @@ struct omap_dss_device {
 		u32 height_in_um;
 		u32 fb_width_in_pixels;
 		u32 fb_height_in_pixels;
+		u32 hdmi_default_cea_code;
 	} panel;
 
 	struct {
