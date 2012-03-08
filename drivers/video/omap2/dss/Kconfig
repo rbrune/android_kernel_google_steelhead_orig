@@ -129,4 +129,27 @@ config OMAP2_DSS_SLEEP_AFTER_VENC_RESET
 	  This option enables the sleep, and is enabled by default. You can
 	  disable the sleep if it doesn't cause problems on your platform.
 
+
+config OMAP2_LARGE_FB
+        bool "Enable large FB size"
+	default n
+	help
+	  This enables FB size to be different than display size.
+
+config OMAP2_LARGE_FB_WIDTH
+	int "Frame Buffer Width (pixels)"
+	range 0 1920
+	depends on OMAP2_LARGE_FB && ARCH_OMAP4
+	default 720
+	help
+         Change frame buffer width in case it is larger than display width.
+
+config OMAP2_LARGE_FB_HEIGHT
+	int "Frame Buffer Height (pixels)"
+	range 0 1920
+	depends on OMAP2_LARGE_FB && ARCH_OMAP4
+	default 1280
+	help
+         Change frame buffer width in case it is larger than display height.
+
 endif
