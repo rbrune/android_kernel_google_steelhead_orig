@@ -12,8 +12,11 @@
 static bool blanked;
 
 #define NUM_TILER1D_SLOTS 2
-#define TILER1D_SLOT_SIZE (16 << 20)
-
+#ifdef CONFIG_OMAP2_LARGE_FB
+static u32 TILER1D_SLOT_SIZE = (32 << 20);
+#else
+static u32 TILER1D_SLOT_SIZE = (16 << 20);
+#endif
 static struct tiler1d_slot {
 	struct list_head q;
 	tiler_blk_handle slot;
