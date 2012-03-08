@@ -1129,7 +1129,7 @@ static OMAPLFB_ERROR OMAPLFBInitFBDev(OMAPLFB_DEVINFO *psDevInfo)
 	OMAPLFBPrintInfo(psDevInfo);
 
 	/* hijack LINFB */
-#if defined(CONFIG_ION_OMAP)
+#if defined(CONFIG_ION_OMAP) && !defined(CONFIG_OMAP2_HDMI_DEFAULT_DISPLAY)
 	if(1)
 	{
 		/* for some reason we need at least 3 buffers in the swap chain */
