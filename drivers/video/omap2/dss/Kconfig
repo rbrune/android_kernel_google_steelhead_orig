@@ -152,4 +152,10 @@ config OMAP2_LARGE_FB_HEIGHT
 	help
          Change frame buffer width in case it is larger than display height.
 
+config OMAP2_HDMI_DEFAULT_DISPLAY
+        bool "Enable Default HDMI display"
+	default n
+	help
+	  This enables HDMI as default display.
+
 endif
