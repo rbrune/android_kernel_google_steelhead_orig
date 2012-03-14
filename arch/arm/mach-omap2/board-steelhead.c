@@ -146,11 +146,7 @@ static void __init omap4_steelhead_init_hw_rev(void)
 #define PHYS_ADDR_DUCATI_SIZE				(SZ_1M * 105)
 #define OMAP_STEELHEAD_ION_HEAP_SECURE_INPUT_SIZE	(SZ_1M * 90)
 #define OMAP_STEELHEAD_ION_HEAP_TILER_SIZE		(SZ_1M * 81)
-/* We need more than Tuna because our orientation is landscape
- * and the SGX alignment requirements imposed in omaplfb_displayclass.c
- * causes the memory requirements to be greater.
- */
-#define OMAP_STEELHEAD_ION_HEAP_NONSECURE_TILER_SIZE	(SZ_1M * 18)
+#define OMAP_STEELHEAD_ION_HEAP_NONSECURE_TILER_SIZE	(SZ_1M * 32)
 
 #define PHYS_ADDR_SMC_MEM	(0x80000000 + SZ_1G - PHYS_ADDR_SMC_SIZE)
 #define PHYS_ADDR_DUCATI_MEM	(PHYS_ADDR_SMC_MEM - \
@@ -1074,35 +1070,39 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 			.max_pixclk_khz = 165000,
 		},
 	},
+	.panel = {
+		.width_in_um	= CONFIG_OMAP2_LARGE_FB_WIDTH * 100,
+		.height_in_um	= CONFIG_OMAP2_LARGE_FB_HEIGHT * 100,
+		.fb_width_in_pixels = CONFIG_OMAP2_LARGE_FB_WIDTH,
+		.fb_height_in_pixels = CONFIG_OMAP2_LARGE_FB_HEIGHT,
+		.hdmi_default_cea_code = 34,
+		.timings = {
+			.x_res = 1920,
+			.y_res = 1080,
+			.pixel_clock = 74250,
+			.hsw = 44,
+			.hfp = 88,
+			.hbp = 148,
+			.vsw = 5,
+			.vfp = 4,
+			.vbp = 36,
+		},
+	},
 	.hpd_gpio = GPIO_HDMI_HPD,
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
 };
 
-static struct panel_generic_dpi_data omap4_dvi_panel = {
-	.name			= "generic_720p",
-};
-
-struct omap_dss_device omap4_steelhead_dummy_dvi_device = {
-	.type			= OMAP_DISPLAY_TYPE_DPI,
-	.name			= "dvi",
-	.driver_name		= "generic_dpi_panel",
-	.data			= &omap4_dvi_panel,
-	.phy.dpi.data_lines	= 24,
-	.channel		= OMAP_DSS_CHANNEL_LCD2,
-};
-
 static struct omap_dss_device *omap4_steelhead_dss_devices[] = {
-	&omap4_steelhead_dummy_dvi_device,
 	&omap4_steelhead_hdmi_device,
 };
 
 static struct omap_dss_board_info omap4_steelhead_dss_data = {
 	.num_devices	= ARRAY_SIZE(omap4_steelhead_dss_devices),
 	.devices	= omap4_steelhead_dss_devices,
-	.default_device	= &omap4_steelhead_dummy_dvi_device,
+	.default_device	= &omap4_steelhead_hdmi_device,
 };
 
-#define STEELHEAD_FB_RAM_SIZE		SZ_16M /* ~1280*720*4 * 2 */
+#define STEELHEAD_FB_RAM_SIZE		SZ_16M /* ~1920*1080*4 * 2 */
 
 static struct omapfb_platform_data steelhead_fb_pdata = {
 	.mem_desc = {
