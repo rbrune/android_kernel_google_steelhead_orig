@@ -2442,10 +2442,18 @@ int dispc_setup_plane(enum omap_plane plane,
 	_dispc_setup_global_alpha(plane, global_alpha);
 
 	if (cpu_is_omap44xx()) {
+#if !defined(CONFIG_OMAP2_HDMI_DEFAULT_DISPLAY)
 		fifo_low = dispc_calculate_threshold(plane, paddr + offset0,
 				   puv_addr + offset0, width, height,
 				   row_inc, pix_inc);
 		fifo_high = dispc_get_plane_fifo_size(plane) - 1;
+#else
+		u32 size;
+		size = dispc_get_plane_fifo_size(plane);
+
+		default_get_overlay_fifo_thresholds(plane, size,
+				&size, &fifo_low, &fifo_high);
+#endif
 		dispc_setup_plane_fifo(plane, fifo_low, fifo_high);
 	}
 
