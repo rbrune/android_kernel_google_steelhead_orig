@@ -92,6 +92,24 @@ static struct {
 
 static const u8 edid_header[8] = {0x0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0};
 
+int set_dispc_clk(void)
+{
+	struct clk *clk;
+	int r;
+
+	if (cpu_is_omap44xx()) {
+		clk = clk_get(NULL, "dpll_per_m5x2_ck");
+		if (IS_ERR(clk)) {
+			DSSERR("Failed to get dpll_per_m5x2_ck\n");
+			r = PTR_ERR(clk);
+			return r;
+		}
+		r = clk_set_rate(clk, 192000000);
+		if (r)
+			return r;
+	}
+	return 0;
+}
 static int hdmi_runtime_get(void)
 {
 	int r;
@@ -578,6 +596,8 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 
 	/* Make selection of HDMI in DSS */
 	dss_select_hdmi_venc_clk_source(DSS_HDMI_M_PCLK);
+
+	set_dispc_clk();
 
 	/* Select the dispc clock source as PRCM clock, to ensure that it is not
 	 * DSI PLL source as the clock selected by DSI PLL might not be
