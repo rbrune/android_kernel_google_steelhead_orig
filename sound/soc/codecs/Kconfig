@@ -224,6 +224,19 @@ config SND_SOC_TAS5713
 	tristate "TI TAS5713 Class-D Audio Amplifier"
 	depends on I2C
 
+config SND_SOC_TAS5713_SHIFTING_I2C_ADDR_HACK
+	bool "Workaround for unstable latching of i2c addresses"
+	depends on SND_SOC_TAS5713
+        help
+	  It is possible in some devices for the TAS5713 circuit to be layed out
+	  improperly in such which can cause the TAS5713 to latch a different
+	  I2C address every time it came out of reset.  Enabling this hack
+	  allows the driver to try both addresses every time it lets the chip
+	  out of reset, using whichever address the chip responds to.  This hack
+	  should never be upstreamed.
+
+          If unsure select "N".
+
 config SND_SOC_TLV320AIC23
 	tristate
 

@@ -361,10 +361,34 @@ static int tas5713_probe_device_addr(struct device* dev,
 					ret, state->i2c_client->addr);
 		ret = 0;
 	} else {
+#ifdef CONFIG_SND_SOC_TAS5713_SHIFTING_I2C_ADDR_HACK
+		uint16_t new_addr = state->i2c_client->addr ^ 0x1;
+		dev_warn(dev, "Failed to read TAS5713 device ID register at "
+				" address 0x%02x.  Trying addr 0x%02x "
+				"(ret = %d)\n",
+				state->i2c_client->addr, new_addr, ret);
+
+		state->i2c_client->addr = new_addr;
+		ret = i2c_smbus_read_byte_data(state->i2c_client, 0x01);
+
+		if (ret >= 0)  {
+			dev_info(dev, "Found TAS5713 device with dev ID = "
+					"0x%02x at new addr 0x%02x\n",
+					ret, state->i2c_client->addr);
+			ret = 0;
+		} else {
+			dev_err(dev, "Failed to read TAS5713 device ID register"
+					" at address 0x%02x.  Giving up.  "
+					"(ret = %d)\n",
+					state->i2c_client->addr, ret);
+			ret = -ENODEV;
+		}
+#else
 		dev_err(dev, "Failed to read TAS5713 device ID register at "
 				" address 0x%02x.  (ret = %d)\n",
 				state->i2c_client->addr, ret);
 		ret = -ENODEV;
+#endif
 	}
 
 	return ret;
