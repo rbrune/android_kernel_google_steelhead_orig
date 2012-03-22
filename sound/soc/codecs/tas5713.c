@@ -345,6 +345,31 @@ bailout:
 }
 #undef DO_RESET_DELAY
 
+static int tas5713_probe_device_addr(struct device* dev,
+		struct tas5713_driver_state* state,
+		bool log_initial_discovery) {
+	int ret;
+
+	/* Probe the assigned device address read the device ID register at
+	 * sub-address 0x01.
+	 */
+	ret = i2c_smbus_read_byte_data(state->i2c_client, 0x01);
+	if (ret >= 0)  {
+		if (log_initial_discovery)
+			dev_info(dev, "Found TAS5713 device with dev ID = "
+					"0x%02x at addr 0x%02x\n",
+					ret, state->i2c_client->addr);
+		ret = 0;
+	} else {
+		dev_err(dev, "Failed to read TAS5713 device ID register at "
+				" address 0x%02x.  (ret = %d)\n",
+				state->i2c_client->addr, ret);
+		ret = -ENODEV;
+	}
+
+	return ret;
+}
+
 static int tas5713_check_device_exists(struct device* dev,
 		struct tas5713_driver_state* state)
 {
@@ -357,19 +382,8 @@ static int tas5713_check_device_exists(struct device* dev,
 	do_before_power_up(state);
 	tas5713_do_reset(state, 0, 0);
 
-	/* Check to see that the device exists by attempting to read the device
-	 * ID register at sub-address 0x01.
-	 */
-	ret = i2c_smbus_read_byte_data(state->i2c_client, 0x01);
-	if (ret >= 0)  {
-		dev_info(dev, "Found TAS5713 device with dev ID = 0x%02x\n",
-				ret);
-		ret = 0;
-	} else {
-		dev_err(dev, "Failed to read TAS5713 device ID register.  "
-				"(ret = %d)\n", ret);
-		ret = -ENODEV;
-	}
+	/* read the device's ID register */
+	ret = tas5713_probe_device_addr(dev, state, true);
 
 	/* Place the device back into power-down/reset. */
 	gpio_set_value(state->pdata->pdn_gpio, 0);
@@ -398,6 +412,11 @@ static void tas5713_power_up(struct tas5713_driver_state* state)
 	 * already logged an error.
 	 */
 	ret = tas5713_do_reset(state, 1, 1);
+	if (ret)
+		goto err_setup;
+
+	/* read the device's ID register */
+	ret = tas5713_probe_device_addr(dev, state, false);
 	if (ret)
 		goto err_setup;
 
