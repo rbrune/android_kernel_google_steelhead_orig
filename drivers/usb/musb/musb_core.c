@@ -945,9 +945,11 @@ void musb_start(struct musb *musb)
 		 */
 		if ((devctl & MUSB_DEVCTL_VBUS) == MUSB_DEVCTL_VBUS)
 			musb->is_active = 1;
-		else if (musb->xceiv->state == OTG_STATE_A_HOST)
+		else if (musb->xceiv->state == OTG_STATE_A_IDLE) {
 			devctl |= MUSB_DEVCTL_SESSION;
-
+			/* enable vbus and set us to host mode */
+			musb_platform_set_vbus(musb, 1);
+		}
 	} else if (is_host_enabled(musb)) {
 		/* assume ID pin is hard-wired to ground */
 		devctl |= MUSB_DEVCTL_SESSION;
