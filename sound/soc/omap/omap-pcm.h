@@ -33,6 +33,7 @@ struct omap_pcm_dma_data {
 	int		data_type;	/* data type 8,16,32 */
 	int		sync_mode;	/* DMA sync mode */
 	int		packet_size;	/* packet size only in PACKET mode */
+	int		priority;	/* channel priority */
 };
 
 #endif

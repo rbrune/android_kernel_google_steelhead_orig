@@ -175,6 +175,7 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 		dma_params.dst_start		= dma_data->port_addr;
 		dma_params.dst_port		= OMAP_DMA_PORT_MPUI;
 		dma_params.dst_fi		= dma_data->packet_size;
+		dma_params.write_prio		= dma_data->priority;
 	} else {
 		dma_params.src_amode		= OMAP_DMA_AMODE_CONSTANT;
 		dma_params.dst_amode		= OMAP_DMA_AMODE_POST_INC;
@@ -183,6 +184,7 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 		dma_params.dst_start		= runtime->dma_addr;
 		dma_params.src_port		= OMAP_DMA_PORT_MPUI;
 		dma_params.src_fi		= dma_data->packet_size;
+		dma_params.read_prio		= dma_data->priority;
 	}
 	/*
 	 * Set DMA transfer frame size equal to ALSA period size and frame
