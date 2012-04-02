@@ -235,6 +235,7 @@ static struct omap_pcm_dma_data omap_mcasp_dai_dma_params[] = {
 		.data_type = OMAP_DMA_DATA_TYPE_S16,
 		.sync_mode = OMAP_DMA_SYNC_ELEMENT,
 		.port_addr = OMAP44XX_MCASP_DAT_BASE + OMAP_MCASP_TXBUF0_REG,
+		.priority = DMA_CH_PRIO_HIGH,
 	},
 };
 
