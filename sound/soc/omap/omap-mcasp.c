@@ -35,6 +35,7 @@
 #include <plat/clock.h>
 #include <plat/dma.h>
 #include <plat/dma-44xx.h>
+#include <plat/omap-pm.h>
 
 #include "omap-pcm.h"
 #include "omap-mcasp.h"
@@ -637,6 +638,12 @@ static int omap_mcasp_startup(struct snd_pcm_substream *substream,
 
 	pm_runtime_get_sync(mcasp->dev);
 
+	/* HACK: Force L3 to run at 200 MHz at all times.  Failure to do this
+	 * can result in other users of L3 starving the McASP's single audio
+	 * sample buffer which can lead to an underflow and lock-up situation.
+	 */
+	omap_pm_set_min_bus_tput(mcasp->dev, OCP_INITIATOR_AGENT, 800000);
+
 	return 0;
 }
 
@@ -644,6 +651,11 @@ static void omap_mcasp_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
 	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
+
+	/* HACK: Release the L3 throughput constraint added in
+	 * omap_mcasp_startup.
+	 */
+	omap_pm_set_min_bus_tput(mcasp->dev, OCP_INITIATOR_AGENT, -1);
 
 	pm_runtime_put_sync(mcasp->dev);
 
