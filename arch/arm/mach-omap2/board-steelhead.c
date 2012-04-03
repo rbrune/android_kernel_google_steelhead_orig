@@ -1370,6 +1370,23 @@ err_board_obj:
 		pr_err("failed to create board_properties\n");
 }
 
+/* At 1080p FB, we need L3 to run at OPP100 to avoid DSS underflows.
+ * Be careful how many of such bus constraints are held because they
+ * are all added up and in omap-pm-helper.c and there is no overflow
+ * check at this time.  5 callers at 800000 KBit/sec should be okay.
+ * McASP currently holds one such constraint.
+ */
+static void steelhead_platform_reserve_l3_bus_bw(void) {
+	static struct device dummy_bw_reserve_dev = {
+		.init_name = "steelhead_l3_bw_reserve_dev",
+	};
+
+	omap_pm_set_min_bus_tput(&dummy_bw_reserve_dev,
+				OCP_INITIATOR_AGENT,
+				200 * 1000 * 4);
+}
+
+
 static void __init steelhead_init(void)
 {
 	int package = OMAP_PACKAGE_CBS;
@@ -1384,6 +1401,8 @@ static void __init steelhead_init(void)
 	omap4_steelhead_emif_init();
 
 	register_reboot_notifier(&steelhead_reboot_notifier);
+
+	steelhead_platform_reserve_l3_bus_bw();
 
 	steelhead_platform_init_avr();
 	steelhead_platform_init_tas5713_audio();
