@@ -220,6 +220,9 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 						dma_data->burst_mode);
 	}
 
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		omap_set_dma_write_mode(prtd->dma_ch, dma_data->write_mode);
+
 	return 0;
 }
 
