@@ -212,10 +212,12 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 	}
 
 	if (!(cpu_class_is_omap1())) {
-		omap_set_dma_src_burst_mode(prtd->dma_ch,
-						OMAP_DMA_DATA_BURST_16);
-		omap_set_dma_dest_burst_mode(prtd->dma_ch,
-						OMAP_DMA_DATA_BURST_16);
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			omap_set_dma_src_burst_mode(prtd->dma_ch,
+						dma_data->burst_mode);
+		else
+			omap_set_dma_dest_burst_mode(prtd->dma_ch,
+						dma_data->burst_mode);
 	}
 
 	return 0;

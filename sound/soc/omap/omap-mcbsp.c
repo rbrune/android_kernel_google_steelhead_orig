@@ -375,6 +375,7 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 	dma_data->port_addr = port;
 	dma_data->sync_mode = sync_mode;
 	dma_data->packet_size = pkt_size;
+	dma_data->burst_mode = OMAP_DMA_DATA_BURST_16;
 
 	snd_soc_dai_set_dma_data(cpu_dai, substream, dma_data);
 

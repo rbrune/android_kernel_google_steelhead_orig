@@ -71,12 +71,14 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_0,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 	{
 		.name = "Media Capture1",
 		.dma_req = OMAP44XX_DMA_ABE_REQ_3,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 },
 {
@@ -86,6 +88,7 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_4,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 },
 {
@@ -94,12 +97,14 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_1,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 	{
 		.name = "Voice Capture",
 		.dma_req = OMAP44XX_DMA_ABE_REQ_2,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 },
 {
@@ -108,6 +113,7 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_5,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},{},
 },
 {
@@ -124,12 +130,14 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_1,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 	{
 		.name = "MODEM Capture",
 		.dma_req = OMAP44XX_DMA_ABE_REQ_2,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},
 },
 {
@@ -138,6 +146,7 @@ static struct omap_pcm_dma_data omap_abe_dai_dma_params[7][2] = {
 		.dma_req = OMAP44XX_DMA_ABE_REQ_0,
 		.data_type = OMAP_DMA_DATA_TYPE_S32,
 		.sync_mode = OMAP_DMA_SYNC_PACKET,
+		.burst_mode = OMAP_DMA_DATA_BURST_16,
 	},{},
 },};
 
