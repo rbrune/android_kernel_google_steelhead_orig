@@ -415,6 +415,7 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXHCLKRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXCLKRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSERCLR);
+	mcasp_clr_bits(mcasp->base + OMAP_MCASP_TXEVTCTL_REG, TXDATADMADIS);
 
 	/* Wait until the DMA has loaded the first sample into TXBUF before we
 	 * let the TX state machine and frame sync generator out of reset. */
@@ -438,7 +439,6 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 #endif
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSMRST);
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXFSRST);
-	mcasp_clr_bits(mcasp->base + OMAP_MCASP_TXEVTCTL_REG, TXDATADMADIS);
 
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	if (!mcasp->start_time_valid &&
