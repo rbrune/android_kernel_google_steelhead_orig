@@ -38,6 +38,9 @@ struct omap_mcasp {
 	s64 start_time;
 	int start_time_valid;
 	spinlock_t starttime_lock;
+
+	struct snd_pcm_substream* substream;
+	spinlock_t substream_lock;
 #endif
 };
 

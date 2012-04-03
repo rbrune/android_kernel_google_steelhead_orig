@@ -439,7 +439,14 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	spin_lock_irqsave(&mcasp->starttime_lock, irq_state);
 #endif
+	/* Clear any pending IRQs */
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG,
+			OMAP_MCASP_TXSTAT_MASK);
+
+	/* Release the TX state machine from reset. */
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXSMRST);
+
+	/* Release the TX frame sync generator from reset. */
 	mcasp_set_ctl_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, TXFSRST);
 
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
@@ -452,6 +459,9 @@ static int omap_mcasp_start(struct omap_mcasp *mcasp)
 
 	spin_unlock_irqrestore(&mcasp->starttime_lock, irq_state);
 #endif
+
+	/* enable underrun IRQs */
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_EVTCTLX_REG, EVTCTLX_XUNDRN);
 
 	return 0;
 }
@@ -467,7 +477,13 @@ static void omap_mcasp_stop(struct omap_mcasp *mcasp)
 	spin_unlock_irqrestore(&mcasp->starttime_lock, irq_state);
 #endif
 
+	/* disable IRQ sources */
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_EVTCTLX_REG, 0);
+
+	/* Shut down the transmitter */
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_GBLCTL_REG, 0);
+
+	/* Clear any lingering IRQs */
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG,
 			OMAP_MCASP_TXSTAT_MASK);
 }
@@ -610,6 +626,7 @@ static irqreturn_t omap_mcasp_irq_handler(int irq, void *data)
 
 	txstat = mcasp_get_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG);
 	if (txstat & TXSTAT_XUNDRN) {
+#ifndef CONFIG_SND_OMAP_SOC_STEELHEAD
 		dev_err(mcasp->dev, "%s: Underrun (0x%08x)\n", __func__,
 			txstat);
 
@@ -623,12 +640,63 @@ static irqreturn_t omap_mcasp_irq_handler(int irq, void *data)
 			omap_mcasp_start(mcasp);
 		}
 		spin_unlock(&mcasp->lock);
+#else
+		unsigned long irq_state;
+
+		/* If this is not a spurrious IRQ, and we have actually
+		 * underflowed, make sure to signal that state so that the ALSA
+		 * clients can unwind and take appropriate action.
+		 */
+		spin_lock_irqsave(&mcasp->substream_lock, irq_state);
+		if (mcasp->substream) {
+			dev_err(mcasp->dev, "%s: Underrun (0x%08x)\n", __func__,
+				txstat);
+			snd_pcm_stop(mcasp->substream, SNDRV_PCM_STATE_XRUN);
+		}
+		spin_unlock_irqrestore(&mcasp->substream_lock, irq_state);
+#endif
 	}
 
 	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG, txstat);
 
 	return IRQ_HANDLED;
 }
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+static void omap_mcasp_set_substream(struct omap_mcasp *mcasp,
+		struct snd_pcm_substream *substream) {
+	/* On steelhead, we have a slightly different way of dealing with an
+	 * underflow.  In order to preserve our timing relative to the other
+	 * outputs in the system, we need to signal this failure all of the way
+	 * up to the app level so that it can re-prime this entire pipeline and
+	 * get it back into sync the other outputs.  In order to do this, we
+	 * will need access to the ALSA substream in the context of the IRQ
+	 * handler.
+	 *
+	 * To make sure we don't have any crazy multi-cpu race conditions, grab
+	 * the McASP's "substream" lock, make certain IRQs are disabled, then
+	 * record the current substream structure in the McASP structure.  When
+	 * the IRQ fires, it will hold this lock while accessing the substream
+	 * to signal a shutdown via ALSA.  In theory, even if there is a late
+	 * IRQ in flight on a different CPU, we will be OK as long as the main
+	 * mcasp structure never goes away.
+	 */
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&mcasp->substream_lock, irq_state);
+
+	/* make sure we have shut down IRQs and cleared anything pending */
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_EVTCTLX_REG, 0);
+	mcasp_set_reg(mcasp->base + OMAP_MCASP_TXSTAT_REG,
+			OMAP_MCASP_TXSTAT_MASK);
+
+	/* record the substream so the underflow IRQ handler can make use of it
+	 */
+	mcasp->substream = substream;
+
+	spin_unlock_irqrestore(&mcasp->substream_lock, irq_state);
+}
+#endif
 
 static int omap_mcasp_startup(struct snd_pcm_substream *substream,
 			      struct snd_soc_dai *dai)
@@ -646,6 +714,10 @@ static int omap_mcasp_startup(struct snd_pcm_substream *substream,
 	 */
 	omap_pm_set_min_bus_tput(mcasp->dev, OCP_INITIATOR_AGENT, 800000);
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	omap_mcasp_set_substream(mcasp, substream);
+#endif
+
 	return 0;
 }
 
@@ -653,6 +725,10 @@ static void omap_mcasp_shutdown(struct snd_pcm_substream *substream,
 				struct snd_soc_dai *dai)
 {
 	struct omap_mcasp *mcasp = snd_soc_dai_get_drvdata(dai);
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	omap_mcasp_set_substream(mcasp, NULL);
+#endif
 
 	/* HACK: Release the L3 throughput constraint added in
 	 * omap_mcasp_startup.
@@ -775,6 +851,7 @@ static __devinit int omap_mcasp_probe(struct platform_device *pdev)
 	spin_lock_init(&mcasp->lock);
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	spin_lock_init(&mcasp->starttime_lock);
+	spin_lock_init(&mcasp->substream_lock);
 #endif
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
