@@ -68,6 +68,9 @@ struct omap_mcbsp_data {
 	s64 start_time;
 	int start_time_valid;
 	spinlock_t starttime_lock;
+
+	struct snd_pcm_substream* substream;
+	spinlock_t substream_lock;
 #endif
 };
 
@@ -106,6 +109,20 @@ static int mcbsp_ioctl_get_start_time(
 		return -EINVAL;
 
 	return 0;
+}
+
+static void omap_mcbsp_underflow_handler(unsigned int mcbsp_id, void* ctx) {
+	struct omap_mcbsp_data* mcbsp_data = (struct omap_mcbsp_data*)ctx;
+
+	unsigned long irq_state;
+	spin_lock_irqsave(&mcbsp_data->substream_lock, irq_state);
+
+	if (mcbsp_data->substream) {
+		printk(KERN_ERR "Underrun on McBSP_%d\n", mcbsp_id);
+		snd_pcm_stop(mcbsp_data->substream, SNDRV_PCM_STATE_XRUN);
+	}
+
+	spin_unlock_irqrestore(&mcbsp_data->substream_lock, irq_state);
 }
 #endif
 
@@ -202,6 +219,18 @@ static int omap_mcbsp_dai_startup(struct snd_pcm_substream *substream,
 					   SNDRV_PCM_HW_PARAM_PERIOD_SIZE, 2);
 	}
 
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	if (!err) {
+		unsigned long irq_state;
+		spin_lock_irqsave(&mcbsp_data->substream_lock, irq_state);
+		mcbsp_data->substream = substream;
+		spin_unlock_irqrestore(&mcbsp_data->substream_lock, irq_state);
+		err = omap_mcbsp_set_tx_underflow_callback(bus_id,
+				omap_mcbsp_underflow_handler,
+				mcbsp_data);
+	}
+#endif
+
 	return err;
 }
 
@@ -209,6 +238,14 @@ static void omap_mcbsp_dai_shutdown(struct snd_pcm_substream *substream,
 				    struct snd_soc_dai *cpu_dai)
 {
 	struct omap_mcbsp_data *mcbsp_data = snd_soc_dai_get_drvdata(cpu_dai);
+
+#ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
+	unsigned long irq_state;
+	omap_mcbsp_set_tx_underflow_callback(mcbsp_data->bus_id, NULL, NULL);
+	spin_lock_irqsave(&mcbsp_data->substream_lock, irq_state);
+	mcbsp_data->substream = NULL;
+	spin_unlock_irqrestore(&mcbsp_data->substream_lock, irq_state);
+#endif
 
 	if (!cpu_dai->active) {
 		omap_mcbsp_free(mcbsp_data->bus_id);
@@ -840,8 +877,10 @@ static __devinit int asoc_mcbsp_probe(struct platform_device *pdev)
 {
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	int i;
-	for (i = 0; i < ARRAY_SIZE(mcbsp_data); ++i)
+	for (i = 0; i < ARRAY_SIZE(mcbsp_data); ++i) {
 		spin_lock_init(&mcbsp_data[i].starttime_lock);
+		spin_lock_init(&mcbsp_data[i].substream_lock);
+	}
 #endif
 
 	return snd_soc_register_dai(&pdev->dev, &omap_mcbsp_dai);
