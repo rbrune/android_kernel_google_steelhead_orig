@@ -127,9 +127,38 @@ static irqreturn_t omap_mcbsp_tx_irq_handler(int irq, void *dev_id)
 {
 	struct omap_mcbsp *mcbsp_tx = dev_id;
 	u16 irqst_spcr2;
+	u32 irqst;
 
 	irqst_spcr2 = MCBSP_READ(mcbsp_tx, SPCR2);
-	dev_dbg(mcbsp_tx->dev, "TX IRQ callback : 0x%x\n", irqst_spcr2);
+	irqst = (MCBSP_READ(mcbsp_tx, IRQST) & MCBSP_READ(mcbsp_tx, IRQEN));
+	dev_dbg(mcbsp_tx->dev, "TX IRQ callback : 0x%08x 0x%08x\n",
+			irqst_spcr2, irqst);
+
+
+	if (irqst & MCBSP_IRQ_XUNDFLEN) {
+		/* Start by disabling the TX Underflow interrupt.  It is going
+		 * to remain asserted until something higher up does something
+		 * about it.  */
+		unsigned long irq_flags;
+		u32 irqen = MCBSP_READ(mcbsp_tx, IRQEN);
+		irqen &= ~MCBSP_IRQ_XUNDFLEN;
+		MCBSP_WRITE(mcbsp_tx, IRQEN, irqen);
+
+		/* If there is a registered underflow handler, call it now */
+		spin_lock_irqsave(&mcbsp_tx->cbk_lock, irq_flags);
+		if (mcbsp_tx->tx_underflow_cbk) {
+			mcbsp_tx->tx_underflow_cbk(mcbsp_tx->id,
+					mcbsp_tx->tx_underflow_cbk_ctx);
+		} else {
+			dev_dbg(mcbsp_tx->dev, "TX FIFO Underflow\n");
+		}
+		spin_unlock_irqrestore(&mcbsp_tx->cbk_lock, irq_flags);
+
+		/* Underflow has been handled and disabled.  If there is
+		 * anything else to do, we will take care of it next time
+		 * around. */
+		return IRQ_HANDLED;
+	}
 
 	if (irqst_spcr2 & XSYNC_ERR) {
 		dev_err(mcbsp_tx->dev, "TX Frame Sync Error! : 0x%x\n",
@@ -995,6 +1024,14 @@ void omap_mcbsp_start_capture_start_time(unsigned int id,
 		MCBSP_WRITE(mcbsp, SPCR2, w | (1 << 7));
 	}
 
+	/* If we are configured for transmission, enable the transmit underflow
+	 * handler in order to call any app registered handlers in the event of
+	 * a FIFO underflow. */
+	if (tx) {
+		MCBSP_WRITE(mcbsp, IRQST, MCBSP_IRQ_MASK);
+		MCBSP_WRITE(mcbsp, IRQEN, MCBSP_IRQ_XUNDFLEN);
+	}
+
 	if (do_capture_start)
 		start1 = mcbsp->pdata->get_raw_counter();
 
@@ -1061,6 +1098,9 @@ void omap_mcbsp_stop(unsigned int id, int tx, int rx)
 	}
 
 	mcbsp = id_to_mcbsp_ptr(id);
+
+	/* Shut off all IRQ sources */
+	MCBSP_WRITE(mcbsp, IRQEN, 0);
 
 	/* Reset transmitter */
 	tx &= 1;
@@ -1620,6 +1660,27 @@ int omap_mcbsp_get_tx_irq(unsigned int id)
 }
 EXPORT_SYMBOL(omap_mcbsp_get_tx_irq);
 
+int omap_mcbsp_set_tx_underflow_callback(unsigned int id,
+	omap_mcbsp_tx_underflow_handler cbk, void* ctx)
+{
+	struct omap_mcbsp *mcbsp;
+	unsigned long irq_flags;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
+		return -ENODEV;
+	}
+	mcbsp = id_to_mcbsp_ptr(id);
+
+	spin_lock_irqsave(&mcbsp->cbk_lock, irq_flags);
+	mcbsp->tx_underflow_cbk = cbk;
+	mcbsp->tx_underflow_cbk_ctx = ctx;
+	spin_unlock_irqrestore(&mcbsp->cbk_lock, irq_flags);
+
+        return 0;
+}
+EXPORT_SYMBOL(omap_mcbsp_set_tx_underflow_callback);
+
 #if defined(CONFIG_ARCH_OMAP3) || defined(CONFIG_ARCH_OMAP4)
 #define max_thres(m)			(mcbsp->pdata->buffer_size)
 #define valid_threshold(m, val)		((val) <= max_thres(m))
@@ -1936,6 +1997,7 @@ static int __devinit omap_mcbsp_probe(struct platform_device *pdev)
 	}
 
 	spin_lock_init(&mcbsp->lock);
+	spin_lock_init(&mcbsp->cbk_lock);
 	mcbsp->id = id + 1;
 	mcbsp->free = true;
 	mcbsp->dma_tx_lch = -1;

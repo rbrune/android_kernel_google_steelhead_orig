@@ -291,6 +291,22 @@ static struct platform_device omap_mcbsp##port_nr = {	\
 #define RFSREN			0x0002
 #define RSYNCERREN		0x0001
 
+/********************** McBSP IRQST/IRQEN bit definitions *********************/
+#define MCBSP_IRQ_XEMPTYEOFEN	(0x1 << 14)
+#define MCBSP_IRQ_XOVFLEN	(0x1 << 12)
+#define MCBSP_IRQ_XUNDFLEN	(0x1 << 11)
+#define MCBSP_IRQ_XRDYEN	(0x1 << 10)
+#define MCBSP_IRQ_XEOFEN	(0x1 << 9)
+#define MCBSP_IRQ_XFSXEN	(0x1 << 8)
+#define MCBSP_IRQ_XSYNCERREN	(0x1 << 7)
+#define MCBSP_IRQ_ROVFLEN	(0x1 << 5)
+#define MCBSP_IRQ_RUNDFLEN	(0x1 << 4)
+#define MCBSP_IRQ_RRDYEN	(0x1 << 3)
+#define MCBSP_IRQ_REOFEN	(0x1 << 2)
+#define MCBSP_IRQ_RFSREN	(0x1 << 1)
+#define MCBSP_IRQ_RSYNCERREN	(0x1 << 0)
+#define MCBSP_IRQ_MASK		(0x7FBF)
+
 /* CLKR signal muxing options */
 #define CLKR_SRC_CLKR		0
 #define CLKR_SRC_CLKX		1
@@ -419,6 +435,10 @@ struct omap_mcbsp_st_data {
 	s16 ch1gain;
 };
 
+typedef void (*omap_mcbsp_tx_underflow_handler)(
+		unsigned int mcbsp_id,
+		void* ctx);
+
 struct omap_mcbsp {
 	struct device *dev;
 	unsigned long phys_base;
@@ -460,6 +480,11 @@ struct omap_mcbsp {
 #endif
 	void *reg_cache;
 	unsigned int mcbsp_config_type;
+
+	/* TX Underflow IRQ callback */
+	spinlock_t cbk_lock;
+	omap_mcbsp_tx_underflow_handler tx_underflow_cbk;
+	void* tx_underflow_cbk_ctx;
 };
 
 /**
@@ -537,6 +562,10 @@ int omap_mcbsp_dma_reg_params(unsigned int id, unsigned int stream);
 int omap_mcbsp_read_reg(unsigned int id, u16 reg);
 int omap_mcbsp_write_reg(unsigned int id, u16 reg, u32 val);
 int omap_mcbsp_get_tx_irq(unsigned int id);
+
+/* APIs for callbacks */
+int omap_mcbsp_set_tx_underflow_callback(unsigned int id,
+	omap_mcbsp_tx_underflow_handler cbk, void* ctx);
 
 #ifdef CONFIG_ARCH_OMAP3
 /* Sidetone specific API */
