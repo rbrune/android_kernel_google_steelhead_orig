@@ -23,6 +23,7 @@
 
 struct omap_mcasp_platform_data {
 	s64 (*get_raw_counter)(void);
+	void (*log_underflow)(int);
 };
 
 #endif

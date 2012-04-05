@@ -154,6 +154,9 @@ static irqreturn_t omap_mcbsp_tx_irq_handler(int irq, void *dev_id)
 		}
 		spin_unlock_irqrestore(&mcbsp_tx->cbk_lock, irq_flags);
 
+		if (mcbsp_tx->pdata && mcbsp_tx->pdata->log_underflow)
+			mcbsp_tx->pdata->log_underflow(mcbsp_tx->id);
+
 		/* Underflow has been handled and disabled.  If there is
 		 * anything else to do, we will take care of it next time
 		 * around. */

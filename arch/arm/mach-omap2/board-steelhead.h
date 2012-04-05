@@ -43,6 +43,9 @@ extern s64 steelhead_get_raw_counter(void);
 extern u32 steelhead_get_raw_counter_nominal_freq(void);
 extern void steelhead_set_counter_slew_rate(s32 correction);
 
+extern void steelhead_log_mcasp_underflow(int dev_id);
+extern void steelhead_log_mcbsp_underflow(int dev_id);
+
 enum {
 	STEELHEAD_REV_ALPHA  = 0x0,
 	STEELHEAD_REV_EVT    = 0x1,

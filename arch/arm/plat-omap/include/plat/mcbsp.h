@@ -423,6 +423,7 @@ struct omap_mcbsp_platform_data {
 	char clks_prcm_src[30];
 
 	s64 (*get_raw_counter)(void);
+	void (*log_underflow)(int);
 };
 
 struct omap_mcbsp_st_data {

@@ -654,6 +654,9 @@ static irqreturn_t omap_mcasp_irq_handler(int irq, void *data)
 			snd_pcm_stop(mcasp->substream, SNDRV_PCM_STATE_XRUN);
 		}
 		spin_unlock_irqrestore(&mcasp->substream_lock, irq_state);
+
+		if (mcasp->pdata && mcasp->pdata->log_underflow)
+			mcasp->pdata->log_underflow(1);
 #endif
 	}
 

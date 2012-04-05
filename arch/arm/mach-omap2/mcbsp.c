@@ -134,6 +134,7 @@ static int omap_init_mcbsp(struct omap_hwmod *oh, void *unused)
 
 #ifdef CONFIG_MACH_STEELHEAD
 	pdata->get_raw_counter = steelhead_get_raw_counter;
+	pdata->log_underflow = steelhead_log_mcbsp_underflow;
 #endif
 
 	if (oh->class->rev == MCBSP_CONFIG_TYPE3) {

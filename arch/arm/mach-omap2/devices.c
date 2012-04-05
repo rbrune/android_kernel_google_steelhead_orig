@@ -503,6 +503,7 @@ static struct omap_device_pm_latency omap_mcasp_latency[] = {
 #ifdef CONFIG_MACH_STEELHEAD
 static struct omap_mcasp_platform_data steelhead_mcasp_pdata = {
 	.get_raw_counter = steelhead_get_raw_counter,
+	.log_underflow = steelhead_log_mcasp_underflow,
 };
 #endif
 

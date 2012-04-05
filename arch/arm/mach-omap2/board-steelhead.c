@@ -81,6 +81,10 @@
 #define STEELHEAD_RAMCONSOLE_START	(PLAT_PHYS_OFFSET + SZ_512M)
 #define STEELHEAD_RAMCONSOLE_SIZE	SZ_2M
 
+#define STEELHEAD_ATTR_RO(_type, _name, _show) \
+	struct kobj_attribute steelhead_##_type##_prop_attr_##_name = \
+		__ATTR(_name, S_IRUGO, _show, NULL)
+
 static struct resource ramconsole_resources[] = {
 	{
 		.flags  = IORESOURCE_MEM,
@@ -592,6 +596,51 @@ int __init steelhead_reserve_gpios(struct steelhead_gpio_reservation *data,
 
 	return 0;
 }
+
+/******************************************************************************
+ *                                                                            *
+ *         Underflow counters for health monitoring of audio outputs          *
+ *                                                                            *
+ ******************************************************************************/
+static u32 steelhead_mcasp_dai_underflows;
+static u32 steelhead_mcbsp_dai_underflows;
+static ssize_t steelhead_audio_underflows_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf,
+			"spdif_dai_underflows=%u,"
+			"tas5713_dai_underflows=%u\n",
+			steelhead_mcasp_dai_underflows,
+			steelhead_mcbsp_dai_underflows);
+}
+
+void steelhead_log_mcasp_underflow(int dev_id) {
+	steelhead_mcasp_dai_underflows++;
+}
+
+void steelhead_log_mcbsp_underflow(int dev_id) {
+	/* At 1.0 ship, steelhead used only one of the 4 McBSPs (#2) in order to
+	 * drive the TAS5713 amp.  McBSP #1, however, is tied to the BT chip for
+	 * BT audio scenarios.  If we ever turn this on in SW, we will want to
+	 * revisit this and add another counter for BT audio I2S underflows
+	 * coming from a McBSP FIFO underflow.  For now, it should be safe to
+	 * assert that this underflow is coming from McBSP #2
+	 */
+	BUG_ON(dev_id != 2);
+	steelhead_mcbsp_dai_underflows++;
+}
+
+static STEELHEAD_ATTR_RO(audio, underflows, steelhead_audio_underflows_show);
+
+static struct attribute *steelhead_audio_prop_attrs[] = {
+	&steelhead_audio_prop_attr_underflows.attr,
+	NULL,
+};
+
+static struct attribute_group steelhead_audio_prop_attr_group = {
+	.attrs = steelhead_audio_prop_attrs,
+};
+
 
 /******************************************************************************
  *                                                                            *
@@ -1234,10 +1283,6 @@ static ssize_t steelhead_soc_type_show(struct kobject *kobj,
 	return sprintf(buf, "%s\n", omap_types[omap_type()]);
 }
 
-#define STEELHEAD_ATTR_RO(_type, _name, _show) \
-	struct kobj_attribute steelhead_##_type##_prop_attr_##_name = \
-		__ATTR(_name, S_IRUGO, _show, NULL)
-
 static STEELHEAD_ATTR_RO(soc, family, steelhead_soc_family_show);
 static STEELHEAD_ATTR_RO(soc, revision, steelhead_soc_revision_show);
 static STEELHEAD_ATTR_RO(soc, type, steelhead_soc_type_show);
@@ -1280,6 +1325,7 @@ static void __init omap4_steelhead_create_board_props(void)
 {
 	struct kobject *board_props_kobj;
 	struct kobject *soc_kobj;
+	struct kobject *audio_kobj;
 	int ret = 0;
 
 	board_props_kobj = kobject_create_and_add("board_properties", NULL);
@@ -1290,6 +1336,10 @@ static void __init omap4_steelhead_create_board_props(void)
 	if (!soc_kobj)
 		goto err_soc_obj;
 
+	audio_kobj = kobject_create_and_add("audio", board_props_kobj);
+	if (!audio_kobj)
+		goto err_audio_obj;
+
 	ret = sysfs_create_group(board_props_kobj,
 				 &steelhead_board_prop_attr_group);
 	if (ret)
@@ -1299,11 +1349,19 @@ static void __init omap4_steelhead_create_board_props(void)
 	if (ret)
 		goto err_soc_sysfs_create;
 
+	ret = sysfs_create_group(audio_kobj, &steelhead_audio_prop_attr_group);
+	if (ret)
+		goto err_audio_sysfs_create;
+
 	return;
 
+err_audio_sysfs_create:
+	sysfs_remove_group(soc_kobj, &steelhead_soc_prop_attr_group);
 err_soc_sysfs_create:
 	sysfs_remove_group(board_props_kobj, &steelhead_board_prop_attr_group);
 err_board_sysfs_create:
+	kobject_put(audio_kobj);
+err_audio_obj:
 	kobject_put(soc_kobj);
 err_soc_obj:
 	kobject_put(board_props_kobj);
