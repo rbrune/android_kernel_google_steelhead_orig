@@ -124,8 +124,11 @@ static const char const *omap4_steelhead_hw_name[] = {
 	[STEELHEAD_REV_DVT3]   = "Steelhead DVT3",
 	[STEELHEAD_REV_DVT4]   = "Steelhead DVT4",
 	[STEELHEAD_REV_DVT5]   = "Steelhead DVT5",
-	[STEELHEAD_REV_PVT]    = "Steelhead PVT",
+	[STEELHEAD_REV_DVT6]   = "Steelhead DVT6",
 	[STEELHEAD_REV_PROD]   = "Steelhead PROD",
+	[STEELHEAD_REV_PROD1]  = "Steelhead PROD1",
+	[STEELHEAD_REV_PROD2]  = "Steelhead PROD2",
+	[STEELHEAD_REV_PROD3]  = "Steelhead PROD3",
 };
 
 static const char *omap4_steelhead_hw_rev_name(void)
@@ -974,12 +977,6 @@ static int __init steelhead_i2c_init(void)
 	omap_mux_init_signal("i2c3_sda.i2c3_sda", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c4_scl.i2c4_scl", OMAP_PIN_INPUT);
 	omap_mux_init_signal("i2c4_sda.i2c4_sda", OMAP_PIN_INPUT);
-
-	/* for EVT, this is always on.  For DVT, it's not used because
-	 * we tie the 1.29V output of the PMIC to memory.
-	 */
-	if (steelhead_hw_rev < STEELHEAD_REV_DVT)
-		steelhead_vmem.constraints.always_on = true;
 
 	/*
 	 * This will allow unused regulator to be shutdown. This flag
