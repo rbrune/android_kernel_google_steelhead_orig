@@ -200,7 +200,10 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 
 	for (i = 0; i < CEA_MODEDB_SIZE; i++) {
 		if (relaxed_fb_mode_is_equal(cea_modes + i, vm)) {
+			/* save old flag field */
+			u32 flag = vm->flag;
 			*vm = cea_modes[i];
+			vm->flag = flag;
 			if (check_only)
 				return 1;
 			hdmi.cfg.cm.code = i;
@@ -212,7 +215,10 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 
 	for (i = 0; i < VESA_MODEDB_SIZE; i++) {
 		if (relaxed_fb_mode_is_equal(vesa_modes + i, vm)) {
+			/* save old flag field */
+			u32 flag = vm->flag;
 			*vm = vesa_modes[i];
+			vm->flag = flag;
 			if (check_only)
 				return 1;
 			hdmi.cfg.cm.code = i;
@@ -238,8 +244,9 @@ done:
 
 void hdmi_get_monspecs(struct fb_monspecs *specs)
 {
-	int i, j;
+	int i;
 	char *edid = (char *) hdmi.edid;
+	int found_preferred = 0;
 
 	memset(specs, 0x0, sizeof(*specs));
 	if (!hdmi.edid_set)
@@ -256,9 +263,19 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 
 	hdmi.can_do_hdmi = specs->misc & FB_MISC_HDMI;
 
-	/* filter out resolutions we don't support */
-	for (i = j = 0; i < specs->modedb_len; i++) {
-		u32 max_pclk = hdmi.dssdev->clocks.hdmi.max_pixclk_khz;
+	/* mark resolutions we support */
+	for (i = 0; i < specs->modedb_len; i++) {
+		u32 max_pclk;
+
+		/* pick out the first mode that it claims to be preferred and mark as such */
+		if (!found_preferred &&
+			specs->misc & FB_MISC_1ST_DETAIL &&
+			specs->modedb[i].flag & FB_MODE_IS_DETAILED) {
+			specs->modedb[i].flag |= FB_FLAG_PREFERRED;
+			found_preferred = 1;
+		}
+
+		max_pclk = hdmi.dssdev->clocks.hdmi.max_pixclk_khz;
 		if (!hdmi_set_timings(&specs->modedb[i], true))
 			continue;
 
@@ -269,9 +286,9 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 		if (specs->modedb[i].flag & FB_FLAG_PIXEL_REPEAT)
 			continue;
 
-		specs->modedb[j++] = specs->modedb[i];
+		/* if we made it here the mode is actually possible */
+		specs->modedb[i].flag |= FB_FLAG_HW_CAPABLE;
 	}
-	specs->modedb_len = j;
 }
 
 #define EDID_BLK_SIZE 0x80

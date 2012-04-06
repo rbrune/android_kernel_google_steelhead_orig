@@ -229,6 +229,8 @@ struct fb_bitfield {
 #define FB_FLAG_RATIO_4_3	64
 #define FB_FLAG_RATIO_16_9	128
 #define FB_FLAG_PIXEL_REPEAT	256
+#define FB_FLAG_PREFERRED	512
+#define FB_FLAG_HW_CAPABLE	1024
 
 /*
  * Display rotation support
