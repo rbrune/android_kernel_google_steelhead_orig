@@ -445,6 +445,12 @@ u8 *hdmi_read_edid(struct omap_video_timings *dp)
 		return NULL;
 
 	hdmi.edid_set = true;
+
+	if (hdmi.hdmi_start_frame_cb &&
+	    hdmi.custom_set &&
+	    hdmi.wp_reset_done && hdmi.edid_set)
+		(*hdmi.hdmi_start_frame_cb)();
+
 	return hdmi.edid;
 }
 
@@ -620,7 +626,7 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 
 	if (hdmi.hdmi_start_frame_cb &&
 	    hdmi.custom_set &&
-	    hdmi.wp_reset_done)
+	    hdmi.wp_reset_done && hdmi.edid_set)
 		(*hdmi.hdmi_start_frame_cb)();
 
 	return 0;
