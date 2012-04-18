@@ -242,7 +242,7 @@ enum av_mute {
 #define HDCP_ENABLE_DELAY	300
 #define HDCP_R0_DELAY		110
 #define HDCP_KSV_TIMEOUT_DELAY  5000
-#define HDCP_REAUTH_DELAY	100
+#define HDCP_REAUTH_DELAY	1000
 
 /* DDC access timeout in ms */
 #define HDCP_DDC_TIMEOUT	500

@@ -894,7 +894,7 @@ static void hdcp_load_keys_cb(const struct firmware *fw, void *context)
 	}
 
 	memcpy(en_ctrl->key, fw->data, sizeof(en_ctrl->key));
-	en_ctrl->nb_retry = 20;
+	en_ctrl->nb_retry = HDCP_INFINITE_REAUTH;
 
 	hdcp.en_ctrl = en_ctrl;
 	hdcp.retry_cnt = hdcp.en_ctrl->nb_retry;
