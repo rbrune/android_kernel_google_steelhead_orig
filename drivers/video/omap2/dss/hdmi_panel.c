@@ -26,6 +26,7 @@
 #include <linux/module.h>
 #include <video/omapdss.h>
 #include <linux/switch.h>
+#include <linux/delay.h>
 
 #include "dss.h"
 
@@ -126,11 +127,13 @@ static void hdmi_panel_disable(struct omap_dss_device *dssdev)
 {
 	mutex_lock(&hdmi.hdmi_lock);
 
-	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
+	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
+		dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
+		msleep(100);
+		dssdev->manager->blank(dssdev->manager, true);
 		omapdss_hdmi_display_disable(dssdev);
-
-	dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
-
+	} else
+		dssdev->state = OMAP_DSS_DISPLAY_DISABLED;
 	mutex_unlock(&hdmi.hdmi_lock);
 }
 
