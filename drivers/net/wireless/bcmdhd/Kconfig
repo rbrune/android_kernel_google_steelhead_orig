@@ -31,3 +31,17 @@ config BCMDHD_WEXT
 	select WEXT_PRIV
 	help
 	  Enables WEXT support
+
+config BCMDHD_DISABLE_ARP_OFFLOAD_SUPPORT
+	bool "Disable ARP offload support."
+	depends on BCMDHD
+	help
+	  Forces ARP offload support to be disabled for Broadcom 4329/30
+	  wireless cards.
+
+config BCMDHD_DISABLE_PKT_FILTER_SUPPORT
+	bool "Disable Packet Filter support."
+	depends on BCMDHD
+	help
+	  Forces Packet Filter support to be disabled for Broadcom 4329/30
+	  wireless cards.
