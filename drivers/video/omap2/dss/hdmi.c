@@ -633,7 +633,14 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 
 	dispc_enable_channel(OMAP_DSS_CHANNEL_DIGIT, dssdev->type, 1);
 
-	hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 1);
+	/* some AVRs get very unhappy and drop HPD if we set one
+	 * mode here in the driver on initial HPD detection and
+	 * then change the mode later when the hwc chooses sets
+	 * a mode.  to avoid this, only enable video when the hwc
+	 * has set the real/final mode.
+	 */
+	if (hdmi.custom_set)
+		hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 1);
 
 	/* only start hdcp state machine after the mode has been
 	 * set by hwc.  this prevents hdcp's ddc transactions from
