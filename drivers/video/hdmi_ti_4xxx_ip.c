@@ -293,6 +293,11 @@ int hdmi_ti_4xxx_phy_init(struct hdmi_ip_data *ip_data, int phy)
 				    HDMI_TXPHY_PAD_CFG_CTRL, 0x7, 30, 28);
 		}
 	}
+
+	/* Enable null packet flooding when VSync is high to reduce EMI noise
+	 * during vertical blanking
+	 */
+	REG_FLD_MOD(hdmi_av_base(ip_data), HDMI_CORE_AV_AUDO_TXSTAT, 0x3, 1, 0);
 #endif
 
 	return 0;
