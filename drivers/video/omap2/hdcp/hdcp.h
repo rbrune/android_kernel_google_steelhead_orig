@@ -235,6 +235,7 @@ enum av_mute {
 
 #define HDCP_INFINITE_REAUTH	0x100
 #define HDCP_MAX_DDC_ERR	5
+#define HDCP_MAX_FAIL_MESSAGES	3
 
 /* FIXME: should be 300ms delay between HDMI start frame event and HDCP enable
  * (to respect 7 VSYNC delay in 24 Hz)
@@ -313,6 +314,8 @@ struct hdcp {
 	 */
 	struct delayed_work *pending_wq_event;
 	int retry_cnt;
+	int fail_cnt;
+	int print_messages;
 	int dss_state;
 	int pending_disable;
 	int hdmi_restart;

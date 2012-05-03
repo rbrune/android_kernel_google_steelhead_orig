@@ -484,7 +484,8 @@ void hdcp_lib_set_encryption(enum encryption_state enc_state)
 
 	spin_unlock_irqrestore(&hdcp.spinlock, flags);
 
-	pr_info("HDCP: Encryption state changed: %s hdcp_ctrl: %02x",
+	if (hdcp.print_messages)
+		pr_info("HDCP: Encryption state changed: %s hdcp_ctrl: %02x",
 				enc_state == HDCP_ENC_OFF ? "OFF" : "ON",
 				RD_REG_32(hdcp.hdmi_wp_base_addr +
 					  HDMI_IP_CORE_SYSTEM,

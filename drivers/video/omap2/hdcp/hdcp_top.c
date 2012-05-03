@@ -133,7 +133,8 @@ static void hdcp_wq_start_authentication(void)
 
 	hdcp.hdcp_state = HDCP_AUTHENTICATION_START;
 
-	printk(KERN_INFO "HDCP: authentication start\n");
+	if (hdcp.print_messages)
+		printk(KERN_INFO "HDCP: authentication start\n");
 
 	/* Step 1 part 1 (until R0 calc delay) */
 	status = hdcp_lib_step1_start();
@@ -167,6 +168,8 @@ static void hdcp_wq_check_r0(void)
 	} else if (status < 0)
 		hdcp_wq_authentication_failure();
 	else {
+		hdcp.fail_cnt = 0;
+		hdcp.print_messages = 1;
 		if (hdcp_lib_check_repeater_bit_in_tx()) {
 			/* Repeater */
 			printk(KERN_INFO "HDCP: authentication step 1 "
@@ -256,9 +259,23 @@ static void hdcp_wq_authentication_failure(void)
 			printk(KERN_INFO "HDCP: authentication failed - "
 					 "retrying, attempts=%d\n",
 							hdcp.retry_cnt);
-		} else
-			printk(KERN_INFO "HDCP: authentication failed - "
-					 "retrying\n");
+		} else {
+			hdcp.fail_cnt++;
+			if (hdcp.print_messages) {
+				if (hdcp.fail_cnt < HDCP_MAX_FAIL_MESSAGES)
+					printk(KERN_INFO "HDCP: authentication "
+					       "failed - retrying\n");
+				else {
+					hdcp.print_messages = 0;
+					printk(KERN_INFO "HDCP: authentication "
+					       "failed %d consecutive times\n",
+					       hdcp.fail_cnt);
+					printk(KERN_INFO "HDCP: will keep "
+					       "trying but silencing logs "
+					       "until hotplug or success\n");
+				}
+			}
+		}
 
 		hdcp.hdcp_state = HDCP_AUTHENTICATION_START;
 		hdcp.auth_state = HDCP_STATE_AUTH_FAIL_RESTARTING;
@@ -512,6 +529,8 @@ static void hdcp_start_frame_cb(void)
 	hdcp.hpd_low = 0;
 	hdcp.pending_disable = 0;
 	hdcp.retry_cnt = hdcp.en_ctrl->nb_retry;
+	hdcp.fail_cnt = 0;
+	hdcp.print_messages = 1;
 	hdcp.pending_start = hdcp_submit_work(HDCP_START_FRAME_EVENT,
 							HDCP_ENABLE_DELAY);
 }
