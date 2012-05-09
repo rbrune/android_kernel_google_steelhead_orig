@@ -33,6 +33,10 @@
 
 #define MAX_EDID_READ_ATTEMPTS 5
 
+#ifdef CONFIG_SND_SOC_OMAP_HDMI_CODEC
+extern void omap_hdmi_audio_set_plug_state(int plugged);
+#endif
+
 static struct {
 	struct mutex hdmi_lock;
 	struct switch_dev hpd_switch;
@@ -249,8 +253,11 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 		/* Were we just reset?  If so, shut everything down, then
 		 * schedule a check of the plug state in the near future.
 		 */
-		switch_set_state(&hdmi.hpd_switch, 0);
+#ifdef CONFIG_SND_SOC_OMAP_HDMI_CODEC
+		omap_hdmi_audio_set_plug_state(0);
+#endif
 		switch_set_state(&hdmi.hdmi_audio_switch, 0);
+		switch_set_state(&hdmi.hpd_switch, 0);
 		memset(&dssdev->panel.audspecs, 0,
 				sizeof(dssdev->panel.audspecs));
 		if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
@@ -449,7 +456,7 @@ static int hdmi_set_mode(struct omap_dss_device *dssdev,
 	 * mode" or not.  Its possible for an HDMI panel to accept a VESA/DVI
 	 * video mode and still support audio.  Likewise, just because a panel
 	 * is using HDMI does not mean that the panel must support audio.
-	 * Finally, just because the panel supports a particual audio mode does
+	 * Finally, just because the panel supports a particular audio mode does
 	 * not mean that the mode can be driven at all times.  Some high bitrate
 	 * audio modes can only be supported if the chosen pixel clock is high
 	 * enough.  All of these factors should be taken into account by the
@@ -459,8 +466,12 @@ static int hdmi_set_mode(struct omap_dss_device *dssdev,
 	if (!ret &&
 	   (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) &&
 	   (dssdev->panel.audspecs.basic_audio_support ||
-	    dssdev->panel.audspecs.valid_mode_cnt))
+	    dssdev->panel.audspecs.valid_mode_cnt)) {
+#ifdef CONFIG_SND_SOC_OMAP_HDMI_CODEC
+		omap_hdmi_audio_set_plug_state(1);
+#endif
 		switch_set_state(&hdmi.hdmi_audio_switch, 1);
+	}
 
 	mutex_unlock(&hdmi.hdmi_lock);
 

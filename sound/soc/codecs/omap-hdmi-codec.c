@@ -62,7 +62,7 @@ struct hdmi_params {
 
 
 /* codec private data */
-struct hdmi_codec_data {
+static struct hdmi_codec_data {
 	struct hdmi_audio_format audio_fmt;
 	struct hdmi_audio_dma audio_dma;
 	struct hdmi_core_audio_config audio_core_cfg;
@@ -80,6 +80,9 @@ struct hdmi_codec_data {
 	int start_time_valid;
 	spinlock_t starttime_lock;
 #endif
+	spinlock_t active_substream_lock;
+	struct snd_pcm_substream *active_substream;
+	int plug_state;
 } hdmi_data;
 
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
@@ -94,6 +97,18 @@ static int hdmi_audio_ioctl_get_start_time(
 	unsigned long irq_state;
 	s64 start;
 	int valid;
+
+	/* If we are in the disconnected state, then HDMI was unplugged while we
+	 * were running and we have been forced to perform an immediate
+	 * shutdown.  The app level will be calling write and get_start_time on
+	 * our now zombie-ified audio driver.  Calls to write will return
+	 * -EBADFD while we are in this state (handled in sound/core/pcm_lib.c),
+	 * but ioctls will be passed through directly to us.  Make sure to
+	 * return the same error code so that the high level knows we are in a
+	 * zombie state and that it is now time to clean us up.
+	 */
+	if (SNDRV_PCM_STATE_DISCONNECTED == substream->runtime->status->state)
+		return -EBADFD;
 
 	if (!priv)
 		return -EINVAL;
@@ -410,10 +425,33 @@ static int hdmi_audio_trigger(struct snd_pcm_substream *substream, int cmd,
 static int hdmi_audio_startup(struct snd_pcm_substream *substream,
 				  struct snd_soc_dai *dai)
 {
-	if (!omapdss_hdmi_get_mode()) {
-		pr_err("Current video settings do not support audio.\n");
-		return -EIO;
+	unsigned long irq_state;
+	int ret_val = 0;
+
+	spin_lock_irqsave(&hdmi_data.active_substream_lock, irq_state);
+	if (!hdmi_data.plug_state) {
+		pr_err("Cannot start HDMI audio.  The HDMI cable could be"
+			" unplugged, or a pixel clock may not have been"
+			" selected or the sink may not support audio for the"
+			" currently selected video mode.\n");
+		ret_val = -EIO;
+		goto done;
 	}
+	hdmi_data.active_substream = substream;
+
+done:
+	spin_unlock_irqrestore(&hdmi_data.active_substream_lock, irq_state);
+	return ret_val;
+}
+
+static int hdmi_audio_shutdown(struct snd_pcm_substream *substream,
+				  struct snd_soc_dai *dai)
+{
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&hdmi_data.active_substream_lock, irq_state);
+	hdmi_data.active_substream = NULL;
+	spin_unlock_irqrestore(&hdmi_data.active_substream_lock, irq_state);
 	return 0;
 }
 
@@ -441,6 +479,8 @@ static int hdmi_probe(struct snd_soc_codec *codec)
 #ifdef CONFIG_SND_OMAP_SOC_STEELHEAD
 	spin_lock_init(&hdmi_data.starttime_lock);
 #endif
+	spin_lock_init(&hdmi_data.active_substream_lock);
+	hdmi_data.plug_state = 0;
 
 	snd_soc_codec_set_drvdata(codec, &hdmi_data);
 
@@ -508,6 +548,54 @@ static int hdmi_remove(struct snd_soc_codec *codec)
 	return 0;
 }
 
+/* omap_hdmi_audio_set_plug_state(int plugged)
+ *
+ * A hack function added to work around some issues with the exisitng HDMI audio
+ * architecture.  Basically, when the HDMI cable is unplugged, the hdmi video
+ * subsystem wants to immediately shut down the entire HDMI unit.  Unfortunatly,
+ * it was relying upon the application level to handle this task, quickly, by
+ * monitoring the appropriate switch devices which are manipulated by the kernel
+ * level.
+ *
+ * If the user-land level of the system is slow, or not paying attention, or
+ * simply does not want to shut down the audio, then the video shutdown
+ * operation in the kernel is going to get wedged behind a number of long
+ * timeouts.  When these timeouts have expired, the video shutdown operation
+ * will shutdown the entire HDMI unit (de-clocking it in the process).  If/When
+ * the app level wakes back up again and attempts to access the hdmi audio
+ * registers, it will trigger a kernel panic because of the attempts to access
+ * the now powered down unit.
+ *
+ * Kernel code should never rely on application code doing anything (in a timely
+ * fashion or not).  The workaround for now is to allow the kernel to signal the
+ * plug state to the hdmi sound driver.  We will immediately shutdown the ALSA
+ * device and put it into the DISCONNECTED state.  Calls to the driver will
+ * start to fail, as will attempts to close and re-open the driver (which should
+ * be the only way out of the DISCONNECTED state).  No matter how badly behaved
+ * the app level code is, at least it cannot trigger a kernel panic.  Well
+ * behaved application code will receive clear signals that the audio driver has
+ * become disconnected and can handle cleanup at their own pace.
+ */
+void omap_hdmi_audio_set_plug_state(int plugged)
+{
+	unsigned long irq_state;
+
+	spin_lock_irqsave(&hdmi_data.active_substream_lock, irq_state);
+	hdmi_data.plug_state = plugged;
+
+	if ((NULL == hdmi_data.active_substream) || hdmi_data.plug_state)
+		goto done;
+
+	snd_pcm_stream_lock_irq(hdmi_data.active_substream);
+	snd_pcm_stop(hdmi_data.active_substream, SNDRV_PCM_STATE_DISCONNECTED);
+	snd_pcm_stream_unlock_irq(hdmi_data.active_substream);
+	hdmi_data.active_substream = NULL;
+
+done:
+	spin_unlock_irqrestore(&hdmi_data.active_substream_lock, irq_state);
+}
+EXPORT_SYMBOL(omap_hdmi_audio_set_plug_state);
+
 
 static struct snd_soc_codec_driver hdmi_audio_codec_drv = {
 	.probe = hdmi_probe,
@@ -518,6 +606,7 @@ static struct snd_soc_dai_ops hdmi_audio_codec_ops = {
 	.hw_params = hdmi_audio_hw_params,
 	.trigger = hdmi_audio_trigger,
 	.startup = hdmi_audio_startup,
+	.shutdown = hdmi_audio_shutdown,
 	.ioctl = hdmi_audio_ioctl,
 };
 
