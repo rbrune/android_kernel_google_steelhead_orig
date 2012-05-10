@@ -38,8 +38,8 @@
 
 #include "steelhead_avr_regs.h"
 
-/* TODO(johngro): remove this include.  No real need to delay here. */
 #include <linux/delay.h>
+#include <linux/reboot.h>
 
 #define LED_BYTE_SZ 3
 
@@ -58,6 +58,16 @@ static const u16 initial_avr_keymap[] = {
 	KEY_VOLUMEUP,
 	KEY_VOLUMEDOWN,
 };
+
+static const struct avr_led_rgb_vals red = {
+	.rgb[0] = 128, .rgb[1] = 0, .rgb[2] = 0
+};
+static const struct avr_led_rgb_vals black = {
+	.rgb[0] = 0, .rgb[1] = 0, .rgb[2] = 0
+};
+
+#define WIPE_WORKER_DELAY_MS 100
+#define WIPE_TIMEOUT_SECS 10
 
 struct avr_driver_state {
 	/* Locks */
@@ -83,6 +93,13 @@ struct avr_driver_state {
 	int irq_registered;
 	int irq_id;
 
+	/* Used to support wipe feature during early boot */
+	struct workqueue_struct *workq;
+	struct delayed_work dwork;
+	unsigned long mute_key_down_start_time;
+	const struct avr_led_rgb_vals *color;
+	u8 mute_key_down;
+
 	/* Current LED state. We cache it so we can restore if we
 	 * detect an AVR reset and not have to notify userland to
 	 * refresh the state.
@@ -94,6 +111,7 @@ struct avr_driver_state {
 
 	/* Preallocated i2c data structure for the setRange ioctl */
 	struct avr_led_set_range_i2c *set_range_vals;
+
 };
 
 static void cleanup_driver_state(struct avr_driver_state *state)
@@ -132,6 +150,11 @@ static void cleanup_driver_state(struct avr_driver_state *state)
 		state->led_buffer_cache = NULL;
 	}
 
+	if (state->workq) {
+		destroy_workqueue(state->workq);
+		state->workq = NULL;
+	}
+
 	i2c_set_clientdata(state->i2c_client, NULL);
 	kfree(state);
 }
@@ -151,7 +174,7 @@ static inline struct avr_driver_state *state_from_file(struct file *file)
  */
 #define MAX_I2C_ATTEMPTS 5
 static int avr_i2c_write_block(struct avr_driver_state *state, u8 cmd,
-			       u16 len, u8 *buf)
+			       u16 len, const u8 *buf)
 {
 	int rc, try;
 
@@ -283,7 +306,7 @@ static int avr_get_led_mode(struct avr_driver_state *state, u8 *mode)
 }
 
 static int avr_led_set_all_vals(struct avr_driver_state *state,
-				struct avr_led_rgb_vals *req)
+				const struct avr_led_rgb_vals *req)
 {
 	if (!state || !req)
 		return -EFAULT;
@@ -354,7 +377,7 @@ static int avr_led_set_range_vals(struct avr_driver_state *state,
 }
 
 static int avr_led_set_mute(struct avr_driver_state *state,
-			    struct avr_led_rgb_vals *req)
+			    const struct avr_led_rgb_vals *req)
 {
 	int rc;
 
@@ -413,6 +436,20 @@ static long avr_leddev_ioctl(struct file *file, unsigned int cmd,
 	long rc = 0;
 
 	mutex_lock(&state->api_lock);
+
+	/* on first call from userspace that's not a read,
+	 * cancel the worker that's processing wipe reset, if any
+	 */
+	if (state->workq && (_IOC_DIR(cmd) == _IOC_WRITE)) {
+		pr_info("%s: First write ioctl from userspace, "
+			"destroying workq\n", __func__);
+		cancel_delayed_work_sync(&state->dwork);
+		destroy_workqueue(state->workq);
+		state->workq = NULL;
+		avr_led_set_all_vals(state, &black);
+		avr_led_set_mode(state, AVR_LED_MODE_BOOT_ANIMATION);
+	}
+	pr_debug("%s: cmd = 0x%x\n", __func__, cmd);
 
 	switch (cmd) {
 	case AVR_LED_GET_FIRMWARE_REVISION: {
@@ -618,6 +655,8 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 		int was_down;
 
 		rc = avr_read_event_fifo(state, &scan);
+		pr_debug("%s: rc = %d, scan = 0x%x\n",
+			 __func__, rc, scan);
 		if (rc || (scan == AVR_KEY_EVENT_EMPTY))
 			break;
 
@@ -644,11 +683,46 @@ static irqreturn_t avr_irq_thread_handler(int irq, void *data)
 				scan == AVR_KEY_VOLUME_UP ?
 				"VOLUME_UP" : "VOLUME_DOWN",
 				was_down ? "down" : "up");
+			input_sync(state->input_dev);
 		}
 
-		input_sync(state->input_dev);
+		/* handle wipe requests in early boot */
+		mutex_lock(&state->api_lock);
+		if (state->workq && (scan == AVR_KEY_MUTE)) {
+			if (was_down) {
+				pr_info("%s: mute key down\n", __func__);
+				/* start delayed work.  worker will
+				 * flash LEDs and eventually cause
+				 * wipe if not cancelled.
+				 */
+				state->mute_key_down = 1;
+				state->mute_key_down_start_time = jiffies;
+				queue_delayed_work(state->workq,
+					&state->dwork,
+					msecs_to_jiffies(WIPE_WORKER_DELAY_MS));
+				avr_led_set_mode(state,
+						 AVR_LED_MODE_HOST_AUTO_COMMIT);
+				state->color = &red;
+				avr_led_set_all_vals(state, state->color);
+			} else {
+				pr_info("%s: mute key released\n", __func__);
+				state->mute_key_down = 0;
+				cancel_delayed_work_sync(&state->dwork);
+				/* could try saving and restoring all led state
+				 * before we entered mute key down flashing red
+				 * mode, but we should have been in boot
+				 * animation mode so just restore that.
+				 * we set to black so that when we come out
+				 * of animation mode, the leds don't show stale
+				 * state.
+				 */
+				avr_led_set_all_vals(state, &black);
+				avr_led_set_mode(state,
+						 AVR_LED_MODE_BOOT_ANIMATION);
+			}
+		}
+		mutex_unlock(&state->api_lock);
 	}
-
 
 	if (rc) {
 
@@ -677,10 +751,49 @@ static const struct file_operations avr_led_fops = {
 	.unlocked_ioctl = avr_leddev_ioctl,
 };
 
+static void steelhead_avr_wipe_worker(struct work_struct *work)
+{
+	struct avr_driver_state *state;
+
+	state = container_of(work, typeof(*state), dwork.work);
+	mutex_lock(&state->api_lock);
+	if (state->mute_key_down) {
+		unsigned long time_down;
+
+		/* since we're running in early boot, we don't
+		 * expect any wrapping of jiffies
+		 */
+		time_down = jiffies - state->mute_key_down_start_time;
+		if (time_down >
+		    msecs_to_jiffies(WIPE_TIMEOUT_SECS * 1000)) {
+			pr_info("%s: mute key down more than %u seconds,"
+				" starting recovery to wipe data\n",
+				__func__, WIPE_TIMEOUT_SECS);
+			mutex_unlock(&state->api_lock);
+			kernel_restart("recovery:wipe_data");
+		}
+		pr_info("%s: mute key still down after %u ms\n",
+			__func__, jiffies_to_msecs(time_down));
+		/* toggle led ring red and black while down
+		 * to give user some feedback
+		 */
+		if (state->color == &red)
+			state->color = &black;
+		else
+			state->color = &red;
+		avr_led_set_all_vals(state, state->color);
+
+		/* prepare next poll check */
+		queue_delayed_work(state->workq,
+				   &state->dwork,
+				   msecs_to_jiffies(WIPE_WORKER_DELAY_MS));
+	}
+	mutex_unlock(&state->api_lock);
+}
+
 static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct avr_driver_state *state;
-	struct avr_led_rgb_vals clear_led_req;
 	int i;
 	int rc;
 
@@ -772,24 +885,8 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		goto error;
 	}
 
-	/* Set up the IRQ line from the AVR */
-	state->irq_id = gpio_to_irq(state->pdata->interrupt_gpio);
-	rc = request_threaded_irq(state->irq_id, NULL,
-				  avr_irq_thread_handler,
-				  IRQF_TRIGGER_LOW | IRQF_ONESHOT,
-				  "steelhead avr irq", state);
-	if (rc) {
-		pr_err("Failed to register IRQ (rc = %d)", rc);
-		goto error;
-	}
-	state->irq_registered = 1;
-
 	/* Per UI spec, clear mute led on kernel init. */
-	clear_led_req.rgb[0] = 0x00;
-	clear_led_req.rgb[1] = 0x00;
-	clear_led_req.rgb[2] = 0x00;
-
-	rc = avr_led_set_mute(state, &clear_led_req);
+	rc = avr_led_set_mute(state, &black);
 	if (rc) {
 		/* don't treat this as fatal.  userland
 		 * can still force reset and use bootloader
@@ -838,6 +935,22 @@ static int avr_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		state->led_mode = AVR_LED_MODE_HOST_AUTO_COMMIT;
 	}
 
+	/* Do this before registering the irq handler */
+	state->workq = create_singlethread_workqueue("steelhead_avr_worker");
+	INIT_DELAYED_WORK(&state->dwork, steelhead_avr_wipe_worker);
+
+	/* Set up the IRQ line from the AVR */
+	state->irq_id = gpio_to_irq(state->pdata->interrupt_gpio);
+	rc = request_threaded_irq(state->irq_id, NULL,
+				  avr_irq_thread_handler,
+				  IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+				  "steelhead avr irq", state);
+	if (rc) {
+		pr_err("Failed to register IRQ (rc = %d)", rc);
+		goto error;
+	}
+	state->irq_registered = 1;
+
 	pr_info("Steelhead AVR Driver loaded.\n");
 
 	return rc;
@@ -858,6 +971,7 @@ static int __devexit avr_remove(struct i2c_client *client)
 
 	/* cleanup our state and get out. */
 	cleanup_driver_state(state);
+
 	return 0;
 }
 
