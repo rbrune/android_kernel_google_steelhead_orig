@@ -103,6 +103,12 @@ static int hdmi_panel_enable(struct omap_dss_device *dssdev)
 		goto err;
 	}
 
+	if (hdmi_get_current_hpd() == 0) {
+		pr_warn("%s: returning 0 but not enabling because hpd is 0\n",
+			__func__);
+		goto err;
+	}
+
 	r = omapdss_hdmi_display_enable(dssdev);
 	if (r) {
 		DSSERR("failed to power on\n");
