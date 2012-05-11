@@ -1474,8 +1474,8 @@ int hci_register_dev(struct hci_dev *hdev)
 	hdev->io_capability = 0x03; /* No Input No Output */
 
 #ifdef CONFIG_MACH_STEELHEAD
-	/* request sniff mode after 1 second default idle_timeout */
-	hdev->idle_timeout = 1000;
+	/* request sniff mode after 500ms default idle_timeout */
+	hdev->idle_timeout = 500;
 #else
 	hdev->idle_timeout = 0;
 #endif
