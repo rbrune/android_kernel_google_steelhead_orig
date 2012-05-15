@@ -529,4 +529,5 @@ void hdmi_panel_exit(void)
 	omap_dss_unregister_driver(&hdmi_driver);
 
 	switch_dev_unregister(&hdmi.hpd_switch);
+	switch_dev_unregister(&hdmi.hdmi_audio_switch);
 }
