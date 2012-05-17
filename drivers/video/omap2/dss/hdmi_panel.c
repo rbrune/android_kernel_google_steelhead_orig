@@ -41,7 +41,6 @@ static struct {
 	struct mutex hdmi_lock;
 	struct switch_dev hpd_switch;
 	struct switch_dev hdmi_audio_switch;
-	struct switch_dev hdmi_video_switch;
 } hdmi;
 
 static ssize_t hdmi_deepcolor_show(struct device *dev,
@@ -264,7 +263,6 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 		omap_hdmi_audio_set_plug_state(0);
 #endif
 		switch_set_state(&hdmi.hdmi_audio_switch, 0);
-		switch_set_state(&hdmi.hdmi_video_switch, 0);
 		switch_set_state(&hdmi.hpd_switch, 0);
 		memset(&dssdev->panel.audspecs, 0,
 				sizeof(dssdev->panel.audspecs));
@@ -381,33 +379,8 @@ static void hdmi_set_timings(struct omap_dss_device *dssdev,
 
 	dssdev->panel.timings = *timings;
 
-	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
-
-		/* this can be used via sysfs at the display driver layer
-		 * to directly set the timing/mode of hdmi.  as such, we
-		 * want to toggle the video and audio switches to update
-		 * userspace uevent listeners of the video mode change,
-		 * and audio might not be supported in the new mode as
-		 * well.
-		 */
-
-		switch_set_state(&hdmi.hdmi_audio_switch, 0);
-		switch_set_state(&hdmi.hdmi_video_switch, 0);
-
-		/* omapdss_hdmi_display_set_timing() eventually
-		 * calls back to our hdmi_panel_disable()
-		 * and hdmi_panel_enable() so we can't hold
-		 * the lock or else we'd deadlock
-		 */
-		mutex_unlock(&hdmi.hdmi_lock);
+	if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)
 		omapdss_hdmi_display_set_timing(dssdev);
-		mutex_lock(&hdmi.hdmi_lock);
-
-		switch_set_state(&hdmi.hdmi_video_switch, 1);
-		if (dssdev->panel.audspecs.basic_audio_support ||
-		    dssdev->panel.audspecs.valid_mode_cnt)
-			switch_set_state(&hdmi.hdmi_audio_switch, 1);
-	}
 
 	mutex_unlock(&hdmi.hdmi_lock);
 }
@@ -496,17 +469,14 @@ static int hdmi_set_mode(struct omap_dss_device *dssdev,
 	 * HDMI audio driver when it decides which audio modes are allowed and
 	 * which ones are not.  Currently none of this is taken into account.
 	 */
-	if (!ret && (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE)) {
-		/* inform userland that we've choosen a video mode */
-		switch_set_state(&hdmi.hdmi_video_switch, 1);
-
-		if (dssdev->panel.audspecs.basic_audio_support ||
-		    dssdev->panel.audspecs.valid_mode_cnt) {
+	if (!ret &&
+	   (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) &&
+	   (dssdev->panel.audspecs.basic_audio_support ||
+	    dssdev->panel.audspecs.valid_mode_cnt)) {
 #ifdef CONFIG_SND_SOC_OMAP_HDMI_CODEC
-			omap_hdmi_audio_set_plug_state(1);
+		omap_hdmi_audio_set_plug_state(1);
 #endif
-			switch_set_state(&hdmi.hdmi_audio_switch, 1);
-		}
+		switch_set_state(&hdmi.hdmi_audio_switch, 1);
 	}
 
 	mutex_unlock(&hdmi.hdmi_lock);
@@ -544,9 +514,6 @@ int hdmi_panel_init(void)
 	hdmi.hdmi_audio_switch.name = "hdmi_audio";
 	switch_dev_register(&hdmi.hdmi_audio_switch);
 
-	hdmi.hdmi_video_switch.name = "hdmi_video";
-	switch_dev_register(&hdmi.hdmi_video_switch);
-
 	my_workq = create_singlethread_workqueue("hdmi_hotplug");
 	INIT_DELAYED_WORK(&hpd_work.dwork, hdmi_hotplug_detect_worker);
 	omap_dss_register_driver(&hdmi_driver);
@@ -563,5 +530,4 @@ void hdmi_panel_exit(void)
 
 	switch_dev_unregister(&hdmi.hpd_switch);
 	switch_dev_unregister(&hdmi.hdmi_audio_switch);
-	switch_dev_unregister(&hdmi.hdmi_video_switch);
 }
