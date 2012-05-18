@@ -549,6 +549,7 @@ int hdmi_get_current_hpd(void);
 void hdmi_get_monspecs(struct fb_monspecs *specs);
 void hdmi_get_audspecs(struct omap_hdmi_audio_modes *specs);
 u8 *hdmi_read_edid(struct omap_video_timings *);
+void hdmi_set_edid_state(bool val);
 
 int hdmi_panel_init(void);
 void hdmi_panel_exit(void);

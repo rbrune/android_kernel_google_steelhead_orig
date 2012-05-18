@@ -1,10 +1,10 @@
 /*
- * hdcp_ddc.h
+ * hdmi_ti_4xxx_ip_ddc.h
  *
- * HDCP interface DSS driver setting for TI's OMAP4 family of processor.
+ * HDMI interface DSS driver setting for TI's OMAP4 family of processor.
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com/
- * Authors: Fabrice Olivero
- *	Fabrice Olivero <f-olivero@ti.com>
+ * Authors: Dandawate Saket
+ *	Dandawate Saket <dsaket@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -18,8 +18,10 @@
  * You should have received a copy of the GNU General Public License along with
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#include <linux/ioctl.h>
+#include <linux/types.h>
 
-#define HDCPRX_SLV 0x74
+#define DDC_RX_SLV 0x74
 
 #define MASTER_BASE		0xEC
 #define MDDC_MANUAL_ADDR	0xEC
@@ -109,3 +111,81 @@ enum ri_suspend_resume {
 	AUTO_RI_SUSPEND,
 	AUTO_RI_RESUME
 };
+
+/***********************/
+/* DDC addresses  */
+/***********************/
+
+#define DDC_BKSV_ADDR		0x00
+#define DDC_Ri_ADDR		0x08
+#define DDC_AKSV_ADDR		0x10
+#define DDC_AN_ADDR		0x18
+#define DDC_V_ADDR		0x20
+#define DDC_BCAPS_ADDR		0x40
+#define DDC_BSTATUS_ADDR	0x41
+#define DDC_KSV_FIFO_ADDR	0x43
+
+#define DDC_BKSV_LEN		5
+#define DDC_Ri_LEN		2
+#define DDC_AKSV_LEN		5
+#define DDC_AN_LEN		8
+#define DDC_V_LEN		20
+#define DDC_BCAPS_LEN		1
+#define DDC_BSTATUS_LEN		2
+
+#define DDC_BIT_REPEATER	6
+
+#define DDC_BSTATUS0_MAX_DEVS	0x80
+#define DDC_BSTATUS0_DEV_COUNT	0x7F
+#define DDC_BSTATUS1_MAX_CASC	0x08
+
+#ifdef DEBUG
+#define DDC_DBG			/* Log DDC data */
+#undef POWER_TRANSITION_DBG	/* Add wait loops to allow testing DSS power
+				 * transition during debug*/
+#endif
+
+/* DDC access timeout in ms */
+#define DDC_TIMEOUT	500
+#define DDC_STOP_FRAME_BLOCKING_TIMEOUT (2*DDC_TIMEOUT)
+
+#define MAX_DDC_ERR	5
+
+/* Status / error codes */
+#define DDC_OK			0
+#define DDC_ERROR		1
+
+#define HDMI_IP_CORE_SYSTEM 0x400
+/* HDMI WP base address */
+/*----------------------*/
+#define HDMI_WP			0x58006000
+
+#define WR_REG_32(base, offset, val)	__raw_writel(val, base + offset)
+#define RD_REG_32(base, offset)		__raw_readl(base + offset)
+
+#define RD_FIELD_32(base, offset, start, end) \
+	((RD_REG_32(base, offset) & FLD_MASK(start, end)) >> (end))
+
+
+#undef DBG
+
+#ifdef HDCP_DEBUG
+#define DBG(format, ...) \
+		printk(KERN_DEBUG "HDCP: " format "\n", ## __VA_ARGS__)
+#else
+#define DBG(format, ...)
+#endif
+
+struct ddc {
+	void __iomem *hdmi_wp_base_addr;
+	struct mutex lock;
+	spinlock_t spinlock;
+	int pending_disable;
+};
+extern struct ddc ddc;
+
+/* DDC */
+int ddc_read(u16 no_bytes, u8 addr, u8 *pdata);
+int ddc_write(u16 no_bytes, u8 addr, u8 *pdata);
+void ddc_abort(void);
+int ddc_start_transfer(mddc_type *mddc_cmd, u8 operation);

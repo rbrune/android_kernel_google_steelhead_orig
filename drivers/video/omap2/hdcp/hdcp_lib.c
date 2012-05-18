@@ -23,6 +23,7 @@
 #include <mach/omap4-common.h>
 #include <linux/dma-mapping.h>
 #include "hdcp.h"
+#include "../../hdmi_ti_4xxx_ip_ddc.h"
 
 static void hdcp_lib_read_an(u8 *an);
 static void hdcp_lib_read_aksv(u8 *ksv_data);
@@ -123,8 +124,8 @@ static int hdcp_lib_r0_check(void)
 	DBG("hdcp_lib_r0_check()");
 
 	/* DDC: Read Ri' from RX */
-	if (hdcp_ddc_read(DDC_Ri_LEN, DDC_Ri_ADDR , (u8 *)&ro_rx))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_Ri_LEN, DDC_Ri_ADDR , (u8 *)&ro_rx))
+		return -DDC_ERROR;
 
 	/* Read Ri in HDCP IP */
 	ro_tx[0] = RD_REG_32(hdcp.hdmi_wp_base_addr + HDMI_IP_CORE_SYSTEM,
@@ -150,8 +151,8 @@ static int hdcp_lib_sha_bstatus(struct hdcp_sha_in *sha)
 {
 	u8 data[2];
 
-	if (hdcp_ddc_read(DDC_BSTATUS_LEN, DDC_BSTATUS_ADDR, data))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_BSTATUS_LEN, DDC_BSTATUS_ADDR, data))
+		return -DDC_ERROR;
 
 	sha->data[sha->byte_counter++] = data[0];
 	sha->data[sha->byte_counter++] = data[1];
@@ -205,10 +206,10 @@ static int hdcp_lib_initiate_step1(void)
 	DBG("hdcp_lib_initiate_step1()\n");
 
 	/* DDC: Read BKSV from RX */
-	if (hdcp_ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR , an_ksv_data))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR , an_ksv_data))
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	DBG("BKSV: %02x %02x %02x %02x %02x", an_ksv_data[0], an_ksv_data[1],
@@ -230,10 +231,10 @@ static int hdcp_lib_initiate_step1(void)
 		    HDMI_IP_CORE_SYSTEM__HDCP_CTRL, 2, 2, 1);
 
 	/* Read BCAPS to determine if HDCP RX is a repeater */
-	if (hdcp_ddc_read(DDC_BCAPS_LEN, DDC_BCAPS_ADDR, &rx_type))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_BCAPS_LEN, DDC_BCAPS_ADDR, &rx_type))
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	rx_type = FLD_GET(rx_type, DDC_BIT_REPEATER, DDC_BIT_REPEATER);
@@ -258,8 +259,8 @@ static int hdcp_lib_initiate_step1(void)
 			 "*************************\n");
 #endif
 	/* DDC: Read BKSV from RX */
-	if (hdcp_ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR , an_bksv_data))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_BKSV_LEN, DDC_BKSV_ADDR , an_bksv_data))
+		return -DDC_ERROR;
 
 	/* Generate An */
 	hdcp_lib_generate_an(an_ksv_data);
@@ -267,10 +268,10 @@ static int hdcp_lib_initiate_step1(void)
 	/* Authentication 1st step initiated HERE */
 
 	/* DDC: Write An */
-	if (hdcp_ddc_write(DDC_AN_LEN, DDC_AN_ADDR , an_ksv_data))
-		return -HDCP_DDC_ERROR;
+	if (ddc_write(DDC_AN_LEN, DDC_AN_ADDR , an_ksv_data))
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* Read AKSV from IP: (HDCP AKSV register) */
@@ -285,14 +286,14 @@ static int hdcp_lib_initiate_step1(void)
 		return -HDCP_AKSV_ERROR;
 	}
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* DDC: Write AKSV */
-	if (hdcp_ddc_write(DDC_AKSV_LEN, DDC_AKSV_ADDR, an_ksv_data))
-		return -HDCP_DDC_ERROR;
+	if (ddc_write(DDC_AKSV_LEN, DDC_AKSV_ADDR, an_ksv_data))
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* Write Bksv to IP */
@@ -658,7 +659,7 @@ int hdcp_lib_step1_start(void)
 
 	status = hdcp_lib_initiate_step1();
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 	else
 		return status;
@@ -695,7 +696,7 @@ int hdcp_lib_step1_r0_check(void)
 	 * enable encryption / Ri check
 	 */
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	if (hdcp_lib_check_repeater_bit_in_tx()) {
@@ -764,8 +765,8 @@ int hdcp_lib_step2(void)
 #endif
 
 	/* DDC: Read Bstatus (1st byte) from Rx */
-	if (hdcp_ddc_read(DDC_BSTATUS_LEN, DDC_BSTATUS_ADDR, bstatus))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_BSTATUS_LEN, DDC_BSTATUS_ADDR, bstatus))
+		return -DDC_ERROR;
 
 	/* Get KSV list size */
 	DBG("KSV list size: %d", bstatus[0] & DDC_BSTATUS0_DEV_COUNT);
@@ -788,28 +789,28 @@ int hdcp_lib_step2(void)
 	/* TODO: should be done earlier at HDCP init */
 	memset(sha_input.data, 0, MAX_SHA_DATA_SIZE);
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* DDC: read KSV list */
 	if (sha_input.byte_counter) {
-		if (hdcp_ddc_read(sha_input.byte_counter, DDC_KSV_FIFO_ADDR,
+		if (ddc_read(sha_input.byte_counter, DDC_KSV_FIFO_ADDR,
 				  (u8 *)&sha_input.data))
-			return -HDCP_DDC_ERROR;
+			return -DDC_ERROR;
 	}
 
 	/* Read and add Bstatus */
 	if (hdcp_lib_sha_bstatus(&sha_input))
-		return -HDCP_DDC_ERROR;
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* Read V' */
-	if (hdcp_ddc_read(DDC_V_LEN, DDC_V_ADDR, sha_input.vprime))
-		return -HDCP_DDC_ERROR;
+	if (ddc_read(DDC_V_LEN, DDC_V_ADDR, sha_input.vprime))
+		return -DDC_ERROR;
 
-	if (hdcp.pending_disable)
+	if (ddc.pending_disable)
 		return -HDCP_CANCELLED_AUTH;
 
 	/* clear sha_input values in cache*/

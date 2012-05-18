@@ -431,6 +431,19 @@ void hdmi_get_audspecs(struct omap_hdmi_audio_modes *specs)
 	}
 }
 
+void hdmi_set_edid_state(bool val)
+{
+	hdmi.edid_set = val;
+	if (val)
+		pr_info("hdmi: EDID info read\n");
+	else {
+		pr_info("hdmi: EDID and custom_set cleared\n");
+		/* clear custom set if we lost edid */
+		hdmi.custom_set = 0;
+	}
+}
+EXPORT_SYMBOL(hdmi_set_edid_state);
+
 u8 *hdmi_read_edid(struct omap_video_timings *dp)
 {
 	int ret = 0, i;
@@ -461,7 +474,8 @@ u8 *hdmi_read_edid(struct omap_video_timings *dp)
 	if (memcmp(hdmi.edid, edid_header, sizeof(edid_header)))
 		return NULL;
 
-	hdmi.edid_set = true;
+	hdmi_set_edid_state(true);
+
 	return hdmi.edid;
 }
 
@@ -650,6 +664,7 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 	 */
 	if (hdmi.custom_set)
 		hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 1);
+
 
 	if (hdmi.hdmi_start_frame_cb &&
 	    hdmi.custom_set &&
@@ -849,7 +864,6 @@ err0:
 void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 {
 	DSSINFO("Enter hdmi_display_disable\n");
-
 	mutex_lock(&hdmi.lock);
 
 	if (!hdmi.enabled)
@@ -861,10 +875,6 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 	hdmi_power_off(dssdev);
 	if (dssdev->sync_lost_error == 0)
 		if (dssdev->state != OMAP_DSS_DISPLAY_SUSPENDED) {
-			/* clear EDID and mode on disable only */
-			hdmi.edid_set = false;
-			hdmi.custom_set = 0;
-
 			/* clear the HDMI mode back to DVI.  The audio subsystem
 			 * uses the hdmi.mode to determine if audio support is
 			 * present.  We don't want the audio system to decide
@@ -889,7 +899,6 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 			 */
 			hdmi.cfg.cm.mode = HDMI_DVI;
 
-			pr_info("hdmi: clearing EDID info\n");
 		}
 	regulator_disable(hdmi.hdmi_reg);
 

@@ -208,10 +208,13 @@ static int hdmi_hpd_set_state(int target_state, int resched_time) {
 	 * of the pending callback's way.
 	 */
 	if ((hpd_work.state == HPD_STATE_RESET) &&
-			(target_state >= HPD_STATE_CHECK_EDID)) {
+		(target_state >= HPD_STATE_CHECK_EDID)) {
 		ret = -1;
 		goto done;
 	}
+
+	if (target_state == HPD_STATE_RESET)
+		hdmi_set_edid_state(false);
 
 	__cancel_delayed_work(&hpd_work.dwork);
 	hpd_work.state = target_state;

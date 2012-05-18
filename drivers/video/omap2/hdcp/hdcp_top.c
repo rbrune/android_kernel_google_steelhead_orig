@@ -31,6 +31,7 @@
 #include "../../hdmi_ti_4xxx_ip.h"
 #include "../dss/dss.h"
 #include "hdcp.h"
+#include "../../hdmi_ti_4xxx_ip_ddc.h"
 
 struct hdcp hdcp;
 struct hdcp_sha_in sha_input;
@@ -120,7 +121,7 @@ static void hdcp_wq_disable(void)
 
 	hdcp_cancel_work(&hdcp.pending_wq_event);
 	hdcp_lib_disable();
-	hdcp.pending_disable = 0;
+	ddc.pending_disable = 0;
 }
 
 /*-----------------------------------------------------------------------------
@@ -251,7 +252,7 @@ static void hdcp_wq_authentication_failure(void)
 	hdcp_cancel_work(&hdcp.pending_wq_event);
 
 	hdcp_lib_disable();
-	hdcp.pending_disable = 0;
+	ddc.pending_disable = 0;
 
 	if (hdcp.retry_cnt && (hdcp.hdmi_state != HDMI_STOPPED)) {
 		if (hdcp.retry_cnt < HDCP_INFINITE_REAUTH) {
@@ -527,7 +528,7 @@ static void hdcp_start_frame_cb(void)
 		hdcp_cancel_work(&hdcp.pending_wq_event);
 
 	hdcp.hpd_low = 0;
-	hdcp.pending_disable = 0;
+	ddc.pending_disable = 0;
 	hdcp.retry_cnt = hdcp.en_ctrl->nb_retry;
 	hdcp.fail_cnt = 0;
 	hdcp.print_messages = 1;
@@ -566,7 +567,7 @@ static void hdcp_irq_cb(int status)
 	    (hdcp.hdcp_state != HDCP_ENABLE_PENDING)) {
 		if (status & HDMI_HPD_LOW) {
 			hdcp_lib_set_encryption(HDCP_ENC_OFF);
-			hdcp_ddc_abort();
+			ddc_abort();
 		}
 
 		if (status & HDMI_RI_ERR) {
@@ -580,10 +581,11 @@ static void hdcp_irq_cb(int status)
 	}
 
 	if (status & HDMI_HPD_LOW) {
-		hdcp.pending_disable = 1;	/* Used to exit on-going HDCP
+		ddc.pending_disable = 1;	/* Used to exit on-going HDCP
 						 * work */
 		hdcp.hpd_low = 0;		/* Used to cancel HDCP works */
 		hdcp_lib_disable();
+		ddc.pending_disable = 0;
 		/* In case of HDCP_STOP_FRAME_EVENT, HDCP stop
 		 * frame callback is blocked and waiting for
 		 * HDCP driver to finish accessing the HW
@@ -648,7 +650,7 @@ static long hdcp_disable_ctl(void)
 	hdcp_cancel_work(&hdcp.pending_start);
 	hdcp_cancel_work(&hdcp.pending_wq_event);
 
-	hdcp.pending_disable = 1;
+	ddc.pending_disable = 1;
 	/* Post event to workqueue */
 	if (hdcp_submit_work(HDCP_DISABLE_CTL, 0) == 0)
 		return -EFAULT;
@@ -984,7 +986,7 @@ static int __init hdcp_init(void)
 	hdcp.pending_wq_event = 0;
 	hdcp.retry_cnt = 0;
 	hdcp.auth_state = HDCP_STATE_DISABLED;
-	hdcp.pending_disable = 0;
+	ddc.pending_disable = 0;
 	hdcp.hdcp_up_event = 0;
 	hdcp.hdcp_down_event = 0;
 	hdcp_wait_re_entrance = 0;

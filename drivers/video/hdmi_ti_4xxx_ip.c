@@ -31,6 +31,7 @@
 #include <linux/omapfb.h>
 
 #include "hdmi_ti_4xxx_ip.h"
+#include "hdmi_ti_4xxx_ip_ddc.h"
 
 static inline void hdmi_write_reg(void __iomem *base_addr,
 				const struct hdmi_reg idx, u32 val)
@@ -316,9 +317,7 @@ static int hdmi_core_ddc_edid(struct hdmi_ip_data *ip_data,
 	u32 i, j;
 	char checksum = 0;
 	u32 offset = 0;
-
-	/* Turn on CLK for DDC */
-	REG_FLD_MOD(hdmi_av_base(ip_data), HDMI_CORE_AV_DPD, 0x7, 2, 0);
+	mddc_type mddc;
 
 	/*
 	 * SW HACK : Without the Delay DDC(i2c bus) reads 0 values /
@@ -327,98 +326,23 @@ static int hdmi_core_ddc_edid(struct hdmi_ip_data *ip_data,
 	 */
 	msleep(300);
 
-	if (!ext) {
-		/* Clk SCL Devices */
-		REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-						HDMI_CORE_DDC_CMD, 0xA, 3, 0);
-
-		/* HDMI_CORE_DDC_STATUS_IN_PROG */
-		if (hdmi_wait_for_bit_change(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_STATUS, 4, 4, 0) != 0) {
-			pr_err("Failed to program DDC, attempting to reset...\n");
-
-			REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_CMD, 0xF, 3, 0);
-			usleep_range(1000, 1000);
-
-			return -ETIMEDOUT;
-		}
-
-		/* Clear FIFO */
-		REG_FLD_MOD(hdmi_core_sys_base(ip_data)
-						, HDMI_CORE_DDC_CMD, 0x9, 3, 0);
-
-		/* HDMI_CORE_DDC_STATUS_IN_PROG */
-		if (hdmi_wait_for_bit_change(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_STATUS, 4, 4, 0) != 0) {
-			pr_err("Failed to program DDC, attempting to reset...\n");
-
-			REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_CMD, 0xF, 3, 0);
-			usleep_range(1000, 1000);
-
-			return -ETIMEDOUT;
-		}
-
-	} else {
-		if (ext % 2 != 0)
-			offset = 0x80;
-	}
-
-	/* Load Segment Address Register */
-	REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_SEGM, ext/2, 7, 0);
-
-	/* Load Slave Address Register */
-	REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_ADDR, 0xA0 >> 1, 7, 1);
-
-	/* Load Offset Address Register */
-	REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_OFFSET, offset, 7, 0);
-
-	/* Load Byte Count */
-	REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_COUNT1, 0x80, 7, 0);
-	REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_COUNT2, 0x0, 1, 0);
-
-	/* Set DDC_CMD */
-	if (ext)
-		REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_CMD, 0x4, 3, 0);
-	else
-		REG_FLD_MOD(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_CMD, 0x2, 3, 0);
-
-	/* HDMI_CORE_DDC_STATUS_BUS_LOW */
-	if (REG_GET(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_STATUS, 6, 6) == 1) {
-		pr_err("I2C Bus Low?\n");
-		return -EIO;
-	}
-	/* HDMI_CORE_DDC_STATUS_NO_ACK */
-	if (REG_GET(hdmi_core_sys_base(ip_data),
-					HDMI_CORE_DDC_STATUS, 5, 5) == 1) {
-		pr_err("I2C No Ack\n");
-		return -EIO;
-	}
+	if (ext % 2 != 0)
+		 offset = 0x80;
 
 	i = ext * 128;
-	j = 0;
-	while (((REG_GET(hdmi_core_sys_base(ip_data),
-			HDMI_CORE_DDC_STATUS, 4, 4) == 1) ||
-			(REG_GET(hdmi_core_sys_base(ip_data),
-			HDMI_CORE_DDC_STATUS, 2, 2) == 0)) && j < 128) {
 
-		if (REG_GET(hdmi_core_sys_base(ip_data)
-					, HDMI_CORE_DDC_STATUS, 2, 2) == 0) {
-			/* FIFO not empty */
-			pedid[i++] = REG_GET(hdmi_core_sys_base(ip_data),
-						HDMI_CORE_DDC_DATA, 7, 0);
-			j++;
-		}
-	}
+	mddc.slaveAddr  = 0xA0;
+	mddc.offset     = ext/2;
+	mddc.regAddr    = offset;
+	mddc.nbytes_lsb = 0x80;
+	mddc.nbytes_msb = 0x0;
+	mddc.dummy      = 0;
+	mddc.pdata      = &pedid[i];
+	if (ext)
+		mddc.cmd = MASTER_CMD_ENH_RD;
+	else
+		mddc.cmd = MASTER_CMD_SEQ_RD;
+	ddc_start_transfer(&mddc, DDC_READ);
 
 	for (j = 0; j < 128; j++)
 		checksum += pedid[j];
