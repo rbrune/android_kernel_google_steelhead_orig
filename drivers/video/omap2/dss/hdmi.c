@@ -65,11 +65,8 @@ static struct {
 	struct platform_device *pdev;
 	struct omap_dss_device *dssdev;
 	struct hdmi_ip_data hdmi_data;
-	int code;
-	int mode;
 	u8 edid[HDMI_EDID_MAX_LENGTH];
 	u8 edid_set;
-	bool can_do_hdmi;
 
 	bool custom_set;
 	enum hdmi_deep_color_mode deep_color;
@@ -261,7 +258,10 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 			fb_edid_add_monspecs(edid + i * 128, specs);
 	}
 
-	hdmi.can_do_hdmi = specs->misc & FB_MISC_HDMI;
+	if (specs->misc & FB_MISC_HDMI)
+		hdmi.cfg.cm.mode = HDMI_HDMI;
+	else
+		hdmi.cfg.cm.mode = HDMI_DVI;
 
 	/* mark resolutions we support */
 	for (i = 0; i < specs->modedb_len; i++) {
@@ -557,14 +557,18 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 		dssdev->panel.timings.y_res);
 
 	if (!hdmi.custom_set) {
-		u32 hdmi_code = 4;
-		struct fb_videomode vesa_vga = vesa_modes[hdmi_code];
+		u32 hdmi_code;
+		struct fb_videomode vmode;
 
+		/*
+		 * Default to set cea_modes[1] (640x480p @ 59.94Hz/60Hz)
+		 * if no default set in the panel.
+		 */
 		hdmi_code = dssdev->panel.hdmi_default_cea_code;
-		if (hdmi_code != 0 && hdmi_code < CEA_MODEDB_SIZE)
-			vesa_vga = cea_modes[hdmi_code];
-
-		hdmi_set_timings(&vesa_vga, false);
+		if (hdmi_code == 0 || hdmi_code >= CEA_MODEDB_SIZE)
+			hdmi_code = 1;
+		vmode = cea_modes[hdmi_code];
+		hdmi_set_timings(&vmode, false);
 	}
 
 	omapfb_fb2dss_timings(&hdmi.cfg.timings, &dssdev->panel.timings);
@@ -607,8 +611,6 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 		goto err;
 	}
 
-	hdmi.cfg.cm.mode = hdmi.can_do_hdmi ? hdmi.mode : HDMI_DVI;
-	hdmi.cfg.cm.code = hdmi.code;
 	hdmi_ti_4xxx_basic_configure(&hdmi.hdmi_data, &hdmi.cfg);
 
 	/* Make selection of HDMI in DSS */
@@ -635,7 +637,7 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 
 	/* some AVRs get very unhappy and drop HPD if we set one
 	 * mode here in the driver on initial HPD detection and
-	 * then change the mode later when the hwc chooses sets
+	 * then change the mode later when the hwc chooses
 	 * a mode.  to avoid this, only enable video when the hwc
 	 * has set the real/final mode.
 	 */
@@ -680,7 +682,7 @@ int omapdss_hdmi_get_pixel_clock(void)
 
 int omapdss_hdmi_get_mode(void)
 {
-	return hdmi.mode;
+	return hdmi.cfg.cm.mode;
 }
 
 int omapdss_hdmi_register_hdcp_callbacks(void (*hdmi_start_frame_cb)(void),
@@ -762,8 +764,6 @@ int omapdss_hdmi_display_set_mode(struct omap_dss_device *dssdev,
 	hdmi.set_mode = false;
 	r1 = hdmi_set_timings(vm, false) ? 0 : -EINVAL;
 	hdmi.custom_set = 1;
-	hdmi.code = hdmi.cfg.cm.code;
-	hdmi.mode = hdmi.cfg.cm.mode;
 	r2 = dssdev->driver->enable(dssdev);
 	return r1 ? : r2;
 }
@@ -886,7 +886,7 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 			 * supported and valid.  There is a lot of room for
 			 * improvement here.
 			 */
-			hdmi.mode = HDMI_DVI;
+			hdmi.cfg.cm.mode = HDMI_DVI;
 
 			pr_info("hdmi: clearing EDID info\n");
 		}
