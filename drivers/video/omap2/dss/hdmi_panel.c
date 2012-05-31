@@ -450,7 +450,19 @@ static void hdmi_get_fb_resolution(struct omap_dss_device *dssdev,
 static int hdmi_set_mode(struct omap_dss_device *dssdev,
 			 struct fb_videomode *vm)
 {
-	int ret = omapdss_hdmi_display_set_mode(dssdev, vm);
+	int ret;
+
+	/* Reject any set mode request if edid hasn't been
+	 * read (or has been lost).  Bouncing hpd could cause
+	 * this call to happen when the hpd state machine
+	 * is still running handling a new hdp->1 case, and
+	 * the disable of the driver that setting the mode
+	 * requires could cause the edid read to fail.
+	 */
+	if (hdmi_hpd_get_state() != HPD_STATE_DONE_ENABLED)
+		return -ENODEV;
+
+	ret = omapdss_hdmi_display_set_mode(dssdev, vm);
 
 	mutex_lock(&hdmi.hdmi_lock);
 
