@@ -525,9 +525,16 @@ static void hdmi_load_hdcp_keys(struct omap_dss_device *dssdev)
 		else if (aksv == HDMI_AKSV_ERROR)
 			hdmi.wp_reset_done = false;
 
-		if (!hdmi.wp_reset_done)
-			DSSERR("*** INVALID AKSV: "
-				"Do not perform HDCP AUTHENTICATION\n");
+		if (!hdmi.wp_reset_done) {
+			if (hdmi.custom_set) {
+				DSSERR("*** INVALID AKSV: "
+				       "Do not perform HDCP AUTHENTICATION\n");
+			} else {
+				DSSINFO("*** custom_set == 0: "
+					"not performing HDCP AUTHENTICATION\n");
+			}
+		}
+
 	}
 
 }
