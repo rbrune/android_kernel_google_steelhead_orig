@@ -79,8 +79,11 @@ static struct {
 
 	int runtime_count;
 	int enabled;
+	int display_on;
 	bool set_mode;
 	bool wp_reset_done;
+
+	struct fb_videomode initial_vmode;
 
 	void (*hdmi_start_frame_cb)(void);
 	void (*hdmi_irq_cb)(int);
@@ -192,6 +195,16 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 	int i = 0;
 	DSSDBG("hdmi_get_code\n");
 
+	pr_debug("%s: xres = %d, yres = %d, pixclock = %d (%lu KHz)n",
+		__func__, vm->xres, vm->yres, vm->pixclock,
+		 PICOS2KHZ(vm->pixclock));
+	pr_debug("hsync_len = %d, left_margin = %d, right_margin = %d\n",
+		vm->hsync_len, vm->left_margin, vm->right_margin);
+	pr_debug("vsync_len = %d, upper_margin = %d, lower_margin = %d\n",
+		vm->vsync_len, vm->upper_margin, vm->lower_margin);
+	pr_debug("flag = 0x%x, vmode = 0x%x, check_only = %d\n",
+		 vm->flag, vm->vmode, check_only);
+
 	if (!vm->xres || !vm->yres || !vm->pixclock)
 		goto fail;
 
@@ -201,6 +214,8 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 			u32 flag = vm->flag;
 			*vm = cea_modes[i];
 			vm->flag = flag;
+			pr_debug("%s: found match cea_mode %d\n",
+				__func__, i);
 			if (check_only)
 				return 1;
 			hdmi.cfg.cm.code = i;
@@ -216,6 +231,8 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 			u32 flag = vm->flag;
 			*vm = vesa_modes[i];
 			vm->flag = flag;
+			pr_debug("%s: found match vesa_mode %d\n",
+				__func__, i);
 			if (check_only)
 				return 1;
 			hdmi.cfg.cm.code = i;
@@ -244,6 +261,8 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 	int i;
 	char *edid = (char *) hdmi.edid;
 	int found_preferred = 0;
+	int default_supported = 0;
+	int default_code;
 
 	memset(specs, 0x0, sizeof(*specs));
 	if (!hdmi.edid_set)
@@ -262,6 +281,12 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 		hdmi.cfg.cm.mode = HDMI_HDMI;
 	else
 		hdmi.cfg.cm.mode = HDMI_DVI;
+
+	default_code = hdmi.dssdev->panel.hdmi_default_cea_code;
+	if (default_code > 0 && default_code < CEA_MODEDB_SIZE)
+		hdmi.initial_vmode = cea_modes[default_code];
+	else
+		default_code = 0;
 
 	/* mark resolutions we support */
 	for (i = 0; i < specs->modedb_len; i++) {
@@ -288,6 +313,36 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 
 		/* if we made it here the mode is actually possible */
 		specs->modedb[i].flag |= FB_FLAG_HW_CAPABLE;
+
+		/*
+		 * See if this is the default mode and if so, check
+		 * if it's supported by this sink.
+		 */
+		if (!default_supported && default_code) {
+			if (relaxed_fb_mode_is_equal(&hdmi.initial_vmode,
+						     &specs->modedb[i])) {
+				pr_info("Default hdmi cea_mode[%d] is"
+					" supported\n",	default_code);
+				default_supported = 1;
+			}
+		}
+	}
+
+	/*
+	 * If no default mode supplied or the default mode requested
+	 * is not supported by the sink, select a safe default.  VGA
+	 * is always supposed to be supported.
+	 */
+	if (!default_supported) {
+		if (hdmi.cfg.cm.mode == HDMI_HDMI) {
+			pr_info("No default hdmi code specified, "
+				"using cea code 1 (640x480@60Hz)\n");
+			hdmi.initial_vmode = cea_modes[1];
+		} else {
+			pr_info("No default hdmi code specified, "
+				"using vesa code 3 (640x480@60Hz)\n");
+			hdmi.initial_vmode = vesa_modes[3];
+		}
 	}
 }
 
@@ -527,9 +582,7 @@ static void hdmi_load_hdcp_keys(struct omap_dss_device *dssdev)
 	if (hdmi.hdmi_power_on_cb) {
 		aksv = hdmi_ti_4xx_check_aksv_data(&hdmi.hdmi_data);
 		DSSINFO("%s: aksv = %d\n", __func__, aksv);
-		if ((aksv == HDMI_AKSV_ZERO) &&
-			hdmi.custom_set &&
-			hdmi.hdmi_power_on_cb()) {
+		if ((aksv == HDMI_AKSV_ZERO) && hdmi.hdmi_power_on_cb()) {
 			hdmi_ti_4xxx_set_wait_soft_reset(&hdmi.hdmi_data);
 
 			/*
@@ -550,15 +603,11 @@ static void hdmi_load_hdcp_keys(struct omap_dss_device *dssdev)
 		else if (aksv == HDMI_AKSV_ERROR)
 			hdmi.wp_reset_done = false;
 
-		if (!hdmi.wp_reset_done) {
-			if (hdmi.custom_set) {
-				DSSERR("*** INVALID AKSV: "
-				       "Do not perform HDCP AUTHENTICATION\n");
-			} else {
-				DSSINFO("*** custom_set == 0: "
-					"not performing HDCP AUTHENTICATION\n");
-			}
-		}
+		if (!hdmi.wp_reset_done)
+			DSSERR("*** INVALID AKSV: "
+			       "Do not perform HDCP AUTHENTICATION\n");
+		else
+			DSSINFO("AKSV has been loaded\n");
 
 	}
 
@@ -575,46 +624,34 @@ void omapdss_hdmi_hdcp_keys_loaded(void)
 		hdmi_panel_hpd_handler(1);
 }
 
-static int hdmi_power_on(struct omap_dss_device *dssdev)
+static int hdmi_display_on(struct omap_dss_device *dssdev)
 {
 	int r;
 	struct hdmi_pll_info pll_data;
 	struct omap_video_timings *p;
 	unsigned long phy;
 
-	r = hdmi_runtime_get();
-	if (r)
-		return r;
+	DSSINFO("Entering %s\n", __func__);
 
-	/* Load the HDCP keys if not already loaded*/
+	if (!hdmi.custom_set) {
+		DSSERR("%s: custom_set is false, returning\n", __func__);
+		return -ENODEV;
+	}
+
+	if (hdmi.display_on) {
+		DSSWARN("%s: hdmi display already on\n", __func__);
+		return 0;
+	}
+
+	/* Load the HDCP keys if not already loaded */
 	hdmi_load_hdcp_keys(dssdev);
 
+	/* To be safe, make sure video is off before changing settings */
 	hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 0);
 
 	dispc_enable_channel(OMAP_DSS_CHANNEL_DIGIT, dssdev->type, 0);
 
 	p = &dssdev->panel.timings;
-
-	DSSDBG("hdmi_power_on x_res= %d y_res = %d\n",
-		dssdev->panel.timings.x_res,
-		dssdev->panel.timings.y_res);
-
-	if (!hdmi.custom_set) {
-		u32 hdmi_code;
-		struct fb_videomode vmode;
-
-		/*
-		 * Default to set cea_modes[1] (640x480p @ 59.94Hz/60Hz)
-		 * if no default set in the panel.
-		 */
-		hdmi_code = dssdev->panel.hdmi_default_cea_code;
-		if (hdmi_code == 0 || hdmi_code >= CEA_MODEDB_SIZE)
-			hdmi_code = 1;
-		vmode = cea_modes[hdmi_code];
-		hdmi_set_timings(&vmode, false);
-	}
-
-	omapfb_fb2dss_timings(&hdmi.cfg.timings, &dssdev->panel.timings);
 
 	phy = p->pixel_clock;
 
@@ -626,7 +663,7 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 	case HDMI_DEEP_COLOR_36BIT:
 		if (p->pixel_clock == 148500) {
 			printk(KERN_ERR "36 bit deep color not supported");
-			goto err;
+			return -EINVAL;
 		}
 
 		phy = (p->pixel_clock * 150) / 100;
@@ -644,14 +681,14 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 	/* config the PLL and PHY hdmi_set_pll_pwrfirst */
 	r = hdmi_ti_4xxx_pll_program(&hdmi.hdmi_data, &pll_data);
 	if (r) {
-		DSSDBG("Failed to lock PLL\n");
-		goto err;
+		DSSERR("Failed to lock PLL\n");
+		return -EIO;
 	}
 
 	r = hdmi_ti_4xxx_phy_init(&hdmi.hdmi_data, phy);
 	if (r) {
-		DSSDBG("Failed to start PHY\n");
-		goto err;
+		DSSERR("Failed to start PHY\n");
+		return -EIO;
 	}
 
 	hdmi_ti_4xxx_basic_configure(&hdmi.hdmi_data, &hdmi.cfg);
@@ -678,25 +715,15 @@ static int hdmi_power_on(struct omap_dss_device *dssdev)
 
 	dispc_enable_channel(OMAP_DSS_CHANNEL_DIGIT, dssdev->type, 1);
 
-	/* some AVRs get very unhappy and drop HPD if we set one
-	 * mode here in the driver on initial HPD detection and
-	 * then change the mode later when the hwc chooses
-	 * a mode.  to avoid this, only enable video when the hwc
-	 * has set the real/final mode.
-	 */
-	if (hdmi.custom_set)
-		hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 1);
+	hdmi_ti_4xxx_wp_video_start(&hdmi.hdmi_data, 1);
 
-
-	if (hdmi.hdmi_start_frame_cb &&
-	    hdmi.custom_set &&
-	    hdmi.wp_reset_done)
+	/* Start hdcp negotiation if needed */
+	if (hdmi.hdmi_start_frame_cb && hdmi.wp_reset_done)
 		(*hdmi.hdmi_start_frame_cb)();
 
+	hdmi.display_on = true;
+
 	return 0;
-err:
-	hdmi_runtime_put();
-	return -EIO;
 }
 
 static void hdmi_power_off(struct omap_dss_device *dssdev)
@@ -801,6 +828,23 @@ int omapdss_hdmi_display_set_mode(struct omap_dss_device *dssdev,
 	dssdev->driver->disable(dssdev);
 	hdmi.set_mode = false;
 	r1 = hdmi_set_timings(vm, false) ? 0 : -EINVAL;
+	/* convert hdmi.cfg.timings to dssdev->panel.timings */
+	if (!r1)
+		omapfb_fb2dss_timings(&hdmi.cfg.timings, &dssdev->panel.timings);
+	hdmi.custom_set = 1;
+	r2 = dssdev->driver->enable(dssdev);
+	return r1 ? : r2;
+}
+
+int omapdss_hdmi_display_set_initial_mode(struct omap_dss_device *dssdev)
+{
+	int r1, r2;
+
+	DSSINFO("Enter omapdss_hdmi_display_set_initial_mode\n");
+	r1 = hdmi_set_timings(&hdmi.initial_vmode, false) ? 0 : -EINVAL;
+	/* convert hdmi.cfg.timings to dssdev->panel.timings */
+	if (!r1)
+		omapfb_fb2dss_timings(&hdmi.cfg.timings, &dssdev->panel.timings);
 	hdmi.custom_set = 1;
 	r2 = dssdev->driver->enable(dssdev);
 	return r1 ? : r2;
@@ -820,16 +864,18 @@ void omapdss_hdmi_display_set_timing(struct omap_dss_device *dssdev)
 	omapdss_hdmi_display_set_mode(dssdev, &t);
 }
 
-int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev)
+int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev, bool display_on)
 {
 	int r = 0;
 
-	DSSINFO("ENTER hdmi_display_enable\n");
+	DSSINFO("ENTER %s, display_on = %d\n", __func__, display_on);
 
 	mutex_lock(&hdmi.lock);
 
-	if (hdmi.enabled)
-		goto err0;
+	if (hdmi.enabled) {
+		DSSINFO("%s: already enabled\n", __func__);
+		goto enabled;
+	}
 
 	r = omap_dss_start_device(dssdev);
 	if (r) {
@@ -858,10 +904,19 @@ int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev)
 		goto err3;
 	}
 
-	r = hdmi_power_on(dssdev);
+	r = hdmi_runtime_get();
 	if (r) {
-		DSSERR("failed to power on device\n");
+		DSSERR("failed to enable hdmi_vref regulator\n");
 		goto err4;
+	}
+
+enabled:
+	if (display_on) {
+		r = hdmi_display_on(dssdev);
+		if (r) {
+			DSSERR("failed to turn display on\n");
+			goto err5;
+		}
 	}
 
 	hdmi.enabled = true;
@@ -869,6 +924,8 @@ int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev)
 	mutex_unlock(&hdmi.lock);
 	return 0;
 
+err5:
+	hdmi_runtime_put();
 err4:
 	regulator_disable(hdmi.hdmi_reg);
 err3:
@@ -893,6 +950,7 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 
 	hdmi.enabled = false;
 	hdmi.wp_reset_done = false;
+	hdmi.display_on = false;
 
 	hdmi_power_off(dssdev);
 	if (dssdev->sync_lost_error == 0)

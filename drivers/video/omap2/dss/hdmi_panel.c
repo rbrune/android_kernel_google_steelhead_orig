@@ -77,13 +77,7 @@ static int hdmi_panel_probe(struct omap_dss_device *dssdev)
 	/* sysfs entry to provide user space control to set deepcolor mode */
 	if (device_create_file(&dssdev->dev, &dev_attr_deepcolor))
 		DSSERR("failed to create sysfs file\n");
-	if (dssdev->panel.timings.x_res == 0)
-		dssdev->panel.timings = (struct omap_video_timings)
-			{640, 480, 31746, 128, 24, 29, 9, 40, 2};
 
-	DSSDBG("hdmi_panel_probe x_res= %d y_res = %d\n",
-		dssdev->panel.timings.x_res,
-		dssdev->panel.timings.y_res);
 	return 0;
 }
 
@@ -119,7 +113,18 @@ static int hdmi_panel_enable(struct omap_dss_device *dssdev)
 		goto err;
 	}
 
-	r = omapdss_hdmi_display_enable(dssdev);
+	/* omapfb will always try to enable the driver on boot, but
+	 * we may not have read edid yet and set a mode */
+	if (dssdev->panel.timings.pixel_clock == 0) {
+		DSSWARN("%s: returning 0 but not enabling because"
+			" pixel_clock is 0\n", __func__);
+		goto err;
+	}
+	DSSINFO("%s: pixel_clock = %d, res = %d,%d\n",
+		__func__, dssdev->panel.timings.pixel_clock,
+		dssdev->panel.timings.x_res, dssdev->panel.timings.y_res);
+
+	r = omapdss_hdmi_display_enable(dssdev, true);
 	if (r) {
 		DSSERR("failed to power on\n");
 		goto err;
@@ -307,9 +312,12 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 			 */
 			hpd_work.edid_reads = 0;
 
-			mutex_unlock(&hdmi.hdmi_lock);
-			dssdev->driver->enable(dssdev);
-			mutex_lock(&hdmi.hdmi_lock);
+			/*
+			 * Just turn on power to hdmi so we can
+			 * read edid, but don't turn on the
+			 * display yet.
+			 */
+			omapdss_hdmi_display_enable(dssdev, false);
 
 			hdmi_hpd_set_state(HPD_STATE_CHECK_EDID, 60);
 		} else {
@@ -362,8 +370,18 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 		 * that we are plugged and ready to have our video mode
 		 * configured.
 		 */
-		if (!hdmi_hpd_set_state(HPD_STATE_DONE_ENABLED, -1))
+		if (!hdmi_hpd_set_state(HPD_STATE_DONE_ENABLED, -1)) {
+			mutex_unlock(&hdmi.hdmi_lock);
+			/* set and enable an initial video mode
+			 * because some monitors don't like it if
+			 * we delay this too long and who knows when
+			 * usermode will do this (especially in factory
+			 * setting).
+			 */
+			omapdss_hdmi_display_set_initial_mode(dssdev);
 			switch_set_state(&hdmi.hpd_switch, 1);
+			return;
+		}
 
 		break;
 
@@ -395,7 +413,16 @@ static void hdmi_get_timings(struct omap_dss_device *dssdev,
 {
 	mutex_lock(&hdmi.hdmi_lock);
 
-	*timings = dssdev->panel.timings;
+	/* we don't have timings on boot if no hdmi
+	 * connected, but surface flinger crashes if
+	 * we don't return something non-zero.
+	 */
+	if (dssdev->panel.timings.x_res == 0) {
+		DSSINFO("no timings yet, returning some safe defaults\n");
+		*timings = (struct omap_video_timings)
+			{640, 480, 31746, 128, 24, 29, 9, 40, 2};
+	} else
+		*timings = dssdev->panel.timings;
 
 	mutex_unlock(&hdmi.hdmi_lock);
 }

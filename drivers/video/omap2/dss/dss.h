@@ -532,13 +532,15 @@ static inline void hdmi_uninit_platform_driver(void)
 {
 }
 #endif
-int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev);
+int omapdss_hdmi_display_enable(struct omap_dss_device *dssdev, bool display_on);
 void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev);
 void omapdss_hdmi_display_set_timing(struct omap_dss_device *dssdev);
 int omapdss_hdmi_display_check_timing(struct omap_dss_device *dssdev,
 					struct omap_video_timings *timings);
 int omapdss_hdmi_display_set_mode(struct omap_dss_device *dssdev,
 					struct fb_videomode *mode);
+int omapdss_hdmi_display_set_initial_mode(struct omap_dss_device *dssdev);
+
 void omapdss_hdmi_restart(void);
 int hdmi_panel_hpd_handler(int hpd);
 int omapdss_hdmi_get_pixel_clock(void);
