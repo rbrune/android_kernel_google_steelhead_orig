@@ -564,6 +564,17 @@ static void hdmi_load_hdcp_keys(struct omap_dss_device *dssdev)
 
 }
 
+void omapdss_hdmi_hdcp_keys_loaded(void)
+{
+	/*
+	 * Once hdcp firmware has been loaded, check
+	 * hdmi plug state in case we're plugged in
+	 * from boot.
+	 */
+	if (hdmi_get_current_hpd())
+		hdmi_panel_hpd_handler(1);
+}
+
 static int hdmi_power_on(struct omap_dss_device *dssdev)
 {
 	int r;

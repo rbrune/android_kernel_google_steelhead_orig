@@ -922,6 +922,9 @@ static void hdcp_load_keys_cb(const struct firmware *fw, void *context)
 	hdcp.hdcp_state = HDCP_ENABLE_PENDING;
 	hdcp.hdcp_keys_loaded = true;
 	pr_info("HDCP: loaded keys\n");
+
+	/* let HDMI know keys have been loaded */
+	omapdss_hdmi_hdcp_keys_loaded();
 }
 
 static int hdcp_load_keys(void)

@@ -283,6 +283,10 @@ static int hdcp_lib_initiate_step1(void)
 
 	if (hdcp_lib_check_ksv(an_ksv_data)) {
 		printk(KERN_INFO "HDCP: AKSV error (number of 0 and 1)\n");
+		printk(KERN_INFO "AKSV: %02x %02x %02x %02x %02x",
+		       an_ksv_data[0], an_ksv_data[1],
+		       an_ksv_data[2], an_ksv_data[3],
+		       an_ksv_data[4]);
 		return -HDCP_AKSV_ERROR;
 	}
 
