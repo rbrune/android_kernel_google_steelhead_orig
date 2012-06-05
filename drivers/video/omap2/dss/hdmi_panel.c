@@ -101,6 +101,15 @@ static int hdmi_panel_enable(struct omap_dss_device *dssdev)
 
 	if (dssdev->state != OMAP_DSS_DISPLAY_DISABLED) {
 		r = -EINVAL;
+		if (dssdev->state == OMAP_DSS_DISPLAY_ACTIVE) {
+			/* this can happen in boot during
+			 * race for hdmi to auto enable display
+			 * vs omapfb trying to enable it
+			 */
+			r = 0;
+			pr_info("%s: returning 0 because already enabled\n",
+				__func__);
+		}
 		goto err;
 	}
 
