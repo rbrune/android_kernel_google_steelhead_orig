@@ -276,6 +276,15 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 			mutex_unlock(&hdmi.hdmi_lock);
 			dssdev->driver->disable(dssdev);
 			mutex_lock(&hdmi.hdmi_lock);
+		} else {
+			/*
+			 * We could have enabled during edid
+			 * read phase so call disable directly
+			 * bypassing the notifications.  if
+			 * we're already disabled, this will
+			 * be a noop.
+			 */
+			omapdss_hdmi_display_disable(dssdev);
 		}
 
 		hdmi_hpd_set_state(HPD_STATE_CHECK_PLUG_STATE, 60);
@@ -298,15 +307,15 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 			/* nothing plugged in, so we are finished.  Go
 			 * to the DONE_DISABLED state and stay
 			 * there until the next HPD event. */
-			hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
+			goto end_disabled;
 		}
 		break;
 
 	case HPD_STATE_CHECK_EDID:
-		if (dssdev->state != OMAP_DSS_DISPLAY_ACTIVE) {
-			/* powered down after enable - skip EDID read */
-			hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
-			break;
+		if (hdmi_get_current_hpd() == 0) {
+			/* hpd dropped - stop EDID read */
+			pr_info("hpd == 0, aborting EDID read\n");
+			goto end_disabled;
 		}
 
 		if (!hdmi_read_edid(&dssdev->panel.timings)) {
@@ -318,7 +327,7 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 			if (hpd_work.edid_reads >= MAX_EDID_READ_ATTEMPTS) {
 				pr_info("Failed to read EDID after %d times."
 				        " Giving up.\n", hpd_work.edid_reads);
-				hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
+				goto end_disabled;
 			} else {
 				hdmi_hpd_set_state(HPD_STATE_CHECK_EDID, 60);
 			}
@@ -357,6 +366,12 @@ static void hdmi_hotplug_detect_worker(struct work_struct *work)
 		break;
 	}
 
+	mutex_unlock(&hdmi.hdmi_lock);
+	return;
+
+end_disabled:
+	omapdss_hdmi_display_disable(dssdev);
+	hdmi_hpd_set_state(HPD_STATE_DONE_DISABLED, -1);
 	mutex_unlock(&hdmi.hdmi_lock);
 }
 
