@@ -1121,6 +1121,8 @@ static struct omap_dss_device  omap4_steelhead_hdmi_device = {
 		.height_in_um	= CONFIG_OMAP2_LARGE_FB_HEIGHT * 100,
 		.fb_width_in_pixels = CONFIG_OMAP2_LARGE_FB_WIDTH,
 		.fb_height_in_pixels = CONFIG_OMAP2_LARGE_FB_HEIGHT,
+		/* try to use 1080p@60Hz by default when hpd is detected */
+		.hdmi_default_cea_code = 16,
 	},
 	.hpd_gpio = GPIO_HDMI_HPD,
 	.channel = OMAP_DSS_CHANNEL_DIGIT,
