@@ -526,14 +526,25 @@ static void hdmi_load_hdcp_keys(struct omap_dss_device *dssdev)
 	/* load the keys and reset the wrapper to populate the AKSV registers*/
 	if (hdmi.hdmi_power_on_cb) {
 		aksv = hdmi_ti_4xx_check_aksv_data(&hdmi.hdmi_data);
+		DSSINFO("%s: aksv = %d\n", __func__, aksv);
 		if ((aksv == HDMI_AKSV_ZERO) &&
-		    hdmi.custom_set &&
-		    hdmi.hdmi_power_on_cb()) {
+			hdmi.custom_set &&
+			hdmi.hdmi_power_on_cb()) {
 			hdmi_ti_4xxx_set_wait_soft_reset(&hdmi.hdmi_data);
+
+			/*
+			 * The aksv keys aren't always readable right away,
+			 * even after we waited for the soft reset to
+			 * clear.  TRM says AKSV keys aren't transferred
+			 * until 2ms after reset.
+			 */
+			usleep_range(2000, 4000);
+
 			aksv = hdmi_ti_4xx_check_aksv_data(&hdmi.hdmi_data);
 			hdmi.wp_reset_done = (aksv == HDMI_AKSV_VALID) ?
 				true : false;
-			DSSINFO("HDMI_WRAPPER RESET DONE\n");
+			DSSINFO("HDMI_WRAPPER RESET DONE wp_reset_done = %d,"
+				" aksv = %d\n",	hdmi.wp_reset_done, aksv);
 		} else if (aksv == HDMI_AKSV_VALID)
 			hdmi.wp_reset_done = true;
 		else if (aksv == HDMI_AKSV_ERROR)
