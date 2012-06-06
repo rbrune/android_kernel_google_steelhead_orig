@@ -621,7 +621,7 @@ void omapdss_hdmi_hdcp_keys_loaded(void)
 	 * from boot.
 	 */
 	if (hdmi_get_current_hpd())
-		hdmi_panel_hpd_handler(1);
+		hdmi_panel_hpd_handler();
 }
 
 static int hdmi_display_on(struct omap_dss_device *dssdev)
@@ -782,7 +782,7 @@ static irqreturn_t hpd_irq_handler(int irq, void *ptr)
 	int hpd = hdmi_get_current_hpd();
 	pr_info("hpd %d\n", hpd);
 
-	hdmi_panel_hpd_handler(hpd);
+	hdmi_panel_hpd_handler();
 
 	return IRQ_HANDLED;
 }

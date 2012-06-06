@@ -164,7 +164,7 @@ static int hdmi_panel_suspend(struct omap_dss_device *dssdev)
 
 	dssdev->state = OMAP_DSS_DISPLAY_SUSPENDED;
 
-	hdmi_panel_hpd_handler(0);
+	hdmi_panel_hpd_handler();
 
 	omapdss_hdmi_display_disable(dssdev);
 err:
@@ -188,7 +188,7 @@ static int hdmi_panel_resume(struct omap_dss_device *dssdev)
 err:
 	mutex_unlock(&hdmi.hdmi_lock);
 
-	hdmi_panel_hpd_handler(hdmi_get_current_hpd());
+	hdmi_panel_hpd_handler();
 
 	return r;
 }
@@ -402,10 +402,9 @@ end_disabled:
 	mutex_unlock(&hdmi.hdmi_lock);
 }
 
-int hdmi_panel_hpd_handler(int hpd)
+void hdmi_panel_hpd_handler(void)
 {
 	hdmi_hpd_set_state(HPD_STATE_RESET, 40);
-	return 0;
 }
 
 static void hdmi_get_timings(struct omap_dss_device *dssdev,

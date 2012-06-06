@@ -542,7 +542,7 @@ int omapdss_hdmi_display_set_mode(struct omap_dss_device *dssdev,
 int omapdss_hdmi_display_set_initial_mode(struct omap_dss_device *dssdev);
 
 void omapdss_hdmi_restart(void);
-int hdmi_panel_hpd_handler(int hpd);
+void hdmi_panel_hpd_handler(void);
 int omapdss_hdmi_get_pixel_clock(void);
 int omapdss_hdmi_get_mode(void);
 int omapdss_hdmi_get_deepcolor(void);
