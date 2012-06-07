@@ -778,7 +778,7 @@ void hdmi_ti_4xxx_basic_configure(struct hdmi_ip_data *ip_data,
 	hdmi_core_powerdown_disable(ip_data);
 
 	v_core_cfg.pkt_mode = HDMI_PACKETMODE24BITPERPIXEL;
-	v_core_cfg.hdmi_dvi = cfg->cm.mode;
+	v_core_cfg.hdmi_dvi = cfg->cm.hdmi_mode;
 
 	hdmi_core_video_config(ip_data, &v_core_cfg);
 
@@ -796,10 +796,11 @@ void hdmi_ti_4xxx_basic_configure(struct hdmi_ip_data *ip_data,
 	avi_cfg.db1_scan_info = HDMI_INFOFRAME_AVI_DB1S_0;
 	avi_cfg.db2_colorimetry = HDMI_INFOFRAME_AVI_DB2C_NO;
 	avi_cfg.db2_aspect_ratio = HDMI_INFOFRAME_AVI_DB2M_NO;
-	if (cfg->cm.mode == HDMI_HDMI && cfg->cm.code < CEA_MODEDB_SIZE) {
-		if (cea_modes[cfg->cm.code].flag & FB_FLAG_RATIO_16_9)
+	/* only cea codes have aspect ratio info in their timings */
+	if (cfg->cm.cea_code) {
+		if (cfg->timings.flag & FB_FLAG_RATIO_16_9)
 			avi_cfg.db2_aspect_ratio = HDMI_INFOFRAME_AVI_DB2M_169;
-		else if (cea_modes[cfg->cm.code].flag & FB_FLAG_RATIO_4_3)
+		else if (cfg->timings.flag & FB_FLAG_RATIO_4_3)
 			avi_cfg.db2_aspect_ratio = HDMI_INFOFRAME_AVI_DB2M_43;
 	}
 	avi_cfg.db2_active_fmt_ar = HDMI_INFOFRAME_AVI_DB2R_SAME;
@@ -807,7 +808,7 @@ void hdmi_ti_4xxx_basic_configure(struct hdmi_ip_data *ip_data,
 	avi_cfg.db3_ec = HDMI_INFOFRAME_AVI_DB3EC_XVYUV601;
 	avi_cfg.db3_q_range = HDMI_INFOFRAME_AVI_DB3Q_DEFAULT;
 	avi_cfg.db3_nup_scaling = HDMI_INFOFRAME_AVI_DB3SC_NO;
-	avi_cfg.db4_videocode = cfg->cm.code;
+	avi_cfg.db4_videocode = cfg->cm.cea_code;
 	avi_cfg.db5_pixel_repeat = HDMI_INFOFRAME_AVI_DB5PR_NO;
 	avi_cfg.db6_7_line_eoftop = 0;
 	avi_cfg.db8_9_line_sofbottom = 0;

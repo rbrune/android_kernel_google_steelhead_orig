@@ -218,9 +218,12 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 				__func__, i);
 			if (check_only)
 				return 1;
-			hdmi.cfg.cm.code = i;
-			hdmi.cfg.cm.mode = HDMI_HDMI;
-			hdmi.cfg.timings = cea_modes[hdmi.cfg.cm.code];
+			hdmi.cfg.cm.cea_code = i;
+			hdmi.cfg.timings = cea_modes[hdmi.cfg.cm.cea_code];
+			pr_info("%s: set timing to cea mode %d, %dx%d@%dHz\n",
+				__func__, i, hdmi.cfg.timings.xres,
+				hdmi.cfg.timings.yres,
+				hdmi.cfg.timings.refresh);
 			goto done;
 		}
 	}
@@ -235,9 +238,12 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 				__func__, i);
 			if (check_only)
 				return 1;
-			hdmi.cfg.cm.code = i;
-			hdmi.cfg.cm.mode = HDMI_DVI;
-			hdmi.cfg.timings = vesa_modes[hdmi.cfg.cm.code];
+			hdmi.cfg.cm.cea_code = 0;
+			hdmi.cfg.timings = vesa_modes[i];
+			pr_info("%s: set timing to vesa mode %d, %dx%d@%dHz\n",
+				__func__, i, hdmi.cfg.timings.xres,
+				hdmi.cfg.timings.yres,
+				hdmi.cfg.timings.refresh);
 			goto done;
 		}
 	}
@@ -245,14 +251,17 @@ static int hdmi_set_timings(struct fb_videomode *vm, bool check_only)
 fail:
 	if (check_only)
 		return 0;
-	hdmi.cfg.cm.code = 1;
-	hdmi.cfg.cm.mode = HDMI_HDMI;
-	hdmi.cfg.timings = cea_modes[hdmi.cfg.cm.code];
+	hdmi.cfg.cm.cea_code = 1;
+	hdmi.cfg.timings = cea_modes[hdmi.cfg.cm.cea_code];
+	pr_info("%s: set default timing to cea mode %d, %dx%d@%dHz\n",
+		__func__, hdmi.cfg.cm.cea_code, hdmi.cfg.timings.xres,
+		hdmi.cfg.timings.yres, hdmi.cfg.timings.refresh);
 
 	i = -1;
 done:
 
-	DSSDBG("%s-%d\n", hdmi.cfg.cm.mode ? "CEA" : "VESA", hdmi.cfg.cm.code);
+	DSSDBG("%s-%d\n", hdmi.cfg.cm.cea_code ? "CEA" : "VESA",
+	       hdmi.cfg.cm.cea_code ? hdmi.cfg.cm.cea_code : i);
 	return i >= 0;
 }
 
@@ -277,10 +286,13 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 			fb_edid_add_monspecs(edid + i * 128, specs);
 	}
 
-	if (specs->misc & FB_MISC_HDMI)
-		hdmi.cfg.cm.mode = HDMI_HDMI;
-	else
-		hdmi.cfg.cm.mode = HDMI_DVI;
+	if (specs->misc & FB_MISC_HDMI) {
+		DSSINFO("HDMI sink\n");
+		hdmi.cfg.cm.hdmi_mode = HDMI_HDMI;
+	} else {
+		DSSINFO("DVI sink\n");
+		hdmi.cfg.cm.hdmi_mode = HDMI_DVI;
+	}
 
 	default_code = hdmi.dssdev->panel.hdmi_default_cea_code;
 	if (default_code > 0 && default_code < CEA_MODEDB_SIZE)
@@ -292,7 +304,8 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 	for (i = 0; i < specs->modedb_len; i++) {
 		u32 max_pclk;
 
-		/* pick out the first mode that it claims to be preferred and mark as such */
+		/* pick out the first mode that it claims to be preferred
+		 * and mark as such */
 		if (!found_preferred &&
 			specs->misc & FB_MISC_1ST_DETAIL &&
 			specs->modedb[i].flag & FB_MODE_IS_DETAILED) {
@@ -334,7 +347,7 @@ void hdmi_get_monspecs(struct fb_monspecs *specs)
 	 * is always supposed to be supported.
 	 */
 	if (!default_supported) {
-		if (hdmi.cfg.cm.mode == HDMI_HDMI) {
+		if (hdmi.cfg.cm.hdmi_mode == HDMI_HDMI) {
 			pr_info("No default hdmi code specified, "
 				"using cea code 1 (640x480@60Hz)\n");
 			hdmi.initial_vmode = cea_modes[1];
@@ -475,6 +488,9 @@ void hdmi_get_audspecs(struct omap_hdmi_audio_modes *specs)
 				 * audio support. */
 				if (edid[3] & 0x40)
 					specs->basic_audio_support = 1;
+				pr_debug("edid[0x83] = 0x%x, "
+					 "basic_audio_support = %d\n",
+					edid[3], specs->basic_audio_support);
 				break;
 
 			/* unknown version, skip it. */
@@ -747,7 +763,7 @@ int omapdss_hdmi_get_pixel_clock(void)
 
 int omapdss_hdmi_get_mode(void)
 {
-	return hdmi.cfg.cm.mode;
+	return hdmi.cfg.cm.hdmi_mode;
 }
 
 int omapdss_hdmi_register_hdcp_callbacks(void (*hdmi_start_frame_cb)(void),
@@ -953,33 +969,7 @@ void omapdss_hdmi_display_disable(struct omap_dss_device *dssdev)
 	hdmi.display_on = false;
 
 	hdmi_power_off(dssdev);
-	if (dssdev->sync_lost_error == 0)
-		if (dssdev->state != OMAP_DSS_DISPLAY_SUSPENDED) {
-			/* clear the HDMI mode back to DVI.  The audio subsystem
-			 * uses the hdmi.mode to determine if audio support is
-			 * present.  We don't want the audio system to decide
-			 * that we have audio support when the display is
-			 * disabled.  Right now, the audio subsystem calls
-			 * omapdss_hdmi_get_mode() and if its return value is
-			 * non-zero, it decides that the system supports audio.
-			 * There are only two values used for the mode, they are
-			 * HDMI_DVI (which is 0) and HDMI_HDMI (which is 1).  By
-			 * setting this back to HDMI_DVI when the display is
-			 * enabled, we can be sure that the audio subsystem will
-			 * be told that there is no support for audio while the
-			 * display is disabled.
-			 *
-			 * TODO: need to contact TI regarding this method for
-			 * determining audio support.  It is not a guarantee
-			 * that a downstream device supports audio just because
-			 * its interconnect is HDMI.  Also, just because audio
-			 * is supported does not imply that all audio modes are
-			 * supported and valid.  There is a lot of room for
-			 * improvement here.
-			 */
-			hdmi.cfg.cm.mode = HDMI_DVI;
 
-		}
 	regulator_disable(hdmi.hdmi_reg);
 
 	regulator_put(hdmi.hdmi_reg);

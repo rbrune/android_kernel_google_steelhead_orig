@@ -72,8 +72,10 @@ struct hdmi_timings {
 };
 
 struct hdmi_cm {
-	int	code;
-	int	mode;
+	int	cea_code; /* set only if the video mode is a cea one,
+			   * will be 0 if the video mode is a vesa one
+			   */
+	int	hdmi_mode; /* HDMI_HDMI or HDMI_DVI */
 };
 
 struct hdmi_config {
