@@ -292,6 +292,7 @@ static int __init ddc_init(void)
 		return -EFAULT;
 	}
 
+	spin_lock_init(&ddc.spinlock);
 	mutex_init(&ddc.lock);
 
 	return 0;
