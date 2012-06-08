@@ -532,6 +532,11 @@ static void hdcp_start_frame_cb(void)
 	hdcp.retry_cnt = hdcp.en_ctrl->nb_retry;
 	hdcp.fail_cnt = 0;
 	hdcp.print_messages = 1;
+
+	hdcp.hdmi_state = HDMI_STOPPED;
+	hdcp.hdcp_state = HDCP_ENABLE_PENDING;
+	hdcp.auth_state = HDCP_STATE_DISABLED;
+
 	hdcp.pending_start = hdcp_submit_work(HDCP_START_FRAME_EVENT,
 							HDCP_ENABLE_DELAY);
 }
