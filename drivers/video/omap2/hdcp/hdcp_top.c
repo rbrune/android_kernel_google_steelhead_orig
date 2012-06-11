@@ -905,18 +905,18 @@ static void hdcp_load_keys_cb(const struct firmware *fw, void *context)
 
 	if (!fw) {
 		pr_err("HDCP: failed to load keys\n");
-		return;
+		goto out;
 	}
 
 	if (fw->size != sizeof(en_ctrl->key)) {
 		pr_err("HDCP: encrypted key file wrong size %d\n", fw->size);
-		return;
+		goto out;
 	}
 
 	en_ctrl = kmalloc(sizeof(*en_ctrl), GFP_KERNEL);
 	if (!en_ctrl) {
 		pr_err("HDCP: can't allocated space for keys\n");
-		return;
+		goto out;
 	}
 
 	memcpy(en_ctrl->key, fw->data, sizeof(en_ctrl->key));
@@ -928,8 +928,10 @@ static void hdcp_load_keys_cb(const struct firmware *fw, void *context)
 	hdcp.hdcp_keys_loaded = true;
 	pr_info("HDCP: loaded keys\n");
 
-	/* let HDMI know keys have been loaded */
-	omapdss_hdmi_hdcp_keys_loaded();
+out:
+	/* check hpd state and call handler if hpd is asserted */
+	if (hdmi_get_current_hpd())
+		hdmi_panel_hpd_handler();
 }
 
 static int hdcp_load_keys(void)
