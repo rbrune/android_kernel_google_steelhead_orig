@@ -278,6 +278,7 @@ struct hdcp {
 	struct delayed_work *pending_wq_event;
 	int retry_cnt;
 	int fail_cnt;
+	int av_mute_needed;
 	int print_messages;
 	int dss_state;
 	int hdmi_restart;

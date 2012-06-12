@@ -655,8 +655,9 @@ int hdcp_lib_step1_start(void)
 
 	DBG("RX mode: %s", hdmi_mode ? "HDMI" : "DVI");
 
-	/* Set AV Mute */
-	hdcp_lib_set_av_mute(AV_MUTE_SET);
+	/* Set AV Mute if needed */
+	if (hdcp.av_mute_needed)
+		hdcp_lib_set_av_mute(AV_MUTE_SET);
 
 	/* Must turn encryption off when AVMUTE */
 	hdcp_lib_set_encryption(HDCP_ENC_OFF);

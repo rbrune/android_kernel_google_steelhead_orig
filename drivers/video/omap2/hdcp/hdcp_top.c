@@ -187,6 +187,7 @@ static void hdcp_wq_check_r0(void)
 			printk(KERN_INFO "HDCP: authentication step 1 "
 					 "successful - Receiver\n");
 
+			hdcp.av_mute_needed = 1;
 			hdcp.hdcp_state = HDCP_LINK_INTEGRITY_CHECK;
 			hdcp.auth_state = HDCP_STATE_AUTH_3RD_STEP;
 
@@ -222,6 +223,7 @@ static void hdcp_wq_step2_authentication(void)
 		printk(KERN_INFO "HDCP: (Repeater) authentication step 2 "
 				 "successful\n");
 
+		hdcp.av_mute_needed = 1;
 		hdcp.hdcp_state = HDCP_LINK_INTEGRITY_CHECK;
 		hdcp.auth_state = HDCP_STATE_AUTH_3RD_STEP;
 
@@ -246,7 +248,8 @@ static void hdcp_wq_authentication_failure(void)
 
 	hdcp_lib_auto_ri_check(false);
 	hdcp_lib_auto_bcaps_rdy_check(false);
-	hdcp_lib_set_av_mute(AV_MUTE_SET);
+	if (hdcp.av_mute_needed)
+		hdcp_lib_set_av_mute(AV_MUTE_SET);
 	hdcp_lib_set_encryption(HDCP_ENC_OFF);
 
 	hdcp_cancel_work(&hdcp.pending_wq_event);
@@ -531,6 +534,7 @@ static void hdcp_start_frame_cb(void)
 	ddc.pending_disable = 0;
 	hdcp.retry_cnt = hdcp.en_ctrl->nb_retry;
 	hdcp.fail_cnt = 0;
+	hdcp.av_mute_needed = 0;
 	hdcp.print_messages = 1;
 
 	hdcp.hdmi_state = HDMI_STOPPED;
